@@ -645,20 +645,24 @@ function buildDefaultSchemaQuery(schema: string): string {
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100vh;
   margin: 0;
-  min-height: 100vh;
+  overflow: hidden;
 }
 
 #app {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .desktop-shell {
-  height: 100vh;
+  height: 100%;
   display: grid;
   grid-template-columns: 330px 1fr;
   background: #cfd6de;
+  overflow: hidden;
 }
 
 .explorer-sidebar {
@@ -667,6 +671,8 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar-header {
@@ -757,7 +763,8 @@ textarea {
 .tree-area {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 0.5rem;
 }
 
@@ -851,6 +858,8 @@ textarea {
   display: grid;
   grid-template-rows: 34px 1fr 42%;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .workspace-toolbar {
@@ -882,6 +891,8 @@ textarea {
   border-bottom: 1px solid #9ca6b2;
   min-height: 0;
   background: #f5f7fa;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .sheet-tabs {
@@ -990,6 +1001,7 @@ textarea {
   grid-template-rows: 34px 1fr;
   min-height: 0;
   background: #fff;
+  overflow: hidden;
 }
 
 .results-header {
