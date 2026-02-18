@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import SqlCodeEditor from "./components/SqlCodeEditor.vue";
 
 interface OracleConnectRequest {
   host: string;
@@ -575,11 +576,10 @@ function buildDefaultSchemaQuery(schema: string): string {
           <span class="schema-chip">Schema: {{ connectedSchema }}</span>
         </div>
 
-        <textarea
+        <SqlCodeEditor
           v-if="isQueryTabActive"
           v-model="activeQueryText"
           class="sql-editor"
-          spellcheck="false"
           placeholder="Write Oracle SQL here"
         />
 
@@ -594,10 +594,9 @@ function buildDefaultSchemaQuery(schema: string): string {
             </div>
           </div>
 
-          <textarea
+          <SqlCodeEditor
             v-model="activeDdlText"
             class="ddl-editor"
-            spellcheck="false"
             placeholder="Object DDL will appear here"
           />
         </section>
@@ -986,13 +985,7 @@ textarea {
 .ddl-editor {
   width: 100%;
   height: 100%;
-  border: 0;
-  border-radius: 0;
-  resize: none;
-  padding: 0.6rem;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 0.82rem;
-  line-height: 1.42;
+  min-height: 0;
   background: #ffffff;
 }
 
