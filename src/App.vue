@@ -1023,13 +1023,16 @@ textarea {
 .results-content {
   min-height: 0;
   overflow: auto;
-  padding: 0.55rem;
+  padding: 0;
+  margin: 0;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .results-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.78rem;
+  margin: 0;
 }
 
 .results-table th,
