@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import AppIcon from "./components/AppIcon.vue";
 import SqlCodeEditor from "./components/SqlCodeEditor.vue";
 
 interface OracleConnectRequest {
+  provider: DatabaseProvider;
   host: string;
   port?: number;
   serviceName: string;
@@ -13,10 +14,25 @@ interface OracleConnectRequest {
   schema: string;
 }
 
+type DatabaseProvider = "oracle" | "postgres" | "mysql" | "sqlite";
+
 interface OracleSessionSummary {
   sessionId: number;
   displayName: string;
   schema: string;
+  provider: DatabaseProvider;
+}
+
+interface ConnectionProfile {
+  id: string;
+  name: string;
+  provider: DatabaseProvider;
+  host: string;
+  port?: number;
+  serviceName: string;
+  username: string;
+  schema: string;
+  hasPassword: boolean;
 }
 
 interface OracleObjectEntry {
@@ -66,6 +82,7 @@ function readDebugConnectionPort(value: string | undefined, fallback: number): n
 }
 
 const connection = reactive<OracleConnectRequest>({
+  provider: "oracle",
   host: readDebugConnectionString(import.meta.env.VITE_ORACLE_HOST, "localhost"),
   port: readDebugConnectionPort(import.meta.env.VITE_ORACLE_PORT, 1521),
   serviceName: readDebugConnectionString(import.meta.env.VITE_ORACLE_SERVICE_NAME, "XEPDB1"),
@@ -73,8 +90,12 @@ const connection = reactive<OracleConnectRequest>({
   password: import.meta.env.DEV ? (import.meta.env.VITE_ORACLE_PASSWORD ?? "") : "",
   schema: readDebugConnectionString(import.meta.env.VITE_ORACLE_SCHEMA, "HR"),
 });
+const profileName = ref("");
+const selectedProfileId = ref("");
+const saveProfilePassword = ref(true);
 
 const session = ref<OracleSessionSummary | null>(null);
+const connectionProfiles = ref<ConnectionProfile[]>([]);
 const objects = ref<OracleObjectEntry[]>([]);
 const selectedObject = ref<OracleObjectEntry | null>(null);
 const ddlTabs = ref<WorkspaceDdlTab[]>([]);
@@ -93,6 +114,10 @@ const activeWorkspaceTabId = ref(FIRST_QUERY_TAB_ID);
 
 const busy = reactive({
   connecting: false,
+  loadingProfiles: false,
+  savingProfile: false,
+  deletingProfile: false,
+  loadingProfileSecret: false,
   loadingObjects: false,
   loadingDdl: false,
   savingDdl: false,
@@ -101,6 +126,13 @@ const busy = reactive({
 
 const isConnected = computed(() => session.value !== null);
 const connectedSchema = computed(() => session.value?.schema ?? connection.schema.toUpperCase());
+const selectedProviderLabel = computed(() => {
+  const provider = session.value?.provider ?? connection.provider;
+  return provider.toUpperCase();
+});
+const selectedProfile = computed(
+  () => connectionProfiles.value.find((profile) => profile.id === selectedProfileId.value) ?? null,
+);
 const expandedObjectTypes = ref<Record<string, boolean>>({});
 const activeQueryTab = computed(() =>
   queryTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
@@ -232,12 +264,137 @@ function closeDdlTab(tabId: string): void {
   }
 }
 
+async function loadConnectionProfiles(): Promise<void> {
+  busy.loadingProfiles = true;
+  try {
+    connectionProfiles.value = await invoke<ConnectionProfile[]>("db_list_connection_profiles");
+    if (selectedProfileId.value && !connectionProfiles.value.some((profile) => profile.id === selectedProfileId.value)) {
+      selectedProfileId.value = "";
+    }
+    syncSelectedProfileUi();
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    busy.loadingProfiles = false;
+  }
+}
+
+function syncSelectedProfileUi(): void {
+  if (!selectedProfile.value) {
+    return;
+  }
+
+  profileName.value = selectedProfile.value.name;
+  saveProfilePassword.value = selectedProfile.value.hasPassword;
+}
+
+async function applySelectedProfile(): Promise<void> {
+  if (!selectedProfile.value) {
+    return;
+  }
+
+  const profile = selectedProfile.value;
+  errorMessage.value = "";
+  connection.provider = profile.provider;
+  connection.host = profile.host;
+  connection.port = profile.port;
+  connection.serviceName = profile.serviceName;
+  connection.username = profile.username;
+  connection.schema = profile.schema;
+  connection.password = "";
+  syncSelectedProfileUi();
+
+  if (!profile.hasPassword) {
+    statusMessage.value = `Loaded profile: ${profile.name}`;
+    return;
+  }
+
+  busy.loadingProfileSecret = true;
+  try {
+    const password = await invoke<string | null>("db_get_connection_profile_secret", {
+      request: { profileId: profile.id },
+    });
+    connection.password = password ?? "";
+    statusMessage.value = `Loaded profile: ${profile.name}`;
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    busy.loadingProfileSecret = false;
+  }
+}
+
+async function saveConnectionProfile(): Promise<void> {
+  const normalizedName = profileName.value.trim();
+  if (!normalizedName) {
+    errorMessage.value = "Profile name is required.";
+    return;
+  }
+
+  errorMessage.value = "";
+  busy.savingProfile = true;
+
+  try {
+    const savedProfile = await invoke<ConnectionProfile>("db_save_connection_profile", {
+      request: {
+        id: selectedProfileId.value || null,
+        name: normalizedName,
+        provider: connection.provider,
+        host: connection.host,
+        port: connection.port,
+        serviceName: connection.serviceName,
+        username: connection.username,
+        schema: connection.schema,
+        savePassword: saveProfilePassword.value,
+        password: saveProfilePassword.value ? connection.password : null,
+      },
+    });
+
+    await loadConnectionProfiles();
+    selectedProfileId.value = savedProfile.id;
+    profileName.value = savedProfile.name;
+    statusMessage.value = `Saved profile: ${savedProfile.name}`;
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    busy.savingProfile = false;
+  }
+}
+
+async function deleteSelectedProfile(): Promise<void> {
+  if (!selectedProfile.value) {
+    return;
+  }
+
+  const profile = selectedProfile.value;
+  const shouldDelete = window.confirm(`Delete profile "${profile.name}"?`);
+  if (!shouldDelete) {
+    return;
+  }
+
+  errorMessage.value = "";
+  busy.deletingProfile = true;
+
+  try {
+    await invoke("db_delete_connection_profile", {
+      request: { profileId: profile.id },
+    });
+    selectedProfileId.value = "";
+    profileName.value = "";
+    await loadConnectionProfiles();
+    statusMessage.value = `Deleted profile: ${profile.name}`;
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    busy.deletingProfile = false;
+  }
+}
+
 async function connectOracle(): Promise<void> {
   errorMessage.value = "";
   busy.connecting = true;
 
   try {
-    const summary = await invoke<OracleSessionSummary>("oracle_connect", {
+    const summary = await invoke<OracleSessionSummary>("db_connect", {
       request: connection,
     });
 
@@ -264,7 +421,7 @@ async function disconnectOracle(): Promise<void> {
   errorMessage.value = "";
 
   try {
-    await invoke("oracle_disconnect", {
+    await invoke("db_disconnect", {
       request: { sessionId: session.value.sessionId },
     });
   } catch (error) {
@@ -298,7 +455,7 @@ async function refreshObjects(): Promise<void> {
   busy.loadingObjects = true;
 
   try {
-    const result = await invoke<OracleObjectEntry[]>("oracle_list_objects", {
+    const result = await invoke<OracleObjectEntry[]>("db_list_objects", {
       request: { sessionId: session.value.sessionId },
     });
     objects.value = result;
@@ -319,7 +476,7 @@ async function loadDdl(object: OracleObjectEntry): Promise<void> {
   selectedObject.value = object;
 
   try {
-    const ddl = await invoke<string>("oracle_get_object_ddl", {
+    const ddl = await invoke<string>("db_get_object_ddl", {
       request: {
         sessionId: session.value.sessionId,
         schema: object.schema,
@@ -360,7 +517,7 @@ async function saveDdl(): Promise<void> {
 
   try {
     const object = activeDdlTab.value.object;
-    const message = await invoke<string>("oracle_update_object_ddl", {
+    const message = await invoke<string>("db_update_object_ddl", {
       request: {
         sessionId: session.value.sessionId,
         schema: object.schema,
@@ -387,7 +544,7 @@ async function runQuery(): Promise<void> {
   busy.runningQuery = true;
 
   try {
-    const result = await invoke<OracleQueryResult>("oracle_run_query", {
+    const result = await invoke<OracleQueryResult>("db_run_query", {
       request: {
         sessionId: session.value.sessionId,
         sql: activeQueryTab.value.queryText,
@@ -424,6 +581,10 @@ function isLikelyNumeric(value: string): boolean {
   const normalized = value.trim().replace(/,/g, "");
   return /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized);
 }
+
+onMounted(() => {
+  void loadConnectionProfiles();
+});
 </script>
 
 <template>
@@ -432,9 +593,53 @@ function isLikelyNumeric(value: string): boolean {
       <header class="sidebar-header">Object Explorer</header>
 
       <section class="connect-box">
-        <div class="connect-title">Oracle Connection</div>
+        <div class="connect-title">Database Connection</div>
+        <div class="profile-controls">
+          <label>
+            Profiles
+            <select v-model="selectedProfileId" @change="syncSelectedProfileUi">
+              <option value="">(Select profile)</option>
+              <option v-for="profile in connectionProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }}
+              </option>
+            </select>
+          </label>
+          <div class="profile-actions">
+            <button
+              class="btn"
+              :disabled="!selectedProfile || busy.loadingProfileSecret || busy.loadingProfiles"
+              @click="applySelectedProfile"
+            >
+              {{ busy.loadingProfileSecret ? "Loading..." : "Load Profile" }}
+            </button>
+            <button class="btn" :disabled="!selectedProfile || busy.deletingProfile" @click="deleteSelectedProfile">
+              {{ busy.deletingProfile ? "Deleting..." : "Delete" }}
+            </button>
+          </div>
+          <label>
+            Profile Name
+            <input v-model.trim="profileName" placeholder="Local Oracle Dev" />
+          </label>
+          <label class="profile-password-toggle">
+            <input v-model="saveProfilePassword" type="checkbox" />
+            Save password in OS keychain
+          </label>
+          <button class="btn" :disabled="busy.savingProfile" @click="saveConnectionProfile">
+            {{ busy.savingProfile ? "Saving..." : "Save Profile" }}
+          </button>
+        </div>
 
         <div class="field-grid">
+          <label>
+            Provider
+            <select v-model="connection.provider">
+              <option value="oracle">Oracle</option>
+              <option value="postgres" disabled>PostgreSQL (Soon)</option>
+              <option value="mysql" disabled>MySQL (Soon)</option>
+              <option value="sqlite" disabled>SQLite (Soon)</option>
+            </select>
+          </label>
+
           <label>
             Host
             <input v-model.trim="connection.host" placeholder="db.example.com" />
@@ -590,6 +795,7 @@ function isLikelyNumeric(value: string): boolean {
             <AppIcon name="save" class="btn-icon" aria-hidden="true" />
             {{ busy.savingDdl ? "Saving..." : "Save DDL" }}
           </button>
+          <span class="schema-chip">Provider: {{ selectedProviderLabel }}</span>
           <span class="schema-chip">Schema: {{ connectedSchema }}</span>
         </div>
 
@@ -597,7 +803,7 @@ function isLikelyNumeric(value: string): boolean {
           v-if="isQueryTabActive"
           v-model="activeQueryText"
           class="sql-editor"
-          placeholder="Write Oracle SQL here"
+          placeholder="Write SQL here"
         />
 
         <section v-else-if="activeDdlTab" class="ddl-pane">
@@ -739,6 +945,31 @@ body {
   margin-bottom: 0.5rem;
 }
 
+.profile-controls {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.34rem;
+}
+
+.profile-password-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.profile-password-toggle input {
+  margin: 0;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -754,6 +985,7 @@ label {
 }
 
 input,
+select,
 textarea,
 button {
   font: inherit;
@@ -761,6 +993,7 @@ button {
 }
 
 input,
+select,
 textarea {
   border: 1px solid var(--border-strong);
   border-radius: 4px;

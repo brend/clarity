@@ -6,7 +6,7 @@ Clarity is a Tauri + Vue desktop app targeting Oracle as the initial database pl
 
 This implementation provides:
 
-- Oracle connection/disconnection flow in the UI
+- Provider-aware connection flow (Oracle implemented, more providers scaffolded)
 - Schema-aware connection input (host, service, user, schema)
 - Schema/object explorer scoped to the connected schema
 - Query editor + run action
@@ -35,6 +35,8 @@ find /opt /usr/local "$HOME" -maxdepth 4 -name 'libclntsh.dylib' 2>/dev/null
 ```
 
 - Rust command API lives in `/Users/waldrumpus/code/clarity/src-tauri/src/lib.rs`
+- Provider registry lives in `/Users/waldrumpus/code/clarity/src-tauri/src/providers/mod.rs`
+- Oracle provider implementation lives in `/Users/waldrumpus/code/clarity/src-tauri/src/providers/oracle.rs`
 - UI lives in `/Users/waldrumpus/code/clarity/src/App.vue`
 
 ## Run
@@ -62,6 +64,13 @@ Notes:
 - These values are used only in dev mode.
 - Missing/invalid values fall back to the built-in defaults.
 
+## Connection Profiles and Secrets
+
+- Connection profiles are saved to the app data directory as non-secret metadata.
+- Passwords are stored separately in the OS keychain via the Rust `keyring` crate.
+- Profile file never stores plaintext passwords.
+- `.env` remains a dev-only fallback for initial field defaults.
+
 ## Build / Verify
 
 ```bash
@@ -71,4 +80,4 @@ cd src-tauri && cargo check
 
 ## Next Step
 
-Add secure connection profile persistence (without storing plaintext passwords in app state) and query safety guards (default row limits, destructive statement confirmation).
+Add query safety guards (default row limits, destructive statement confirmation), profile import/export tooling, and provider implementations beyond Oracle.
