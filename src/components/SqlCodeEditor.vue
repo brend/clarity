@@ -45,18 +45,24 @@ const editorTheme = EditorView.theme({
     padding: "0 0.6rem",
   },
   ".cm-gutters": {
-    borderRight: "1px solid #d8e0ea",
-    background: "#f5f8fb",
-    color: "#5f6f82",
+    borderRight: "1px solid #dfe6ee",
+    background: "#f5f7fa",
+    color: "#7a8798",
   },
   ".cm-activeLine": {
-    backgroundColor: "#f4f9ff",
+    backgroundColor: "#f8fafd",
   },
   ".cm-activeLineGutter": {
-    backgroundColor: "#e8f1fb",
+    backgroundColor: "#eff3f8",
   },
   ".cm-selectionBackground": {
-    backgroundColor: "#cfe4fb !important",
+    backgroundColor: "#dbe7f5 !important",
+  },
+  ".cm-cursor": {
+    borderLeftColor: "#5f7fa7",
+  },
+  ".cm-placeholder": {
+    color: "#8a97a6",
   },
 });
 
@@ -155,6 +161,7 @@ onBeforeUnmount(() => {
 }
 
 .sql-code-editor :deep(.cm-editor.cm-focused) {
-  outline: none;
+  outline: 1px solid #c7d7ea;
+  outline-offset: -1px;
 }
 </style>
