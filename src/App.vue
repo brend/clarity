@@ -30,6 +30,21 @@ interface OracleQueryResult {
   message: string;
 }
 
+interface WorkspaceDdlTab {
+  id: string;
+  object: OracleObjectEntry;
+  ddlText: string;
+}
+
+interface WorkspaceQueryTab {
+  id: string;
+  title: string;
+  queryText: string;
+}
+
+const QUERY_TAB_PREFIX = "query:";
+const FIRST_QUERY_TAB_ID = `${QUERY_TAB_PREFIX}1`;
+
 function readDebugConnectionString(value: string | undefined, fallback: string): string {
   if (!import.meta.env.DEV) {
     return fallback;
@@ -57,15 +72,22 @@ const connection = reactive<OracleConnectRequest>({
   schema: readDebugConnectionString(import.meta.env.VITE_ORACLE_SCHEMA, "HR"),
 });
 
-const queryText = ref(buildDefaultSchemaQuery(connection.schema));
 const session = ref<OracleSessionSummary | null>(null);
 const objects = ref<OracleObjectEntry[]>([]);
 const selectedObject = ref<OracleObjectEntry | null>(null);
-const ddlText = ref("");
+const ddlTabs = ref<WorkspaceDdlTab[]>([]);
+const queryTabs = ref<WorkspaceQueryTab[]>([
+  {
+    id: FIRST_QUERY_TAB_ID,
+    title: "Query 1",
+    queryText: buildDefaultSchemaQuery(connection.schema),
+  },
+]);
+const queryTabNumber = ref(2);
 const queryResult = ref<OracleQueryResult | null>(null);
 const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
 const errorMessage = ref("");
-const activeBottomTab = ref<"results" | "ddl">("results");
+const activeWorkspaceTabId = ref(FIRST_QUERY_TAB_ID);
 
 const busy = reactive({
   connecting: false,
@@ -78,6 +100,34 @@ const busy = reactive({
 const isConnected = computed(() => session.value !== null);
 const connectedSchema = computed(() => session.value?.schema ?? connection.schema.toUpperCase());
 const expandedObjectTypes = ref<Record<string, boolean>>({});
+const activeQueryTab = computed(() =>
+  queryTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
+);
+const activeDdlTab = computed(() =>
+  ddlTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
+);
+const activeDdlObject = computed(() => activeDdlTab.value?.object ?? null);
+const isQueryTabActive = computed(() => activeQueryTab.value !== null);
+const activeQueryText = computed({
+  get: () => activeQueryTab.value?.queryText ?? "",
+  set: (value: string) => {
+    if (!activeQueryTab.value) {
+      return;
+    }
+
+    activeQueryTab.value.queryText = value;
+  },
+});
+const activeDdlText = computed({
+  get: () => activeDdlTab.value?.ddlText ?? "",
+  set: (value: string) => {
+    if (!activeDdlTab.value) {
+      return;
+    }
+
+    activeDdlTab.value.ddlText = value;
+  },
+});
 
 const objectTree = computed(() => {
   const byType = new Map<string, OracleObjectEntry[]>();
@@ -112,6 +162,74 @@ function toggleObjectType(objectType: string): void {
   };
 }
 
+function buildDdlTabId(object: OracleObjectEntry): string {
+  return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
+}
+
+function addQueryTab(): void {
+  const tabNumber = queryTabNumber.value;
+  queryTabNumber.value += 1;
+
+  const tabId = `${QUERY_TAB_PREFIX}${tabNumber}`;
+  const tab: WorkspaceQueryTab = {
+    id: tabId,
+    title: `Query ${tabNumber}`,
+    queryText: buildDefaultSchemaQuery(session.value?.schema ?? connection.schema),
+  };
+
+  queryTabs.value.push(tab);
+  activateWorkspaceTab(tabId);
+}
+
+function activateWorkspaceTab(tabId: string): void {
+  activeWorkspaceTabId.value = tabId;
+
+  if (queryTabs.value.some((tab) => tab.id === tabId)) {
+    return;
+  }
+
+  const tab = ddlTabs.value.find((entry) => entry.id === tabId);
+  if (tab) {
+    selectedObject.value = tab.object;
+  }
+}
+
+function closeQueryTab(tabId: string): void {
+  if (queryTabs.value.length <= 1) {
+    return;
+  }
+
+  const index = queryTabs.value.findIndex((tab) => tab.id === tabId);
+  if (index < 0) {
+    return;
+  }
+
+  const wasActive = activeWorkspaceTabId.value === tabId;
+  queryTabs.value.splice(index, 1);
+
+  if (wasActive) {
+    const fallbackQueryTab = queryTabs.value[Math.max(0, index - 1)] ?? queryTabs.value[0];
+    if (fallbackQueryTab) {
+      activateWorkspaceTab(fallbackQueryTab.id);
+    }
+  }
+}
+
+function closeDdlTab(tabId: string): void {
+  const index = ddlTabs.value.findIndex((tab) => tab.id === tabId);
+  if (index < 0) {
+    return;
+  }
+
+  const wasActive = activeWorkspaceTabId.value === tabId;
+  ddlTabs.value.splice(index, 1);
+
+  if (wasActive) {
+    const fallbackTab = ddlTabs.value[Math.max(0, index - 1)];
+    activateWorkspaceTab(fallbackTab?.id ?? queryTabs.value[0]?.id ?? FIRST_QUERY_TAB_ID);
+  }
+}
+
 async function connectOracle(): Promise<void> {
   errorMessage.value = "";
   busy.connecting = true;
@@ -122,7 +240,10 @@ async function connectOracle(): Promise<void> {
     });
 
     session.value = summary;
-    queryText.value = buildDefaultSchemaQuery(summary.schema);
+    const targetQueryTab = activeQueryTab.value ?? queryTabs.value[0];
+    if (targetQueryTab) {
+      targetQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
+    }
     statusMessage.value = `Connected: ${summary.displayName}`;
     await refreshObjects();
   } catch (error) {
@@ -150,11 +271,19 @@ async function disconnectOracle(): Promise<void> {
     session.value = null;
     objects.value = [];
     expandedObjectTypes.value = {};
+    queryTabs.value = [
+      {
+        id: FIRST_QUERY_TAB_ID,
+        title: "Query 1",
+        queryText: buildDefaultSchemaQuery(connection.schema),
+      },
+    ];
+    queryTabNumber.value = 2;
+    ddlTabs.value = [];
+    activeWorkspaceTabId.value = FIRST_QUERY_TAB_ID;
     selectedObject.value = null;
-    ddlText.value = "";
     queryResult.value = null;
     statusMessage.value = "Disconnected.";
-    activeBottomTab.value = "results";
   }
 }
 
@@ -188,7 +317,7 @@ async function loadDdl(object: OracleObjectEntry): Promise<void> {
   selectedObject.value = object;
 
   try {
-    ddlText.value = await invoke<string>("oracle_get_object_ddl", {
+    const ddl = await invoke<string>("oracle_get_object_ddl", {
       request: {
         sessionId: session.value.sessionId,
         schema: object.schema,
@@ -197,18 +326,30 @@ async function loadDdl(object: OracleObjectEntry): Promise<void> {
       },
     });
 
-    activeBottomTab.value = "ddl";
+    const tabId = buildDdlTabId(object);
+    const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
+    if (existingTab) {
+      existingTab.ddlText = ddl;
+      existingTab.object = object;
+    } else {
+      ddlTabs.value.push({
+        id: tabId,
+        object,
+        ddlText: ddl,
+      });
+    }
+
+    activateWorkspaceTab(tabId);
     statusMessage.value = `Loaded DDL: ${object.schema}.${object.objectName}`;
   } catch (error) {
     errorMessage.value = toErrorMessage(error);
-    ddlText.value = "";
   } finally {
     busy.loadingDdl = false;
   }
 }
 
 async function saveDdl(): Promise<void> {
-  if (!session.value || !selectedObject.value) {
+  if (!session.value || !activeDdlTab.value) {
     return;
   }
 
@@ -216,17 +357,18 @@ async function saveDdl(): Promise<void> {
   busy.savingDdl = true;
 
   try {
+    const object = activeDdlTab.value.object;
     const message = await invoke<string>("oracle_update_object_ddl", {
       request: {
         sessionId: session.value.sessionId,
-        schema: selectedObject.value.schema,
-        objectType: selectedObject.value.objectType,
-        objectName: selectedObject.value.objectName,
-        ddl: ddlText.value,
+        schema: object.schema,
+        objectType: object.objectType,
+        objectName: object.objectName,
+        ddl: activeDdlTab.value.ddlText,
       },
     });
 
-    statusMessage.value = `${selectedObject.value.objectName}: ${message}`;
+    statusMessage.value = `${object.objectName}: ${message}`;
   } catch (error) {
     errorMessage.value = toErrorMessage(error);
   } finally {
@@ -235,7 +377,7 @@ async function saveDdl(): Promise<void> {
 }
 
 async function runQuery(): Promise<void> {
-  if (!session.value) {
+  if (!session.value || !activeQueryTab.value) {
     return;
   }
 
@@ -246,12 +388,11 @@ async function runQuery(): Promise<void> {
     const result = await invoke<OracleQueryResult>("oracle_run_query", {
       request: {
         sessionId: session.value.sessionId,
-        sql: queryText.value,
+        sql: activeQueryTab.value.queryText,
       },
     });
 
     queryResult.value = result;
-    activeBottomTab.value = "results";
     statusMessage.value = result.message;
   } catch (error) {
     errorMessage.value = toErrorMessage(error);
@@ -388,42 +529,87 @@ function buildDefaultSchemaQuery(schema: string): string {
         <div class="toolbar-status">{{ statusMessage }}</div>
       </header>
 
-      <section class="editor-pane">
-        <div class="editor-toolbar">
-          <button class="btn primary" :disabled="!isConnected || busy.runningQuery" @click="runQuery">
+      <section class="sheet-pane">
+        <div class="sheet-tabs">
+          <div
+            v-for="tab in queryTabs"
+            :key="tab.id"
+            class="sheet-tab-wrap"
+            :class="{ active: activeWorkspaceTabId === tab.id }"
+          >
+            <button class="sheet-tab" @click="activateWorkspaceTab(tab.id)">
+              {{ tab.title }}
+            </button>
+            <button
+              v-if="queryTabs.length > 1"
+              class="sheet-tab-close"
+              title="Close tab"
+              @click.stop="closeQueryTab(tab.id)"
+            >
+              x
+            </button>
+          </div>
+          <button class="sheet-tab-add" title="New query tab" @click="addQueryTab">+</button>
+          <div
+            v-for="tab in ddlTabs"
+            :key="tab.id"
+            class="sheet-tab-wrap"
+            :class="{ active: activeWorkspaceTabId === tab.id }"
+          >
+            <button class="sheet-tab" @click="activateWorkspaceTab(tab.id)">
+              {{ tab.object.objectName }}
+            </button>
+            <button class="sheet-tab-close" title="Close tab" @click.stop="closeDdlTab(tab.id)">x</button>
+          </div>
+          <div class="sheet-tab-fill"></div>
+          <button
+            class="btn primary"
+            :disabled="!isConnected || !activeQueryTab || busy.runningQuery"
+            @click="runQuery"
+          >
             {{ busy.runningQuery ? "Running..." : "Execute" }}
+          </button>
+          <button class="btn" :disabled="!activeDdlTab || busy.savingDdl" @click="saveDdl">
+            {{ busy.savingDdl ? "Saving..." : "Save DDL" }}
           </button>
           <span class="schema-chip">Schema: {{ connectedSchema }}</span>
         </div>
 
         <textarea
-          v-model="queryText"
+          v-if="isQueryTabActive"
+          v-model="activeQueryText"
           class="sql-editor"
           spellcheck="false"
           placeholder="Write Oracle SQL here"
         />
+
+        <section v-else-if="activeDdlTab" class="ddl-pane">
+          <div class="ddl-header">
+            <div class="muted">
+              {{
+                activeDdlObject
+                  ? `${activeDdlObject.schema}.${activeDdlObject.objectName} (${activeDdlObject.objectType})`
+                  : "Select an object from Object Explorer."
+              }}
+            </div>
+          </div>
+
+          <textarea
+            v-model="activeDdlText"
+            class="ddl-editor"
+            spellcheck="false"
+            placeholder="Object DDL will appear here"
+          />
+        </section>
       </section>
 
-      <section class="bottom-pane">
-        <div class="bottom-tabs">
-          <button
-            class="tab"
-            :class="{ active: activeBottomTab === 'results' }"
-            @click="activeBottomTab = 'results'"
-          >
-            Results
-          </button>
-          <button
-            class="tab"
-            :class="{ active: activeBottomTab === 'ddl' }"
-            @click="activeBottomTab = 'ddl'"
-          >
-            DDL
-          </button>
+      <section class="results-pane">
+        <div class="results-header">
+          <div class="results-title">Results</div>
           <div v-if="errorMessage" class="error-inline">{{ errorMessage }}</div>
         </div>
 
-        <div v-show="activeBottomTab === 'results'" class="bottom-content">
+        <div class="results-content">
           <p v-if="!queryResult" class="muted">Run a query to see results.</p>
 
           <p v-else-if="queryResult.rowsAffected !== null" class="muted">
@@ -442,29 +628,6 @@ function buildDefaultSchemaQuery(schema: string): string {
               </tr>
             </tbody>
           </table>
-        </div>
-
-        <div v-show="activeBottomTab === 'ddl'" class="bottom-content ddl-pane">
-          <div class="ddl-header">
-            <div class="muted">
-              {{
-                selectedObject
-                  ? `${selectedObject.schema}.${selectedObject.objectName} (${selectedObject.objectType})`
-                  : "Select an object from Object Explorer."
-              }}
-            </div>
-            <button class="btn" :disabled="!selectedObject || busy.savingDdl" @click="saveDdl">
-              {{ busy.savingDdl ? "Saving..." : "Save DDL" }}
-            </button>
-          </div>
-
-          <textarea
-            v-model="ddlText"
-            class="ddl-editor"
-            spellcheck="false"
-            placeholder="Object DDL will appear here"
-            :disabled="!selectedObject"
-          />
         </div>
       </section>
     </section>
@@ -713,7 +876,7 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.editor-pane {
+.sheet-pane {
   display: grid;
   grid-template-rows: auto 1fr;
   border-bottom: 1px solid #9ca6b2;
@@ -721,15 +884,85 @@ textarea {
   background: #f5f7fa;
 }
 
-.editor-toolbar {
+.sheet-tabs {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.65rem;
   border-bottom: 1px solid #c2c9d2;
+  background: #e4e9ef;
+  gap: 0;
+  min-width: 0;
+}
+
+.sheet-tab-wrap {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid #b8c1cc;
+  min-width: 0;
+}
+
+.sheet-tab {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.42rem 0.7rem;
+  font-size: 0.77rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12rem;
+}
+
+.sheet-tab.active,
+.sheet-tab-wrap.active {
+  background: #fff;
+}
+
+.sheet-tab-wrap.active .sheet-tab {
+  font-weight: 600;
+}
+
+.sheet-tab-add {
+  border: 0;
+  border-right: 1px solid #b8c1cc;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.42rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #35506d;
+}
+
+.sheet-tab-add:hover {
+  background: #eef4fb;
+}
+
+.sheet-tab-close {
+  border: 0;
+  border-left: 1px solid #d2d8e0;
+  background: transparent;
+  padding: 0.42rem 0.42rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  color: #5e6b7a;
+}
+
+.sheet-tab-close:hover {
+  color: #27384d;
+  background: #eef4fb;
+}
+
+.sheet-tab-fill {
+  flex: 1;
+}
+
+.sheet-tabs > .btn {
+  margin-left: 0.45rem;
 }
 
 .schema-chip {
+  margin-left: 0.45rem;
+  margin-right: 0.45rem;
   font-size: 0.74rem;
   color: #2d3f55;
   background: #dde9f6;
@@ -752,38 +985,29 @@ textarea {
   background: #ffffff;
 }
 
-.bottom-pane {
+.results-pane {
   display: grid;
   grid-template-rows: 34px 1fr;
   min-height: 0;
   background: #fff;
 }
 
-.bottom-tabs {
+.results-header {
   display: flex;
   align-items: center;
+  padding: 0 0.55rem;
   border-bottom: 1px solid #aeb7c2;
   background: #e4e9ef;
 }
 
-.tab {
-  border: 0;
-  border-right: 1px solid #b8c1cc;
-  border-radius: 0;
-  background: transparent;
-  padding: 0.45rem 0.8rem;
+.results-title {
   font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.tab.active {
-  background: #fff;
   font-weight: 600;
+  color: #2f4053;
 }
 
 .error-inline {
   margin-left: auto;
-  padding-right: 0.6rem;
   font-size: 0.74rem;
   color: #9b2030;
   white-space: nowrap;
@@ -791,7 +1015,7 @@ textarea {
   text-overflow: ellipsis;
 }
 
-.bottom-content {
+.results-content {
   min-height: 0;
   overflow: auto;
   padding: 0.55rem;
