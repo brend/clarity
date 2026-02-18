@@ -7,7 +7,8 @@ Clarity is a Tauri + Vue desktop app targeting Oracle as the initial database pl
 This implementation provides:
 
 - Oracle connection/disconnection flow in the UI
-- Schema/object explorer
+- Schema-aware connection input (host, service, user, schema)
+- Schema/object explorer scoped to the connected schema
 - Query editor + run action
 - Results grid
 - Object DDL view/edit and save action
@@ -42,6 +43,24 @@ find /opt /usr/local "$HOME" -maxdepth 4 -name 'libclntsh.dylib' 2>/dev/null
 npm install
 npm run tauri dev
 ```
+
+## Debug Connection Defaults via `.env`
+
+During development (`npm run tauri dev`), the UI will prefill Oracle connection fields from Vite env vars in a project-root `.env` file:
+
+```bash
+VITE_ORACLE_HOST=localhost
+VITE_ORACLE_PORT=1521
+VITE_ORACLE_SERVICE_NAME=XEPDB1
+VITE_ORACLE_USERNAME=hr
+VITE_ORACLE_PASSWORD=your_password
+VITE_ORACLE_SCHEMA=HR
+```
+
+Notes:
+
+- These values are used only in dev mode.
+- Missing/invalid values fall back to the built-in defaults.
 
 ## Build / Verify
 

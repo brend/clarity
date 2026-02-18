@@ -18,6 +18,7 @@ struct OracleConnectRequest {
     service_name: String,
     username: String,
     password: String,
+    schema: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -57,6 +58,7 @@ struct OracleDdlUpdateRequest {
 struct OracleSessionSummary {
     session_id: u64,
     display_name: String,
+    schema: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -78,6 +80,7 @@ struct OracleQueryResult {
 
 struct OracleSession {
     connection: Connection,
+    target_schema: String,
 }
 
 struct AppState {
@@ -107,18 +110,27 @@ fn oracle_connect(
     let service_name = request.service_name.trim();
     let username = request.username.trim();
     let password = request.password.as_str();
+    let schema = normalize_schema_name(&request.schema)?;
 
     let connect_string = format!("//{}:{}/{}", host, port, service_name);
     let connection = Connection::connect(username, password, &connect_string)
         .map_err(|error| map_connect_error(error, host, port, service_name))?;
+    let alter_schema_sql = format!("ALTER SESSION SET CURRENT_SCHEMA = {}", schema);
+    connection
+        .execute(alter_schema_sql.as_str(), &[])
+        .map_err(map_oracle_error)?;
 
     let session_id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
     let summary = OracleSessionSummary {
         session_id,
-        display_name: format!("{}@{}", username, connect_string),
+        display_name: format!("{}@{} [{}]", username, connect_string, schema),
+        schema: schema.clone(),
     };
 
-    let session = OracleSession { connection };
+    let session = OracleSession {
+        connection,
+        target_schema: schema,
+    };
 
     let mut sessions = state
         .sessions
@@ -160,24 +172,25 @@ fn oracle_list_objects(
         FROM (
             SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
             FROM ALL_OBJECTS
-            WHERE OBJECT_TYPE IN (
-                'TABLE',
-                'VIEW',
-                'PROCEDURE',
-                'FUNCTION',
-                'PACKAGE',
-                'PACKAGE BODY',
-                'TRIGGER',
-                'SEQUENCE'
-            )
-            ORDER BY OWNER, OBJECT_TYPE, OBJECT_NAME
+            WHERE OWNER = :1
+              AND OBJECT_TYPE IN (
+                  'TABLE',
+                  'VIEW',
+                  'PROCEDURE',
+                  'FUNCTION',
+                  'PACKAGE',
+                  'PACKAGE BODY',
+                  'TRIGGER',
+                  'SEQUENCE'
+              )
+            ORDER BY OBJECT_TYPE, OBJECT_NAME
         )
-        WHERE ROWNUM <= :1
+        WHERE ROWNUM <= :2
     "#;
 
     let rows = session
         .connection
-        .query(sql, &[&MAX_EXPLORER_OBJECTS])
+        .query(sql, &[&session.target_schema, &MAX_EXPLORER_OBJECTS])
         .map_err(map_oracle_error)?;
 
     let mut objects = Vec::new();
@@ -206,7 +219,8 @@ fn oracle_get_object_ddl(
         .get(&request.session_id)
         .ok_or_else(|| "Session not found".to_string())?;
 
-    let schema = request.schema.trim().to_ascii_uppercase();
+    let schema = normalize_schema_name(&request.schema)?;
+    ensure_schema_is_in_scope(&schema, session)?;
     let object_name = request.object_name.trim().to_ascii_uppercase();
     let source_type = normalize_source_type(&request.object_type);
     let metadata_type = normalize_metadata_type(&request.object_type);
@@ -253,6 +267,8 @@ fn oracle_update_object_ddl(
     let session = sessions
         .get_mut(&request.session_id)
         .ok_or_else(|| "Session not found".to_string())?;
+    let schema = normalize_schema_name(&request.schema)?;
+    ensure_schema_is_in_scope(&schema, session)?;
 
     session
         .connection
@@ -263,7 +279,7 @@ fn oracle_update_object_ddl(
     Ok(format!(
         "{} {}.{} updated",
         request.object_type.to_ascii_uppercase(),
-        request.schema.to_ascii_uppercase(),
+        schema,
         request.object_name.to_ascii_uppercase()
     ))
 }
@@ -371,6 +387,39 @@ fn validate_connect_request(request: &OracleConnectRequest) -> Result<(), String
 
     if request.password.is_empty() {
         return Err("Password is required".to_string());
+    }
+
+    if request.schema.trim().is_empty() {
+        return Err("Schema is required".to_string());
+    }
+
+    Ok(())
+}
+
+fn normalize_schema_name(schema: &str) -> Result<String, String> {
+    let normalized = schema.trim().to_ascii_uppercase();
+    if normalized.is_empty() {
+        return Err("Schema is required".to_string());
+    }
+
+    if !normalized
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '#')
+    {
+        return Err(
+            "Schema must use unquoted Oracle identifier characters: A-Z, 0-9, _, $, #".to_string(),
+        );
+    }
+
+    Ok(normalized)
+}
+
+fn ensure_schema_is_in_scope(schema: &str, session: &OracleSession) -> Result<(), String> {
+    if schema != session.target_schema {
+        return Err(format!(
+            "Connected schema is {}. Object access is limited to that schema.",
+            session.target_schema
+        ));
     }
 
     Ok(())
