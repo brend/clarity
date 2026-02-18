@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import AppIcon from "./components/AppIcon.vue";
 import SqlCodeEditor from "./components/SqlCodeEditor.vue";
 
 interface OracleConnectRequest {
@@ -467,10 +468,15 @@ function isLikelyNumeric(value: string): boolean {
 
         <div class="connect-actions">
           <button class="btn primary" :disabled="busy.connecting || isConnected" @click="connectOracle">
+            <AppIcon name="plug" class="btn-icon" aria-hidden="true" />
             {{ busy.connecting ? "Connecting..." : "Connect" }}
           </button>
-          <button class="btn" :disabled="!isConnected" @click="disconnectOracle">Disconnect</button>
+          <button class="btn" :disabled="!isConnected" @click="disconnectOracle">
+            <AppIcon name="plug-off" class="btn-icon" aria-hidden="true" />
+            Disconnect
+          </button>
           <button class="btn" :disabled="!isConnected || busy.loadingObjects" @click="refreshObjects">
+            <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
             {{ busy.loadingObjects ? "Refreshing..." : "Refresh" }}
           </button>
         </div>
@@ -496,7 +502,7 @@ function isLikelyNumeric(value: string): boolean {
               :class="{ expanded: isObjectTypeExpanded(typeNode.objectType) }"
               @click="toggleObjectType(typeNode.objectType)"
             >
-              <span class="tree-caret" aria-hidden="true">&gt;</span>
+              <AppIcon name="chevron-right" class="tree-caret-icon" aria-hidden="true" />
               <span class="tree-type-label">
                 {{ typeNode.objectType }} <span class="tree-count">({{ typeNode.entries.length }})</span>
               </span>
@@ -519,7 +525,7 @@ function isLikelyNumeric(value: string): boolean {
                   }"
                   @click="loadDdl(entry)"
                 >
-                  <span class="tree-leaf-bullet" aria-hidden="true">-</span>
+                  <AppIcon name="object" class="tree-leaf-icon" aria-hidden="true" />
                   <span>{{ entry.objectName }}</span>
                 </button>
               </li>
@@ -552,10 +558,12 @@ function isLikelyNumeric(value: string): boolean {
               title="Close tab"
               @click.stop="closeQueryTab(tab.id)"
             >
-              x
+              <AppIcon name="close" class="sheet-tab-icon" aria-hidden="true" />
             </button>
           </div>
-          <button class="sheet-tab-add" title="New query tab" @click="addQueryTab">+</button>
+          <button class="sheet-tab-add" title="New query tab" @click="addQueryTab">
+            <AppIcon name="plus" class="sheet-tab-icon" aria-hidden="true" />
+          </button>
           <div
             v-for="tab in ddlTabs"
             :key="tab.id"
@@ -565,7 +573,9 @@ function isLikelyNumeric(value: string): boolean {
             <button class="sheet-tab" @click="activateWorkspaceTab(tab.id)">
               {{ tab.object.objectName }}
             </button>
-            <button class="sheet-tab-close" title="Close tab" @click.stop="closeDdlTab(tab.id)">x</button>
+            <button class="sheet-tab-close" title="Close tab" @click.stop="closeDdlTab(tab.id)">
+              <AppIcon name="close" class="sheet-tab-icon" aria-hidden="true" />
+            </button>
           </div>
           <div class="sheet-tab-fill"></div>
           <button
@@ -573,9 +583,11 @@ function isLikelyNumeric(value: string): boolean {
             :disabled="!isConnected || !activeQueryTab || busy.runningQuery"
             @click="runQuery"
           >
+            <AppIcon name="play" class="btn-icon" aria-hidden="true" />
             {{ busy.runningQuery ? "Running..." : "Execute" }}
           </button>
           <button class="btn" :disabled="!activeDdlTab || busy.savingDdl" @click="saveDdl">
+            <AppIcon name="save" class="btn-icon" aria-hidden="true" />
             {{ busy.savingDdl ? "Saving..." : "Save DDL" }}
           </button>
           <span class="schema-chip">Schema: {{ connectedSchema }}</span>
@@ -777,6 +789,9 @@ button:focus-visible {
   font-size: 0.76rem;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
 }
 
 .btn:hover:not(:disabled) {
@@ -798,6 +813,12 @@ button:focus-visible {
 .btn.primary:hover:not(:disabled) {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
+}
+
+.btn-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
 }
 
 .session-line {
@@ -857,14 +878,16 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
-.tree-caret {
+.tree-caret-icon {
   width: 0.62rem;
+  height: 0.62rem;
   color: var(--text-subtle);
   transform-origin: center;
   transition: transform 0.12s ease;
+  flex: 0 0 auto;
 }
 
-.tree-type.expanded .tree-caret {
+.tree-type.expanded .tree-caret-icon {
   transform: rotate(90deg);
 }
 
@@ -892,9 +915,11 @@ button:focus-visible {
   color: #1f3654;
 }
 
-.tree-leaf-bullet {
+.tree-leaf-icon {
   width: 0.62rem;
+  height: 0.62rem;
   color: var(--text-subtle);
+  flex: 0 0 auto;
 }
 
 .tree-node span:last-child {
@@ -992,6 +1017,9 @@ button:focus-visible {
   font-size: 0.8rem;
   cursor: pointer;
   color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sheet-tab-add:hover {
@@ -1006,6 +1034,9 @@ button:focus-visible {
   font-size: 0.75rem;
   cursor: pointer;
   color: var(--text-subtle);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sheet-tab-close:hover {
@@ -1015,6 +1046,11 @@ button:focus-visible {
 
 .sheet-tab-fill {
   flex: 1;
+}
+
+.sheet-tab-icon {
+  width: 0.76rem;
+  height: 0.76rem;
 }
 
 .sheet-tabs > .btn {
