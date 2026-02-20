@@ -1,6 +1,6 @@
 use crate::{
     DbConnectRequest, OracleDdlUpdateRequest, OracleObjectEntry, OracleObjectRef,
-    OracleQueryRequest, OracleQueryResult,
+    OracleQueryRequest, OracleQueryResult, OracleSourceSearchRequest, OracleSourceSearchResult,
 };
 use oracle::{Connection, Error as OracleError, InitParams, SqlValue};
 use std::env;
@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 const MAX_EXPLORER_OBJECTS: u32 = 5000;
 const MAX_QUERY_ROWS: usize = 1000;
+const DEFAULT_SOURCE_SEARCH_LIMIT: u32 = 200;
+const MAX_SOURCE_SEARCH_RESULTS: u32 = 1000;
 
 pub(crate) struct OracleSession {
     pub(crate) connection: Connection,
@@ -94,27 +96,85 @@ pub(crate) fn get_object_ddl(
     let source_type = normalize_source_type(&request.object_type);
     let metadata_type = normalize_metadata_type(&request.object_type);
 
+    if let Some(source_ddl) = fetch_source_ddl(
+        &session.connection,
+        schema.as_str(),
+        source_type.as_str(),
+        object_name.as_str(),
+    )
+    .map_err(map_oracle_error)?
+    {
+        return Ok(source_ddl);
+    }
+
     let ddl_sql = "SELECT DBMS_METADATA.GET_DDL(:1, :2, :3) FROM DUAL";
-    match session
+    session
         .connection
         .query_row_as::<String>(ddl_sql, &[&metadata_type, &object_name, &schema])
-    {
-        Ok(ddl) => Ok(ddl),
-        Err(error) => {
-            if let Some(ddl) = fetch_source_ddl(
-                &session.connection,
-                schema.as_str(),
-                source_type.as_str(),
-                object_name.as_str(),
-            )
-            .map_err(map_oracle_error)?
-            {
-                return Ok(ddl);
-            }
+        .map_err(map_oracle_error)
+}
 
-            Err(map_oracle_error(error))
-        }
+pub(crate) fn search_source_code(
+    session: &OracleSession,
+    request: &OracleSourceSearchRequest,
+) -> Result<Vec<OracleSourceSearchResult>, String> {
+    let search_term = request.search_term.trim();
+    if search_term.is_empty() {
+        return Err("Search term is required".to_string());
     }
+
+    let search_term = search_term.to_string();
+    let limit = request
+        .limit
+        .unwrap_or(DEFAULT_SOURCE_SEARCH_LIMIT)
+        .clamp(1, MAX_SOURCE_SEARCH_RESULTS);
+    let sql = r#"
+        SELECT OWNER, TYPE, NAME, LINE, TEXT
+        FROM (
+            SELECT OWNER, TYPE, NAME, LINE, TEXT
+            FROM ALL_SOURCE
+            WHERE OWNER = :1
+              AND TYPE IN (
+                  'PROCEDURE',
+                  'FUNCTION',
+                  'PACKAGE',
+                  'PACKAGE BODY',
+                  'TRIGGER',
+                  'TYPE',
+                  'TYPE BODY'
+              )
+              AND INSTR(UPPER(TEXT), UPPER(:2)) > 0
+            ORDER BY TYPE, NAME, LINE
+        )
+        WHERE ROWNUM <= :3
+    "#;
+
+    let rows = session
+        .connection
+        .query(sql, &[&session.target_schema, &search_term, &limit])
+        .map_err(map_oracle_error)?;
+    let mut matches = Vec::new();
+
+    for row_result in rows {
+        let row = row_result.map_err(map_oracle_error)?;
+        let raw_line: i64 = row.get::<usize, i64>(3).map_err(map_oracle_error)?;
+        let line = raw_line.max(1).min(u32::MAX as i64) as u32;
+        let text = row
+            .get::<usize, String>(4)
+            .map_err(map_oracle_error)?
+            .trim_end_matches(&['\r', '\n'][..])
+            .to_string();
+
+        matches.push(OracleSourceSearchResult {
+            schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
+            object_type: row.get::<usize, String>(1).map_err(map_oracle_error)?,
+            object_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
+            line,
+            text,
+        });
+    }
+
+    Ok(matches)
 }
 
 pub(crate) fn update_object_ddl(

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import AppIcon from "./components/AppIcon.vue";
 import SqlCodeEditor from "./components/SqlCodeEditor.vue";
@@ -48,10 +48,25 @@ interface OracleQueryResult {
   message: string;
 }
 
+interface OracleSourceSearchResult {
+  schema: string;
+  objectType: string;
+  objectName: string;
+  line: number;
+  text: string;
+}
+
 interface WorkspaceDdlTab {
   id: string;
   object: OracleObjectEntry;
   ddlText: string;
+  focusLine: number | null;
+  focusToken: number;
+  activeDetailTabId: ObjectDetailTabId;
+  dataResult: OracleQueryResult | null;
+  metadataResult: OracleQueryResult | null;
+  loadingData: boolean;
+  loadingMetadata: boolean;
 }
 
 interface WorkspaceQueryTab {
@@ -60,8 +75,23 @@ interface WorkspaceQueryTab {
   queryText: string;
 }
 
+type ObjectDetailTabId = "data" | "ddl" | "metadata";
+
+interface ObjectDetailTabDefinition {
+  id: ObjectDetailTabId;
+  label: string;
+}
+
 const QUERY_TAB_PREFIX = "query:";
 const FIRST_QUERY_TAB_ID = `${QUERY_TAB_PREFIX}1`;
+const SEARCH_TAB_ID = "search:code";
+const OBJECT_DATA_PREVIEW_LIMIT = 500;
+const PANEL_SPLITTER_SIZE = 6;
+const MIN_SIDEBAR_WIDTH = 240;
+const MIN_WORKSPACE_WIDTH = 560;
+const MIN_SHEET_HEIGHT = 180;
+const MIN_RESULTS_HEIGHT = 120;
+const WORKSPACE_HEADER_HEIGHT = 58;
 
 function readDebugConnectionString(value: string | undefined, fallback: string): string {
   if (!import.meta.env.DEV) {
@@ -108,9 +138,16 @@ const queryTabs = ref<WorkspaceQueryTab[]>([
 ]);
 const queryTabNumber = ref(2);
 const queryResult = ref<OracleQueryResult | null>(null);
+const sourceSearchText = ref("");
+const sourceSearchResults = ref<OracleSourceSearchResult[]>([]);
+const sourceSearchPerformed = ref(false);
 const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
 const errorMessage = ref("");
 const activeWorkspaceTabId = ref(FIRST_QUERY_TAB_ID);
+const desktopShellEl = ref<HTMLElement | null>(null);
+const workspaceEl = ref<HTMLElement | null>(null);
+const sidebarWidth = ref(330);
+const resultsPaneHeight = ref(320);
 
 const busy = reactive({
   connecting: false,
@@ -122,6 +159,7 @@ const busy = reactive({
   loadingDdl: false,
   savingDdl: false,
   runningQuery: false,
+  searchingSource: false,
 });
 
 const isConnected = computed(() => session.value !== null);
@@ -140,6 +178,7 @@ const activeQueryTab = computed(() =>
 const activeDdlTab = computed(() =>
   ddlTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
 );
+const isSearchTabActive = computed(() => activeWorkspaceTabId.value === SEARCH_TAB_ID);
 const activeDdlObject = computed(() => activeDdlTab.value?.object ?? null);
 const isQueryTabActive = computed(() => activeQueryTab.value !== null);
 const activeQueryText = computed({
@@ -162,6 +201,64 @@ const activeDdlText = computed({
     activeDdlTab.value.ddlText = value;
   },
 });
+const activeObjectDetailTabs = computed<ObjectDetailTabDefinition[]>(() =>
+  activeDdlTab.value ? getObjectDetailTabs(activeDdlTab.value.object) : [],
+);
+const activeObjectDetailTabId = computed<ObjectDetailTabId | null>(
+  () => activeDdlTab.value?.activeDetailTabId ?? null,
+);
+const activeObjectDetailResult = computed<OracleQueryResult | null>(() => {
+  if (!activeDdlTab.value) {
+    return null;
+  }
+
+  if (activeDdlTab.value.activeDetailTabId === "data") {
+    return activeDdlTab.value.dataResult;
+  }
+
+  if (activeDdlTab.value.activeDetailTabId === "metadata") {
+    return activeDdlTab.value.metadataResult;
+  }
+
+  return null;
+});
+const activeObjectDetailLoading = computed<boolean>(() => {
+  if (!activeDdlTab.value) {
+    return false;
+  }
+
+  if (activeDdlTab.value.activeDetailTabId === "data") {
+    return activeDdlTab.value.loadingData;
+  }
+
+  if (activeDdlTab.value.activeDetailTabId === "metadata") {
+    return activeDdlTab.value.loadingMetadata;
+  }
+
+  return false;
+});
+
+const desktopShellStyle = computed<Record<string, string>>(() => ({
+  "--sidebar-width": `${sidebarWidth.value}px`,
+}));
+
+const workspaceStyle = computed<Record<string, string>>(() => ({
+  "--results-height": `${resultsPaneHeight.value}px`,
+}));
+
+type ResizeState =
+  | {
+      axis: "sidebar";
+      startPointer: number;
+      startSize: number;
+    }
+  | {
+      axis: "results";
+      startPointer: number;
+      startSize: number;
+    };
+
+const activeResize = ref<ResizeState | null>(null);
 
 const objectTree = computed(() => {
   const byType = new Map<string, OracleObjectEntry[]>();
@@ -196,6 +293,56 @@ function toggleObjectType(objectType: string): void {
   };
 }
 
+function normalizeObjectType(objectType: string): string {
+  return objectType.trim().toUpperCase();
+}
+
+function canPreviewObjectData(objectType: string): boolean {
+  const normalized = normalizeObjectType(objectType);
+  return normalized === "TABLE" || normalized === "VIEW";
+}
+
+function getObjectDetailTabs(object: OracleObjectEntry): ObjectDetailTabDefinition[] {
+  const tabs: ObjectDetailTabDefinition[] = [];
+  if (canPreviewObjectData(object.objectType)) {
+    tabs.push({ id: "data", label: "Data" });
+  }
+  tabs.push({ id: "ddl", label: "DDL" });
+  tabs.push({ id: "metadata", label: "Metadata" });
+  return tabs;
+}
+
+function getDefaultObjectDetailTabId(object: OracleObjectEntry): ObjectDetailTabId {
+  return canPreviewObjectData(object.objectType) ? "data" : "ddl";
+}
+
+function isObjectDetailTabSupported(object: OracleObjectEntry, tabId: ObjectDetailTabId): boolean {
+  return getObjectDetailTabs(object).some((tab) => tab.id === tabId);
+}
+
+function toQuotedIdentifier(name: string): string {
+  return `"${name.replace(/"/g, "\"\"")}"`;
+}
+
+function toSqlStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function buildObjectDataPreviewSql(object: OracleObjectEntry): string {
+  return `select * from ${toQuotedIdentifier(object.schema)}.${toQuotedIdentifier(object.objectName)} fetch first ${OBJECT_DATA_PREVIEW_LIMIT} rows only`;
+}
+
+function buildObjectMetadataSql(object: OracleObjectEntry): string {
+  const owner = toSqlStringLiteral(object.schema.trim());
+  const objectName = toSqlStringLiteral(object.objectName.trim());
+  const objectType = toSqlStringLiteral(object.objectType.trim());
+  if (canPreviewObjectData(object.objectType)) {
+    return `select column_id, column_name, data_type, data_length, data_precision, data_scale, nullable, data_default from all_tab_columns where owner = ${owner} and table_name = ${objectName} order by column_id`;
+  }
+
+  return `select owner, object_name, object_type, status, created, last_ddl_time from all_objects where owner = ${owner} and object_name = ${objectName} and object_type = ${objectType}`;
+}
+
 function buildDdlTabId(object: OracleObjectEntry): string {
   return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
 }
@@ -215,8 +362,16 @@ function addQueryTab(): void {
   activateWorkspaceTab(tabId);
 }
 
+function openSearchTab(): void {
+  activateWorkspaceTab(SEARCH_TAB_ID);
+}
+
 function activateWorkspaceTab(tabId: string): void {
   activeWorkspaceTabId.value = tabId;
+
+  if (tabId === SEARCH_TAB_ID) {
+    return;
+  }
 
   if (queryTabs.value.some((tab) => tab.id === tabId)) {
     return;
@@ -225,6 +380,7 @@ function activateWorkspaceTab(tabId: string): void {
   const tab = ddlTabs.value.find((entry) => entry.id === tabId);
   if (tab) {
     selectedObject.value = tab.object;
+    void ensureObjectDetailLoaded(tab, tab.activeDetailTabId);
   }
 }
 
@@ -262,6 +418,183 @@ function closeDdlTab(tabId: string): void {
     const fallbackTab = ddlTabs.value[Math.max(0, index - 1)];
     activateWorkspaceTab(fallbackTab?.id ?? queryTabs.value[0]?.id ?? FIRST_QUERY_TAB_ID);
   }
+}
+
+function openObjectFromExplorer(object: OracleObjectEntry): void {
+  selectedObject.value = object;
+  const tabId = buildDdlTabId(object);
+  const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
+  if (existingTab) {
+    existingTab.object = object;
+    if (!isObjectDetailTabSupported(existingTab.object, existingTab.activeDetailTabId)) {
+      existingTab.activeDetailTabId = getDefaultObjectDetailTabId(existingTab.object);
+    }
+    activateWorkspaceTab(existingTab.id);
+    return;
+  }
+
+  void loadDdl(object);
+}
+
+function activateObjectDetailTab(tabId: ObjectDetailTabId): void {
+  const tab = activeDdlTab.value;
+  if (!tab || tab.activeDetailTabId === tabId || !isObjectDetailTabSupported(tab.object, tabId)) {
+    return;
+  }
+
+  tab.activeDetailTabId = tabId;
+  void ensureObjectDetailLoaded(tab, tabId);
+}
+
+function refreshActiveObjectDetail(): void {
+  const tab = activeDdlTab.value;
+  if (!tab) {
+    return;
+  }
+
+  if (tab.activeDetailTabId === "data") {
+    void loadObjectData(tab, true);
+    return;
+  }
+
+  if (tab.activeDetailTabId === "metadata") {
+    void loadObjectMetadata(tab, true);
+  }
+}
+
+async function ensureObjectDetailLoaded(tab: WorkspaceDdlTab, detailTabId: ObjectDetailTabId): Promise<void> {
+  if (detailTabId === "data") {
+    await loadObjectData(tab);
+    return;
+  }
+
+  if (detailTabId === "metadata") {
+    await loadObjectMetadata(tab);
+  }
+}
+
+async function loadObjectData(tab: WorkspaceDdlTab, forceReload = false): Promise<void> {
+  if (!session.value || !canPreviewObjectData(tab.object.objectType) || tab.loadingData) {
+    return;
+  }
+
+  if (!forceReload && tab.dataResult) {
+    return;
+  }
+
+  errorMessage.value = "";
+  tab.loadingData = true;
+
+  try {
+    tab.dataResult = await invoke<OracleQueryResult>("db_run_query", {
+      request: {
+        sessionId: session.value.sessionId,
+        sql: buildObjectDataPreviewSql(tab.object),
+      },
+    });
+    statusMessage.value = `Loaded data preview: ${tab.object.schema}.${tab.object.objectName}`;
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    tab.loadingData = false;
+  }
+}
+
+async function loadObjectMetadata(tab: WorkspaceDdlTab, forceReload = false): Promise<void> {
+  if (!session.value || tab.loadingMetadata) {
+    return;
+  }
+
+  if (!forceReload && tab.metadataResult) {
+    return;
+  }
+
+  errorMessage.value = "";
+  tab.loadingMetadata = true;
+
+  try {
+    tab.metadataResult = await invoke<OracleQueryResult>("db_run_query", {
+      request: {
+        sessionId: session.value.sessionId,
+        sql: buildObjectMetadataSql(tab.object),
+      },
+    });
+    statusMessage.value = `Loaded metadata: ${tab.object.schema}.${tab.object.objectName}`;
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    tab.loadingMetadata = false;
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function maxSidebarWidth(): number {
+  const shellWidth = desktopShellEl.value?.clientWidth ?? window.innerWidth;
+  return Math.max(MIN_SIDEBAR_WIDTH, shellWidth - PANEL_SPLITTER_SIZE - MIN_WORKSPACE_WIDTH);
+}
+
+function maxResultsPaneHeight(): number {
+  const workspaceHeight = workspaceEl.value?.clientHeight ?? 800;
+  return Math.max(
+    MIN_RESULTS_HEIGHT,
+    workspaceHeight - WORKSPACE_HEADER_HEIGHT - PANEL_SPLITTER_SIZE - MIN_SHEET_HEIGHT,
+  );
+}
+
+function applyLayoutBounds(): void {
+  sidebarWidth.value = clamp(sidebarWidth.value, MIN_SIDEBAR_WIDTH, maxSidebarWidth());
+  resultsPaneHeight.value = clamp(resultsPaneHeight.value, MIN_RESULTS_HEIGHT, maxResultsPaneHeight());
+}
+
+function beginSidebarResize(event: PointerEvent): void {
+  if (window.matchMedia("(max-width: 980px)").matches) {
+    return;
+  }
+
+  event.preventDefault();
+  activeResize.value = {
+    axis: "sidebar",
+    startPointer: event.clientX,
+    startSize: sidebarWidth.value,
+  };
+  document.body.style.cursor = "col-resize";
+  document.body.style.userSelect = "none";
+}
+
+function beginResultsResize(event: PointerEvent): void {
+  event.preventDefault();
+  activeResize.value = {
+    axis: "results",
+    startPointer: event.clientY,
+    startSize: resultsPaneHeight.value,
+  };
+  document.body.style.cursor = "row-resize";
+  document.body.style.userSelect = "none";
+}
+
+function clearResizeState(): void {
+  activeResize.value = null;
+  document.body.style.removeProperty("cursor");
+  document.body.style.removeProperty("user-select");
+}
+
+function handlePointerMove(event: PointerEvent): void {
+  const resizing = activeResize.value;
+  if (!resizing) {
+    return;
+  }
+
+  if (resizing.axis === "sidebar") {
+    const next = resizing.startSize + (event.clientX - resizing.startPointer);
+    sidebarWidth.value = clamp(next, MIN_SIDEBAR_WIDTH, maxSidebarWidth());
+    return;
+  }
+
+  const next = resizing.startSize - (event.clientY - resizing.startPointer);
+  resultsPaneHeight.value = clamp(next, MIN_RESULTS_HEIGHT, maxResultsPaneHeight());
 }
 
 async function loadConnectionProfiles(): Promise<void> {
@@ -442,6 +775,9 @@ async function disconnectOracle(): Promise<void> {
     activeWorkspaceTabId.value = FIRST_QUERY_TAB_ID;
     selectedObject.value = null;
     queryResult.value = null;
+    sourceSearchText.value = "";
+    sourceSearchResults.value = [];
+    sourceSearchPerformed.value = false;
     statusMessage.value = "Disconnected.";
   }
 }
@@ -466,7 +802,7 @@ async function refreshObjects(): Promise<void> {
   }
 }
 
-async function loadDdl(object: OracleObjectEntry): Promise<void> {
+async function loadDdl(object: OracleObjectEntry, targetLine: number | null = null): Promise<void> {
   if (!session.value) {
     return;
   }
@@ -486,19 +822,39 @@ async function loadDdl(object: OracleObjectEntry): Promise<void> {
     });
 
     const tabId = buildDdlTabId(object);
+    const detailTabId = targetLine === null ? getDefaultObjectDetailTabId(object) : "ddl";
     const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
     if (existingTab) {
       existingTab.ddlText = ddl;
       existingTab.object = object;
+      existingTab.focusLine = targetLine;
+      existingTab.focusToken += targetLine === null ? 0 : 1;
+      existingTab.activeDetailTabId = isObjectDetailTabSupported(existingTab.object, existingTab.activeDetailTabId)
+        ? existingTab.activeDetailTabId
+        : detailTabId;
+      if (targetLine !== null) {
+        existingTab.activeDetailTabId = "ddl";
+      }
     } else {
       ddlTabs.value.push({
         id: tabId,
         object,
         ddlText: ddl,
+        focusLine: targetLine,
+        focusToken: targetLine === null ? 0 : 1,
+        activeDetailTabId: detailTabId,
+        dataResult: null,
+        metadataResult: null,
+        loadingData: false,
+        loadingMetadata: false,
       });
     }
 
     activateWorkspaceTab(tabId);
+    const objectTab = ddlTabs.value.find((tab) => tab.id === tabId);
+    if (objectTab) {
+      void ensureObjectDetailLoaded(objectTab, objectTab.activeDetailTabId);
+    }
     statusMessage.value = `Loaded DDL: ${object.schema}.${object.objectName}`;
   } catch (error) {
     errorMessage.value = toErrorMessage(error);
@@ -560,6 +916,48 @@ async function runQuery(): Promise<void> {
   }
 }
 
+async function runSourceSearch(): Promise<void> {
+  if (!session.value) {
+    return;
+  }
+
+  const searchTerm = sourceSearchText.value.trim();
+  if (!searchTerm) {
+    errorMessage.value = "Search term is required.";
+    return;
+  }
+
+  errorMessage.value = "";
+  busy.searchingSource = true;
+  sourceSearchPerformed.value = true;
+
+  try {
+    sourceSearchResults.value = await invoke<OracleSourceSearchResult[]>("db_search_source_code", {
+      request: {
+        sessionId: session.value.sessionId,
+        searchTerm,
+        limit: 500,
+      },
+    });
+    statusMessage.value = `Search complete. ${sourceSearchResults.value.length} match(es).`;
+  } catch (error) {
+    errorMessage.value = toErrorMessage(error);
+  } finally {
+    busy.searchingSource = false;
+  }
+}
+
+async function openSourceSearchResult(match: OracleSourceSearchResult): Promise<void> {
+  await loadDdl(
+    {
+      schema: match.schema,
+      objectType: match.objectType,
+      objectName: match.objectName,
+    },
+    match.line,
+  );
+}
+
 function toErrorMessage(error: unknown): string {
   if (typeof error === "string") {
     return error;
@@ -583,12 +981,27 @@ function isLikelyNumeric(value: string): boolean {
 }
 
 onMounted(() => {
+  window.addEventListener("pointermove", handlePointerMove);
+  window.addEventListener("pointerup", clearResizeState);
+  window.addEventListener("pointercancel", clearResizeState);
+  window.addEventListener("blur", clearResizeState);
+  window.addEventListener("resize", applyLayoutBounds);
+  requestAnimationFrame(applyLayoutBounds);
   void loadConnectionProfiles();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointermove", handlePointerMove);
+  window.removeEventListener("pointerup", clearResizeState);
+  window.removeEventListener("pointercancel", clearResizeState);
+  window.removeEventListener("blur", clearResizeState);
+  window.removeEventListener("resize", applyLayoutBounds);
+  clearResizeState();
 });
 </script>
 
 <template>
-  <main class="desktop-shell">
+  <main ref="desktopShellEl" class="desktop-shell" :style="desktopShellStyle">
     <aside class="explorer-sidebar">
       <header class="sidebar-header">Object Explorer</header>
 
@@ -728,7 +1141,7 @@ onMounted(() => {
                       selectedObject?.objectName === entry.objectName &&
                       selectedObject?.objectType === entry.objectType,
                   }"
-                  @click="loadDdl(entry)"
+                  @click="openObjectFromExplorer(entry)"
                 >
                   <AppIcon name="object" class="tree-leaf-icon" aria-hidden="true" />
                   <span>{{ entry.objectName }}</span>
@@ -740,7 +1153,15 @@ onMounted(() => {
       </section>
     </aside>
 
-    <section class="workspace">
+    <div
+      class="panel-resizer vertical"
+      role="separator"
+      aria-orientation="vertical"
+      title="Resize explorer and workspace"
+      @pointerdown="beginSidebarResize"
+    ></div>
+
+    <section ref="workspaceEl" class="workspace" :style="workspaceStyle">
       <header class="workspace-toolbar">
         <div class="toolbar-title">SQL Worksheet</div>
         <div class="toolbar-status">{{ statusMessage }}</div>
@@ -769,6 +1190,12 @@ onMounted(() => {
           <button class="sheet-tab-add" title="New query tab" @click="addQueryTab">
             <AppIcon name="plus" class="sheet-tab-icon" aria-hidden="true" />
           </button>
+          <div class="sheet-tab-wrap" :class="{ active: isSearchTabActive }">
+            <button class="sheet-tab sheet-tab-search" @click="openSearchTab">
+              <AppIcon name="search" class="sheet-tab-icon" aria-hidden="true" />
+              Code Search
+            </button>
+          </div>
           <div
             v-for="tab in ddlTabs"
             :key="tab.id"
@@ -791,7 +1218,11 @@ onMounted(() => {
             <AppIcon name="play" class="btn-icon" aria-hidden="true" />
             {{ busy.runningQuery ? "Running..." : "Execute" }}
           </button>
-          <button class="btn" :disabled="!activeDdlTab || busy.savingDdl" @click="saveDdl">
+          <button
+            class="btn"
+            :disabled="!activeDdlTab || activeObjectDetailTabId !== 'ddl' || busy.savingDdl"
+            @click="saveDdl"
+          >
             <AppIcon name="save" class="btn-icon" aria-hidden="true" />
             {{ busy.savingDdl ? "Saving..." : "Save DDL" }}
           </button>
@@ -815,15 +1246,134 @@ onMounted(() => {
                   : "Select an object from Object Explorer."
               }}
             </div>
+            <button
+              class="btn"
+              :disabled="
+                !activeDdlTab ||
+                activeObjectDetailTabId === 'ddl' ||
+                !activeObjectDetailTabId ||
+                activeObjectDetailLoading
+              "
+              @click="refreshActiveObjectDetail"
+            >
+              {{ activeObjectDetailLoading ? "Refreshing..." : "Refresh Detail" }}
+            </button>
+          </div>
+
+          <div class="object-detail-tabs">
+            <button
+              v-for="detailTab in activeObjectDetailTabs"
+              :key="detailTab.id"
+              class="object-detail-tab"
+              :class="{ active: activeObjectDetailTabId === detailTab.id }"
+              @click="activateObjectDetailTab(detailTab.id)"
+            >
+              {{ detailTab.label }}
+            </button>
           </div>
 
           <SqlCodeEditor
+            v-if="activeObjectDetailTabId === 'ddl'"
             v-model="activeDdlText"
             class="ddl-editor"
             placeholder="Object DDL will appear here"
+            :target-line="activeDdlTab.focusLine"
+            :focus-token="activeDdlTab.focusToken"
           />
+
+          <section v-else class="object-detail-grid-pane">
+            <p v-if="activeObjectDetailLoading" class="muted">Loading object detail...</p>
+            <p v-else-if="!activeObjectDetailResult" class="muted">
+              Select a detail tab to load information for this object.
+            </p>
+            <template v-else>
+              <p class="muted">{{ activeObjectDetailResult.message }}</p>
+              <p v-if="activeObjectDetailResult.rowsAffected !== null" class="muted">
+                Rows affected: {{ activeObjectDetailResult.rowsAffected }}
+              </p>
+              <p v-else-if="!activeObjectDetailResult.columns.length" class="muted">No rows returned.</p>
+              <div v-else class="object-detail-grid-wrap">
+                <table class="results-table">
+                  <thead>
+                    <tr>
+                      <th v-for="column in activeObjectDetailResult.columns" :key="column">{{ column }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, rowIndex) in activeObjectDetailResult.rows" :key="`obj-row-${rowIndex}`">
+                      <td
+                        v-for="(value, colIndex) in row"
+                        :key="`obj-col-${rowIndex}-${colIndex}`"
+                        :class="{ 'results-cell-number': isLikelyNumeric(value) }"
+                      >
+                        {{ value }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </template>
+          </section>
+        </section>
+
+        <section v-else-if="isSearchTabActive" class="source-search-pane">
+          <div class="source-search-toolbar">
+            <input
+              v-model="sourceSearchText"
+              class="source-search-input"
+              placeholder="Search procedures, packages, functions, triggers, and types"
+              @keydown.enter.prevent="runSourceSearch"
+            />
+            <button
+              class="btn primary"
+              :disabled="!isConnected || busy.searchingSource || !sourceSearchText.trim()"
+              @click="runSourceSearch"
+            >
+              <AppIcon name="search" class="btn-icon" aria-hidden="true" />
+              {{ busy.searchingSource ? "Searching..." : "Search" }}
+            </button>
+          </div>
+
+          <div class="source-search-content">
+            <p v-if="!sourceSearchPerformed" class="muted">Run a search to find matching code lines.</p>
+            <p v-else-if="!sourceSearchResults.length" class="muted">No matches found.</p>
+
+            <table v-else class="source-search-table">
+              <thead>
+                <tr>
+                  <th>Object</th>
+                  <th>Type</th>
+                  <th>Line</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="match in sourceSearchResults"
+                  :key="`${match.schema}:${match.objectType}:${match.objectName}:${match.line}:${match.text}`"
+                >
+                  <td>
+                    <button class="source-result-link" @click="openSourceSearchResult(match)">
+                      {{ match.schema }}.{{ match.objectName }}
+                    </button>
+                  </td>
+                  <td>{{ match.objectType }}</td>
+                  <td class="results-cell-number">{{ match.line }}</td>
+                  <td class="source-search-line">{{ match.text }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
       </section>
+
+      <div
+        class="panel-resizer horizontal"
+        role="separator"
+        aria-orientation="horizontal"
+        title="Resize worksheet and results"
+        @pointerdown="beginResultsResize"
+      ></div>
 
       <section class="results-pane">
         <div class="results-header">
@@ -905,9 +1455,10 @@ body {
 }
 
 .desktop-shell {
+  --splitter-size: 6px;
   height: 100%;
   display: grid;
-  grid-template-columns: 330px 1fr;
+  grid-template-columns: var(--sidebar-width, 330px) var(--splitter-size) minmax(0, 1fr);
   background: var(--bg-shell);
   overflow: hidden;
 }
@@ -1163,10 +1714,40 @@ button:focus-visible {
 
 .workspace {
   display: grid;
-  grid-template-rows: var(--pane-header-height) 1fr 42%;
+  grid-template-rows: var(--pane-header-height) minmax(180px, 1fr) var(--splitter-size) var(--results-height, 42%);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.panel-resizer {
+  background: var(--bg-surface-muted);
+  position: relative;
+  z-index: 2;
+  touch-action: none;
+}
+
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transition: background-color 0.12s ease;
+}
+
+.panel-resizer:hover::after {
+  background: rgba(79, 111, 150, 0.2);
+}
+
+.panel-resizer.vertical {
+  cursor: col-resize;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.panel-resizer.horizontal {
+  cursor: row-resize;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .workspace-toolbar {
@@ -1230,6 +1811,12 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 12rem;
+}
+
+.sheet-tab-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .sheet-tab.active,
@@ -1309,6 +1896,70 @@ button:focus-visible {
   background: #ffffff;
 }
 
+.source-search-pane {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.source-search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface-muted);
+}
+
+.source-search-input {
+  width: min(34rem, 100%);
+}
+
+.source-search-content {
+  overflow: auto;
+  min-height: 0;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.source-search-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.source-search-table th,
+.source-search-table td {
+  border: 1px solid var(--border);
+  text-align: left;
+  padding: 0.32rem 0.44rem;
+}
+
+.source-search-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface-muted);
+  z-index: 1;
+}
+
+.source-result-link {
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.source-result-link:hover {
+  color: #2b4a6f;
+}
+
+.source-search-line {
+  white-space: pre;
+}
+
 .results-pane {
   display: grid;
   grid-template-rows: 34px 1fr;
@@ -1383,9 +2034,9 @@ button:focus-visible {
 
 .ddl-pane {
   display: grid;
-  grid-template-rows: auto 1fr;
-  gap: 0.4rem;
+  grid-template-rows: auto auto 1fr;
   min-height: 0;
+  overflow: hidden;
 }
 
 .ddl-header {
@@ -1393,6 +2044,51 @@ button:focus-visible {
   justify-content: space-between;
   align-items: center;
   gap: 0.6rem;
+  padding: 0.55rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface-muted);
+}
+
+.object-detail-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface-muted);
+}
+
+.object-detail-tab {
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  padding: 0.42rem 0.68rem;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.object-detail-tab:hover {
+  background: var(--bg-hover);
+}
+
+.object-detail-tab.active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.object-detail-grid-pane {
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.55rem;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 0.45rem;
+}
+
+.object-detail-grid-wrap {
+  min-height: 0;
+  overflow: auto;
 }
 
 .muted {
@@ -1403,7 +2099,7 @@ button:focus-visible {
 @media (max-width: 980px) {
   .desktop-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: 42% 58%;
+    grid-template-rows: 42% var(--splitter-size) 58%;
   }
 
   .explorer-sidebar {
@@ -1411,8 +2107,16 @@ button:focus-visible {
     border-bottom: 1px solid var(--border-strong);
   }
 
+  .panel-resizer.vertical {
+    cursor: row-resize;
+    border-left: 0;
+    border-right: 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
   .workspace {
-    grid-template-rows: var(--pane-header-height) 1fr 44%;
+    grid-template-rows: var(--pane-header-height) minmax(150px, 1fr) var(--splitter-size) var(--results-height, 44%);
   }
 
   .field-grid {

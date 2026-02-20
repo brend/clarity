@@ -10,10 +10,14 @@ const props = withDefaults(
     modelValue: string;
     placeholder?: string;
     readOnly?: boolean;
+    targetLine?: number | null;
+    focusToken?: number;
   }>(),
   {
     placeholder: "",
     readOnly: false,
+    targetLine: null,
+    focusToken: 0,
   },
 );
 
@@ -80,6 +84,23 @@ function updateCompartment(compartment: Compartment, extension: Extension): void
   });
 }
 
+function revealLine(lineNumber: number): void {
+  if (!editorView || !Number.isFinite(lineNumber)) {
+    return;
+  }
+
+  const maxLine = editorView.state.doc.lines;
+  const normalized = Math.max(1, Math.min(maxLine, Math.trunc(lineNumber)));
+  const line = editorView.state.doc.line(normalized);
+
+  editorView.dispatch({
+    selection: { anchor: line.from },
+    effects: EditorView.scrollIntoView(line.from, { y: "center" }),
+    scrollIntoView: true,
+  });
+  editorView.focus();
+}
+
 onMounted(() => {
   if (!hostEl.value) {
     return;
@@ -105,6 +126,10 @@ onMounted(() => {
     }),
     parent: hostEl.value,
   });
+
+  if (props.targetLine !== null && props.targetLine !== undefined) {
+    revealLine(props.targetLine);
+  }
 });
 
 watch(
@@ -140,6 +165,17 @@ watch(
   () => props.placeholder,
   (placeholderValue) => {
     updateCompartment(placeholderCompartment, buildPlaceholderExtension(placeholderValue));
+  },
+);
+
+watch(
+  () => `${props.focusToken}:${props.targetLine ?? ""}`,
+  () => {
+    if (props.targetLine === null || props.targetLine === undefined) {
+      return;
+    }
+
+    revealLine(props.targetLine);
   },
 );
 

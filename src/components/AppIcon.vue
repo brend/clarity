@@ -8,7 +8,8 @@ type IconName =
   | "play"
   | "save"
   | "plus"
-  | "close";
+  | "close"
+  | "search";
 
 withDefaults(
   defineProps<{
@@ -75,5 +76,10 @@ withDefaults(
     <path v-else-if="name === 'plus'" d="M12 5v14M5 12h14" />
 
     <path v-else-if="name === 'close'" d="M6 6l12 12M18 6l-12 12" />
+
+    <g v-else-if="name === 'search'">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m16 16 4 4" />
+    </g>
   </svg>
 </template>

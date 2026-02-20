@@ -38,6 +38,14 @@ struct OracleQueryRequest {
     sql: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleSourceSearchRequest {
+    session_id: u64,
+    search_term: String,
+    limit: Option<u32>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OracleObjectRef {
@@ -129,6 +137,16 @@ struct OracleQueryResult {
     rows: Vec<Vec<String>>,
     rows_affected: Option<u64>,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleSourceSearchResult {
+    schema: String,
+    object_type: String,
+    object_name: String,
+    line: u32,
+    text: String,
 }
 
 struct AppState {
@@ -247,6 +265,22 @@ fn db_run_query(
         .ok_or_else(|| "Session not found".to_string())?;
 
     ProviderRegistry::run_query(session, &request)
+}
+
+#[tauri::command]
+fn db_search_source_code(
+    request: OracleSourceSearchRequest,
+    state: tauri::State<AppState>,
+) -> Result<Vec<OracleSourceSearchResult>, String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    ProviderRegistry::search_source_code(session, &request)
 }
 
 #[tauri::command]
@@ -489,6 +523,7 @@ pub fn run() {
             db_disconnect,
             db_list_objects,
             db_run_query,
+            db_search_source_code,
             db_get_object_ddl,
             db_update_object_ddl,
             db_list_connection_profiles,
