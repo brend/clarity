@@ -14,6 +14,7 @@ import type {
 
 const queryText = defineModel<string>("queryText", { required: true });
 const ddlText = defineModel<string>("ddlText", { required: true });
+const queryRowLimit = defineModel<number>("queryRowLimit", { required: true });
 const sourceSearchText = defineModel<string>("sourceSearchText", { required: true });
 
 const props = defineProps<{
@@ -100,6 +101,10 @@ const props = defineProps<{
         </button>
       </div>
       <div class="sheet-tab-fill"></div>
+      <label class="query-limit-control" title="Maximum rows returned for worksheet queries">
+        Rows
+        <input v-model.number="queryRowLimit" type="number" min="1" max="10000" step="1" />
+      </label>
       <button
         class="btn primary"
         :disabled="!props.isConnected || !props.activeQueryTab || props.busy.runningQuery"
@@ -439,6 +444,21 @@ button:focus-visible {
 
 .sheet-tab-fill {
   flex: 1;
+}
+
+.query-limit-control {
+  margin-left: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.query-limit-control input {
+  width: 5.25rem;
+  padding: 0.28rem 0.38rem;
+  font-size: 0.74rem;
 }
 
 .sheet-tab-icon {

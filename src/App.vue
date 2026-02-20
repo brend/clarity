@@ -41,6 +41,7 @@ const {
   activeObjectDetailLoading,
   activeQueryText,
   activeDdlText,
+  queryRowLimit,
   sourceSearchText,
   sourceSearchResults,
   sourceSearchPerformed,
@@ -117,6 +118,7 @@ onMounted(() => {
       <WorkspaceSheet
         v-model:query-text="activeQueryText"
         v-model:ddl-text="activeDdlText"
+        v-model:query-row-limit="queryRowLimit"
         v-model:source-search-text="sourceSearchText"
         :status-message="statusMessage"
         :query-tabs="queryTabs"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref, watch } from "vue";
 import AppIcon from "./AppIcon.vue";
 import type {
   BusyState,
@@ -34,6 +35,26 @@ const props = defineProps<{
   onToggleObjectType: (objectType: string) => void;
   onOpenObjectFromExplorer: (object: OracleObjectEntry) => void;
 }>();
+
+const connectionPanelCollapsed = ref(props.isConnected);
+
+watch(
+  () => props.isConnected,
+  (isConnected, wasConnected) => {
+    if (isConnected && !wasConnected) {
+      connectionPanelCollapsed.value = true;
+      return;
+    }
+
+    if (!isConnected && wasConnected) {
+      connectionPanelCollapsed.value = false;
+    }
+  },
+);
+
+function toggleConnectionPanel(): void {
+  connectionPanelCollapsed.value = !connectionPanelCollapsed.value;
+}
 </script>
 
 <template>
@@ -41,105 +62,125 @@ const props = defineProps<{
     <header class="sidebar-header">Object Explorer</header>
 
     <section class="connect-box">
-      <div class="connect-title">Database Connection</div>
-      <div class="profile-controls">
-        <label>
-          Profiles
-          <select v-model="selectedProfileId" @change="props.onSyncSelectedProfileUi">
-            <option value="">(Select profile)</option>
-            <option v-for="profile in props.connectionProfiles" :key="profile.id" :value="profile.id">
-              {{ profile.name }}
-            </option>
-          </select>
-        </label>
-        <div class="profile-actions">
-          <button
-            class="btn"
-            :disabled="!props.selectedProfile || props.busy.loadingProfileSecret || props.busy.loadingProfiles"
-            @click="props.onApplySelectedProfile"
-          >
-            {{ props.busy.loadingProfileSecret ? "Loading..." : "Load Profile" }}
-          </button>
-          <button
-            class="btn"
-            :disabled="!props.selectedProfile || props.busy.deletingProfile"
-            @click="props.onDeleteSelectedProfile"
-          >
-            {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
-          </button>
-        </div>
-        <label>
-          Profile Name
-          <input v-model.trim="profileName" placeholder="Local Oracle Dev" />
-        </label>
-        <label class="profile-password-toggle">
-          <input v-model="saveProfilePassword" type="checkbox" />
-          Save password in OS keychain
-        </label>
-        <button class="btn" :disabled="props.busy.savingProfile" @click="props.onSaveConnectionProfile">
-          {{ props.busy.savingProfile ? "Saving..." : "Save Profile" }}
-        </button>
-      </div>
-
-      <div class="field-grid">
-        <label>
-          Provider
-          <select v-model="props.connection.provider">
-            <option value="oracle">Oracle</option>
-            <option value="postgres" disabled>PostgreSQL (Soon)</option>
-            <option value="mysql" disabled>MySQL (Soon)</option>
-            <option value="sqlite" disabled>SQLite (Soon)</option>
-          </select>
-        </label>
-
-        <label>
-          Host
-          <input v-model.trim="props.connection.host" placeholder="db.example.com" />
-        </label>
-
-        <label>
-          Port
-          <input v-model.number="props.connection.port" type="number" min="1" max="65535" />
-        </label>
-
-        <label>
-          Service
-          <input v-model.trim="props.connection.serviceName" placeholder="XEPDB1" />
-        </label>
-
-        <label>
-          Username
-          <input v-model.trim="props.connection.username" placeholder="hr" />
-        </label>
-
-        <label>
-          Schema
-          <input v-model.trim="props.connection.schema" placeholder="HR" />
-        </label>
-
-        <label>
-          Password
-          <input v-model="props.connection.password" type="password" placeholder="********" />
-        </label>
-      </div>
-
-      <div class="connect-actions">
-        <button class="btn primary" :disabled="props.busy.connecting || props.isConnected" @click="props.onConnect">
-          <AppIcon name="plug" class="btn-icon" aria-hidden="true" />
-          {{ props.busy.connecting ? "Connecting..." : "Connect" }}
-        </button>
-        <button class="btn" :disabled="!props.isConnected" @click="props.onDisconnect">
-          <AppIcon name="plug-off" class="btn-icon" aria-hidden="true" />
-          Disconnect
-        </button>
-        <button class="btn" :disabled="!props.isConnected || props.busy.loadingObjects" @click="props.onRefreshObjects">
-          <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
-          {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
+      <div class="connect-heading">
+        <div class="connect-title">Database Connection</div>
+        <button
+          class="btn connect-toggle"
+          type="button"
+          :title="connectionPanelCollapsed ? 'Show connection panel' : 'Hide connection panel'"
+          :aria-expanded="!connectionPanelCollapsed"
+          aria-controls="connection-panel-body"
+          @click="toggleConnectionPanel"
+        >
+          <AppIcon
+            name="chevron-right"
+            class="connect-toggle-icon"
+            :class="{ expanded: !connectionPanelCollapsed }"
+            aria-hidden="true"
+          />
         </button>
       </div>
 
       <div class="session-line">
         {{ props.session ? props.session.displayName : "No active connection" }}
+      </div>
+
+      <div v-show="!connectionPanelCollapsed" id="connection-panel-body" class="connect-body">
+        <div class="profile-controls">
+          <label>
+            Profiles
+            <select v-model="selectedProfileId" @change="props.onSyncSelectedProfileUi">
+              <option value="">(Select profile)</option>
+              <option v-for="profile in props.connectionProfiles" :key="profile.id" :value="profile.id">
+                {{ profile.name }}
+              </option>
+            </select>
+          </label>
+          <div class="profile-actions">
+            <button
+              class="btn"
+              :disabled="!props.selectedProfile || props.busy.loadingProfileSecret || props.busy.loadingProfiles"
+              @click="props.onApplySelectedProfile"
+            >
+              {{ props.busy.loadingProfileSecret ? "Loading..." : "Load Profile" }}
+            </button>
+            <button
+              class="btn"
+              :disabled="!props.selectedProfile || props.busy.deletingProfile"
+              @click="props.onDeleteSelectedProfile"
+            >
+              {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
+            </button>
+          </div>
+          <label>
+            Profile Name
+            <input v-model.trim="profileName" placeholder="Local Oracle Dev" />
+          </label>
+          <label class="profile-password-toggle">
+            <input v-model="saveProfilePassword" type="checkbox" />
+            Save password in OS keychain
+          </label>
+          <button class="btn" :disabled="props.busy.savingProfile" @click="props.onSaveConnectionProfile">
+            {{ props.busy.savingProfile ? "Saving..." : "Save Profile" }}
+          </button>
+        </div>
+
+        <div class="field-grid">
+          <label>
+            Provider
+            <select v-model="props.connection.provider">
+              <option value="oracle">Oracle</option>
+              <option value="postgres" disabled>PostgreSQL (Soon)</option>
+              <option value="mysql" disabled>MySQL (Soon)</option>
+              <option value="sqlite" disabled>SQLite (Soon)</option>
+            </select>
+          </label>
+
+          <label>
+            Host
+            <input v-model.trim="props.connection.host" placeholder="db.example.com" />
+          </label>
+
+          <label>
+            Port
+            <input v-model.number="props.connection.port" type="number" min="1" max="65535" />
+          </label>
+
+          <label>
+            Service
+            <input v-model.trim="props.connection.serviceName" placeholder="XEPDB1" />
+          </label>
+
+          <label>
+            Username
+            <input v-model.trim="props.connection.username" placeholder="hr" />
+          </label>
+
+          <label>
+            Schema
+            <input v-model.trim="props.connection.schema" placeholder="HR" />
+          </label>
+
+          <label>
+            Password
+            <input v-model="props.connection.password" type="password" placeholder="********" />
+          </label>
+        </div>
+
+        <div class="connect-actions">
+          <button class="btn primary" :disabled="props.busy.connecting || props.isConnected" @click="props.onConnect">
+            <AppIcon name="plug" class="btn-icon" aria-hidden="true" />
+            {{ props.busy.connecting ? "Connecting..." : "Connect" }}
+          </button>
+          <button class="btn" :disabled="!props.isConnected" @click="props.onDisconnect">
+            <AppIcon name="plug-off" class="btn-icon" aria-hidden="true" />
+            Disconnect
+          </button>
+          <button class="btn" :disabled="!props.isConnected || props.busy.loadingObjects" @click="props.onRefreshObjects">
+            <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
+            {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
+          </button>
+        </div>
       </div>
     </section>
 
@@ -224,7 +265,35 @@ const props = defineProps<{
 .connect-title {
   font-size: 0.82rem;
   font-weight: 600;
-  margin-bottom: 0.5rem;
+}
+
+.connect-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.connect-toggle {
+  padding: 0.2rem;
+  min-width: 1.55rem;
+  min-height: 1.55rem;
+  justify-content: center;
+}
+
+.connect-toggle-icon {
+  width: 0.72rem;
+  height: 0.72rem;
+  color: var(--text-subtle);
+  transition: transform 0.12s ease;
+}
+
+.connect-toggle-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.connect-body {
+  margin-top: 0.45rem;
 }
 
 .profile-controls {
@@ -337,7 +406,7 @@ button:focus-visible {
 }
 
 .session-line {
-  margin-top: 0.4rem;
+  margin-top: 0.24rem;
   font-size: 0.72rem;
   color: var(--text-secondary);
   white-space: nowrap;

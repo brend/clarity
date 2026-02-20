@@ -8,7 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const MAX_EXPLORER_OBJECTS: u32 = 5000;
-const MAX_QUERY_ROWS: usize = 1000;
+const DEFAULT_QUERY_ROW_LIMIT: u32 = 1000;
+const MAX_QUERY_ROW_LIMIT: u32 = 10000;
 const DEFAULT_SOURCE_SEARCH_LIMIT: u32 = 200;
 const MAX_SOURCE_SEARCH_RESULTS: u32 = 1000;
 
@@ -219,7 +220,20 @@ pub(crate) fn run_query(
         .build()
         .map_err(map_oracle_error)?;
 
+    let is_write_statement = statement.is_dml() || statement.is_ddl() || statement.is_plsql();
+    let allow_destructive = request.allow_destructive.unwrap_or(false);
+    if is_write_statement && !allow_destructive {
+        return Err(
+            "Safety check blocked a write/DDL/PLSQL statement. Confirm execution and retry."
+                .to_string(),
+        );
+    }
+
     if statement.is_query() {
+        let row_limit = request
+            .row_limit
+            .unwrap_or(DEFAULT_QUERY_ROW_LIMIT)
+            .clamp(1, MAX_QUERY_ROW_LIMIT) as usize;
         let result_set = statement.query(&[]).map_err(map_oracle_error)?;
         let columns = result_set
             .column_info()
@@ -231,7 +245,7 @@ pub(crate) fn run_query(
         let mut truncated = false;
 
         for (index, row_result) in result_set.enumerate() {
-            if index >= MAX_QUERY_ROWS {
+            if index >= row_limit {
                 truncated = true;
                 break;
             }
@@ -247,7 +261,7 @@ pub(crate) fn run_query(
 
         let mut message = format!("Query executed. Returned {} row(s).", rows.len());
         if truncated {
-            message.push_str(&format!(" Results truncated at {} rows.", MAX_QUERY_ROWS));
+            message.push_str(&format!(" Results truncated at {} rows.", row_limit));
         }
 
         return Ok(OracleQueryResult {

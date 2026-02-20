@@ -36,6 +36,8 @@ struct SessionRequest {
 struct OracleQueryRequest {
     session_id: u64,
     sql: String,
+    row_limit: Option<u32>,
+    allow_destructive: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

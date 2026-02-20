@@ -18,6 +18,11 @@ const QUERY_TAB_PREFIX = "query:";
 const FIRST_QUERY_TAB_ID = `${QUERY_TAB_PREFIX}1`;
 const SEARCH_TAB_ID = "search:code";
 const OBJECT_DATA_PREVIEW_LIMIT = 500;
+const DEFAULT_QUERY_ROW_LIMIT = 1000;
+const MAX_QUERY_ROW_LIMIT = 10000;
+const SAFE_SQL_LEADING_KEYWORDS = new Set(["SELECT", "WITH", "EXPLAIN", "DESCRIBE", "DESC"]);
+const MUTATING_SQL_KEYWORD_PATTERN =
+  /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|RENAME|GRANT|REVOKE|COMMENT|BEGIN|DECLARE|CALL|EXECUTE)\b/g;
 
 function readDebugConnectionString(value: string | undefined, fallback: string): string {
   if (!import.meta.env.DEV) {
@@ -35,6 +40,23 @@ function readDebugConnectionPort(value: string | undefined, fallback: number): n
 
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : fallback;
+}
+
+function readDebugPositiveInteger(value: string | undefined, fallback: number): number {
+  if (!import.meta.env.DEV) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : fallback;
+}
+
+function clampQueryRowLimit(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_QUERY_ROW_LIMIT;
+  }
+
+  return Math.min(Math.max(Math.trunc(value), 1), MAX_QUERY_ROW_LIMIT);
 }
 
 function toErrorMessage(error: unknown): string {
@@ -57,6 +79,51 @@ function buildDefaultSchemaQuery(schema: string): string {
 function isLikelyNumeric(value: string): boolean {
   const normalized = value.trim().replace(/,/g, "");
   return /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized);
+}
+
+function extractMutatingSqlKeywords(sql: string): string[] {
+  const normalized = sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--.*$/gm, " ")
+    .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:\"\"|[^"])*"/g, '""')
+    .toUpperCase();
+
+  const matches = normalized.match(MUTATING_SQL_KEYWORD_PATTERN) ?? [];
+  return [...new Set(matches)];
+}
+
+function extractLeadingSqlKeyword(sql: string): string | null {
+  const normalized = sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--.*$/gm, " ")
+    .trimStart()
+    .toUpperCase();
+  const match = normalized.match(/^[A-Z]+/);
+  return match ? match[0] : null;
+}
+
+function shouldConfirmBeforeExecution(sql: string): { shouldConfirm: boolean; reasons: string[] } {
+  const reasons = extractMutatingSqlKeywords(sql);
+  if (reasons.length > 0) {
+    return { shouldConfirm: true, reasons };
+  }
+
+  const leadingKeyword = extractLeadingSqlKeyword(sql);
+  if (!leadingKeyword) {
+    return { shouldConfirm: false, reasons: [] };
+  }
+
+  if (!SAFE_SQL_LEADING_KEYWORDS.has(leadingKeyword)) {
+    return { shouldConfirm: true, reasons: [leadingKeyword] };
+  }
+
+  return { shouldConfirm: false, reasons: [] };
+}
+
+function buildMutatingQueryPrompt(reasons: string[]): string {
+  const reasonList = reasons.slice(0, 4).join(", ");
+  return `This statement appears to modify data/schema (${reasonList}). Continue execution?`;
 }
 
 export function useClarityWorkspace() {
@@ -88,6 +155,9 @@ export function useClarityWorkspace() {
   const queryTabNumber = ref(2);
   const queryResult = ref<OracleQueryResult | null>(null);
   const sourceSearchText = ref("");
+  const queryRowLimit = ref(
+    clampQueryRowLimit(readDebugPositiveInteger(import.meta.env.VITE_QUERY_ROW_LIMIT, DEFAULT_QUERY_ROW_LIMIT)),
+  );
   const sourceSearchResults = ref<OracleSourceSearchResult[]>([]);
   const sourceSearchPerformed = ref(false);
   const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
@@ -205,7 +275,7 @@ export function useClarityWorkspace() {
 
   function isObjectTypeExpanded(objectType: string): boolean {
     const expanded = expandedObjectTypes.value[objectType];
-    return expanded ?? true;
+    return expanded ?? false;
   }
 
   function toggleObjectType(objectType: string): void {
@@ -752,6 +822,23 @@ export function useClarityWorkspace() {
       return;
     }
 
+    const effectiveRowLimit = clampQueryRowLimit(queryRowLimit.value);
+    if (effectiveRowLimit !== queryRowLimit.value) {
+      queryRowLimit.value = effectiveRowLimit;
+    }
+
+    const preflight = shouldConfirmBeforeExecution(activeQueryTab.value.queryText);
+    let allowDestructive = false;
+    if (preflight.shouldConfirm) {
+      const shouldContinue = window.confirm(buildMutatingQueryPrompt(preflight.reasons));
+      if (!shouldContinue) {
+        statusMessage.value = "Execution cancelled.";
+        return;
+      }
+
+      allowDestructive = true;
+    }
+
     errorMessage.value = "";
     busy.runningQuery = true;
 
@@ -760,6 +847,8 @@ export function useClarityWorkspace() {
         request: {
           sessionId: session.value.sessionId,
           sql: activeQueryTab.value.queryText,
+          rowLimit: effectiveRowLimit,
+          allowDestructive,
         },
       });
 
@@ -841,6 +930,7 @@ export function useClarityWorkspace() {
     activeObjectDetailLoading,
     activeQueryText,
     activeDdlText,
+    queryRowLimit,
     sourceSearchText,
     sourceSearchResults,
     sourceSearchPerformed,

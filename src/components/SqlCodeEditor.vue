@@ -54,13 +54,16 @@ const editorTheme = EditorView.theme({
     color: "#7a8798",
   },
   ".cm-activeLine": {
-    backgroundColor: "#f8fafd",
+    backgroundColor: "rgba(248, 250, 253, 0.55)",
   },
   ".cm-activeLineGutter": {
     backgroundColor: "#eff3f8",
   },
   ".cm-selectionBackground": {
-    backgroundColor: "#dbe7f5 !important",
+    backgroundColor: "#dbe7f5",
+  },
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
+    backgroundColor: "#c7dbf2",
   },
   ".cm-cursor": {
     borderLeftColor: "#5f7fa7",
