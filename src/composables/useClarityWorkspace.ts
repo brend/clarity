@@ -18,6 +18,7 @@ const QUERY_TAB_PREFIX = "query:";
 const FIRST_QUERY_TAB_ID = `${QUERY_TAB_PREFIX}1`;
 const SEARCH_TAB_ID = "search:code";
 const OBJECT_DATA_PREVIEW_LIMIT = 500;
+const OBJECT_DATA_ROW_ID_COLUMN = "__CLARITY_ROWID__";
 const DEFAULT_QUERY_ROW_LIMIT = 1000;
 const MAX_QUERY_ROW_LIMIT = 10000;
 const SAFE_SQL_LEADING_KEYWORDS = new Set(["SELECT", "WITH", "EXPLAIN", "DESCRIBE", "DESC"]);
@@ -175,6 +176,7 @@ export function useClarityWorkspace() {
     loadingDdl: false,
     savingDdl: false,
     runningQuery: false,
+    updatingData: false,
     searchingSource: false,
   });
 
@@ -222,7 +224,7 @@ export function useClarityWorkspace() {
   const activeObjectDetailTabId = computed<ObjectDetailTabId | null>(
     () => activeDdlTab.value?.activeDetailTabId ?? null,
   );
-  const activeObjectDetailResult = computed<OracleQueryResult | null>(() => {
+  const activeObjectDetailRawResult = computed<OracleQueryResult | null>(() => {
     if (!activeDdlTab.value) {
       return null;
     }
@@ -236,6 +238,35 @@ export function useClarityWorkspace() {
     }
 
     return null;
+  });
+  const activeObjectDetailResult = computed<OracleQueryResult | null>(() => {
+    const result = activeObjectDetailRawResult.value;
+    if (
+      !activeDdlTab.value ||
+      activeDdlTab.value.activeDetailTabId !== "data" ||
+      !isTableObject(activeDdlTab.value.object.objectType) ||
+      !result ||
+      !hasObjectDataRowIdColumn(result)
+    ) {
+      return result;
+    }
+
+    return {
+      ...result,
+      columns: result.columns.slice(1),
+      rows: result.rows.map((row) => row.slice(1)),
+    };
+  });
+  const isActiveObjectDataEditable = computed<boolean>(() => {
+    if (!activeDdlTab.value || activeDdlTab.value.activeDetailTabId !== "data") {
+      return false;
+    }
+
+    if (!isTableObject(activeDdlTab.value.object.objectType) || !activeDdlTab.value.dataResult) {
+      return false;
+    }
+
+    return hasObjectDataRowIdColumn(activeDdlTab.value.dataResult);
   });
   const activeObjectDetailLoading = computed<boolean>(() => {
     if (!activeDdlTab.value) {
@@ -295,6 +326,10 @@ export function useClarityWorkspace() {
     return normalized === "TABLE" || normalized === "VIEW";
   }
 
+  function isTableObject(objectType: string): boolean {
+    return normalizeObjectType(objectType) === "TABLE";
+  }
+
   function getObjectDetailTabs(object: OracleObjectEntry): ObjectDetailTabDefinition[] {
     const tabs: ObjectDetailTabDefinition[] = [];
     if (canPreviewObjectData(object.objectType)) {
@@ -321,8 +356,27 @@ export function useClarityWorkspace() {
     return `'${value.replace(/'/g, "''")}'`;
   }
 
+  function toSqlDataLiteral(value: string): string {
+    if (value === "") {
+      return "NULL";
+    }
+
+    return toSqlStringLiteral(value);
+  }
+
+  function hasObjectDataRowIdColumn(result: OracleQueryResult): boolean {
+    const firstColumn = (result.columns[0] ?? "").replace(/"/g, "").trim().toUpperCase();
+    const expected = OBJECT_DATA_ROW_ID_COLUMN.toUpperCase();
+    return firstColumn === expected || firstColumn === "ROWID";
+  }
+
   function buildObjectDataPreviewSql(object: OracleObjectEntry): string {
-    return `select * from ${toQuotedIdentifier(object.schema)}.${toQuotedIdentifier(object.objectName)} fetch first ${OBJECT_DATA_PREVIEW_LIMIT} rows only`;
+    const owner = `${toQuotedIdentifier(object.schema)}.${toQuotedIdentifier(object.objectName)}`;
+    if (!isTableObject(object.objectType)) {
+      return `select * from ${owner} fetch first ${OBJECT_DATA_PREVIEW_LIMIT} rows only`;
+    }
+
+    return `select rowidtochar(t.rowid) as ${toQuotedIdentifier(OBJECT_DATA_ROW_ID_COLUMN)}, t.* from ${owner} t fetch first ${OBJECT_DATA_PREVIEW_LIMIT} rows only`;
   }
 
   function buildObjectMetadataSql(object: OracleObjectEntry): string {
@@ -471,7 +525,9 @@ export function useClarityWorkspace() {
       return;
     }
 
-    if (!forceReload && tab.dataResult) {
+    const cachedDataNeedsRowIdUpgrade =
+      isTableObject(tab.object.objectType) && !!tab.dataResult && !hasObjectDataRowIdColumn(tab.dataResult);
+    if (!forceReload && tab.dataResult && !cachedDataNeedsRowIdUpgrade) {
       return;
     }
 
@@ -517,6 +573,82 @@ export function useClarityWorkspace() {
       errorMessage.value = toErrorMessage(error);
     } finally {
       tab.loadingMetadata = false;
+    }
+  }
+
+  async function updateActiveObjectDataRow(rowIndex: number, values: string[]): Promise<boolean> {
+    const tab = activeDdlTab.value;
+    if (!session.value || !tab || tab.activeDetailTabId !== "data" || !isTableObject(tab.object.objectType)) {
+      return false;
+    }
+
+    if (busy.updatingData) {
+      return false;
+    }
+
+    if (!tab.dataResult) {
+      errorMessage.value = "No table data is loaded. Refresh the Data tab and try again.";
+      return false;
+    }
+
+    if (!hasObjectDataRowIdColumn(tab.dataResult)) {
+      errorMessage.value = "Row editing is not ready yet. Refresh the Data tab and try again.";
+      return false;
+    }
+
+    const row = tab.dataResult.rows[rowIndex];
+    if (!row) {
+      errorMessage.value = "Unable to save row: row no longer exists in the current result set.";
+      return false;
+    }
+
+    const rowId = row[0];
+    const editableColumns = tab.dataResult.columns.slice(1);
+    if (!rowId || editableColumns.length !== values.length) {
+      errorMessage.value = "Unable to save row: data preview shape changed. Refresh and try again.";
+      return false;
+    }
+
+    const changedIndexes = values.reduce<number[]>((acc, value, index) => {
+      if (row[index + 1] !== value) {
+        acc.push(index);
+      }
+      return acc;
+    }, []);
+
+    if (!changedIndexes.length) {
+      statusMessage.value = "No data changes to save.";
+      return true;
+    }
+
+    const setClauses = changedIndexes
+      .map((index) => `${toQuotedIdentifier(editableColumns[index])} = ${toSqlDataLiteral(values[index])}`)
+      .join(", ");
+    const sql = `update ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} set ${setClauses} where rowid = chartorowid(${toSqlStringLiteral(rowId)})`;
+
+    errorMessage.value = "";
+    busy.updatingData = true;
+
+    try {
+      const result = await invoke<OracleQueryResult>("db_run_query", {
+        request: {
+          sessionId: session.value.sessionId,
+          sql,
+          allowDestructive: true,
+        },
+      });
+
+      for (const index of changedIndexes) {
+        row[index + 1] = values[index];
+      }
+
+      statusMessage.value = `${tab.object.schema}.${tab.object.objectName}: ${result.message}`;
+      return true;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+      return false;
+    } finally {
+      busy.updatingData = false;
     }
   }
 
@@ -927,6 +1059,7 @@ export function useClarityWorkspace() {
     activeObjectDetailTabs,
     activeObjectDetailTabId,
     activeObjectDetailResult,
+    isActiveObjectDataEditable,
     activeObjectDetailLoading,
     activeQueryText,
     activeDdlText,
@@ -948,6 +1081,7 @@ export function useClarityWorkspace() {
     openObjectFromExplorer,
     activateObjectDetailTab,
     refreshActiveObjectDetail,
+    updateActiveObjectDataRow,
     loadConnectionProfiles,
     syncSelectedProfileUi,
     applySelectedProfile,

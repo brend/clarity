@@ -38,6 +38,7 @@ const {
   activeObjectDetailTabs,
   activeObjectDetailTabId,
   activeObjectDetailResult,
+  isActiveObjectDataEditable,
   activeObjectDetailLoading,
   activeQueryText,
   activeDdlText,
@@ -59,6 +60,7 @@ const {
   openObjectFromExplorer,
   activateObjectDetailTab,
   refreshActiveObjectDetail,
+  updateActiveObjectDataRow,
   loadConnectionProfiles,
   syncSelectedProfileUi,
   applySelectedProfile,
@@ -134,6 +136,7 @@ onMounted(() => {
         :active-object-detail-tab-id="activeObjectDetailTabId"
         :active-object-detail-loading="activeObjectDetailLoading"
         :active-object-detail-result="activeObjectDetailResult"
+        :is-active-object-data-editable="isActiveObjectDataEditable"
         :selected-provider-label="selectedProviderLabel"
         :connected-schema="connectedSchema"
         :is-query-tab-active="isQueryTabActive"
@@ -147,6 +150,7 @@ onMounted(() => {
         :on-run-query="runQuery"
         :on-save-ddl="saveDdl"
         :on-refresh-active-object-detail="refreshActiveObjectDetail"
+        :on-update-active-object-data-row="updateActiveObjectDataRow"
         :on-activate-object-detail-tab="activateObjectDetailTab"
         :on-run-source-search="runSourceSearch"
         :on-open-source-search-result="openSourceSearchResult"

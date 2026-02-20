@@ -86,6 +86,7 @@ export interface BusyState {
   loadingDdl: boolean;
   savingDdl: boolean;
   runningQuery: boolean;
+  updatingData: boolean;
   searchingSource: boolean;
 }
 

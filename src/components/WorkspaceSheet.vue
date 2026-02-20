@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref, watch } from "vue";
 import AppIcon from "./AppIcon.vue";
 import SqlCodeEditor from "./SqlCodeEditor.vue";
 import type {
@@ -32,6 +33,7 @@ const props = defineProps<{
   activeObjectDetailTabId: ObjectDetailTabId | null;
   activeObjectDetailLoading: boolean;
   activeObjectDetailResult: OracleQueryResult | null;
+  isActiveObjectDataEditable: boolean;
   selectedProviderLabel: string;
   connectedSchema: string;
   isQueryTabActive: boolean;
@@ -45,11 +47,65 @@ const props = defineProps<{
   onRunQuery: () => void;
   onSaveDdl: () => void;
   onRefreshActiveObjectDetail: () => void;
+  onUpdateActiveObjectDataRow: (rowIndex: number, values: string[]) => Promise<boolean>;
   onActivateObjectDetailTab: (tabId: ObjectDetailTabId) => void;
   onRunSourceSearch: () => void;
   onOpenSourceSearchResult: (result: OracleSourceSearchResult) => void;
   isLikelyNumeric: (value: string) => boolean;
 }>();
+
+const editingRowIndex = ref<number | null>(null);
+const editingRowValues = ref<string[]>([]);
+
+const isDataDetailTab = computed<boolean>(() => props.activeObjectDetailTabId === "data");
+const showEditableRowActions = computed<boolean>(() => {
+  if (!isDataDetailTab.value || !props.isActiveObjectDataEditable || !props.activeObjectDetailResult) {
+    return false;
+  }
+
+  return props.activeObjectDetailResult.columns.length > 0;
+});
+
+function isEditingRow(rowIndex: number): boolean {
+  return editingRowIndex.value === rowIndex;
+}
+
+function beginRowEdit(rowIndex: number, row: string[]): void {
+  editingRowIndex.value = rowIndex;
+  editingRowValues.value = [...row];
+}
+
+function cancelRowEdit(): void {
+  editingRowIndex.value = null;
+  editingRowValues.value = [];
+}
+
+function onRowValueInput(colIndex: number, event: Event): void {
+  const target = event.target as HTMLInputElement | null;
+  if (!target) {
+    return;
+  }
+
+  editingRowValues.value[colIndex] = target.value;
+}
+
+async function saveRowEdit(): Promise<void> {
+  if (editingRowIndex.value === null) {
+    return;
+  }
+
+  const didSave = await props.onUpdateActiveObjectDataRow(editingRowIndex.value, [...editingRowValues.value]);
+  if (didSave) {
+    cancelRowEdit();
+  }
+}
+
+watch(
+  () => [props.activeWorkspaceTabId, props.activeObjectDetailTabId, props.activeObjectDetailResult],
+  () => {
+    cancelRowEdit();
+  },
+);
 </script>
 
 <template>
@@ -187,26 +243,64 @@ const props = defineProps<{
             Rows affected: {{ props.activeObjectDetailResult.rowsAffected }}
           </p>
           <p v-else-if="!props.activeObjectDetailResult.columns.length" class="muted">No rows returned.</p>
-          <div v-else class="object-detail-grid-wrap">
-            <table class="results-table">
-              <thead>
-                <tr>
-                  <th v-for="column in props.activeObjectDetailResult.columns" :key="column">{{ column }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, rowIndex) in props.activeObjectDetailResult.rows" :key="`obj-row-${rowIndex}`">
-                  <td
-                    v-for="(value, colIndex) in row"
-                    :key="`obj-col-${rowIndex}-${colIndex}`"
-                    :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
-                  >
-                    {{ value }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <template v-else>
+            <p v-if="showEditableRowActions" class="muted object-detail-hint">
+              Edit a row and use Save Row to commit.
+            </p>
+            <p v-else-if="isDataDetailTab" class="muted object-detail-hint">
+              Data preview is read-only for this object type.
+            </p>
+            <div class="object-detail-grid-wrap">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th v-if="showEditableRowActions">Actions</th>
+                    <th v-for="column in props.activeObjectDetailResult.columns" :key="column">{{ column }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, rowIndex) in props.activeObjectDetailResult.rows" :key="`obj-row-${rowIndex}`">
+                    <td v-if="showEditableRowActions" class="row-actions-cell">
+                      <template v-if="isEditingRow(rowIndex)">
+                        <button class="btn row-action-btn primary" :disabled="props.busy.updatingData" @click="saveRowEdit">
+                          {{ props.busy.updatingData ? "Saving..." : "Save Row" }}
+                        </button>
+                        <button class="btn row-action-btn" :disabled="props.busy.updatingData" @click="cancelRowEdit">
+                          Cancel
+                        </button>
+                      </template>
+                      <button
+                        v-else
+                        class="btn row-action-btn"
+                        :disabled="
+                          props.busy.updatingData || (editingRowIndex !== null && !isEditingRow(rowIndex))
+                        "
+                        @click="beginRowEdit(rowIndex, row)"
+                      >
+                        Edit
+                      </button>
+                    </td>
+                    <td
+                      v-for="(value, colIndex) in row"
+                      :key="`obj-col-${rowIndex}-${colIndex}`"
+                      :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
+                      @dblclick="showEditableRowActions && beginRowEdit(rowIndex, row)"
+                    >
+                      <input
+                        v-if="showEditableRowActions && isEditingRow(rowIndex)"
+                        class="cell-editor"
+                        :value="editingRowValues[colIndex] ?? ''"
+                        @input="onRowValueInput(colIndex, $event)"
+                        @keydown.enter.prevent="saveRowEdit"
+                        @keydown.esc.prevent="cancelRowEdit"
+                      />
+                      <template v-else>{{ value }}</template>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </template>
       </section>
     </section>
@@ -584,6 +678,32 @@ button:focus-visible {
 .results-cell-number {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.object-detail-hint {
+  margin-top: -0.18rem;
+}
+
+.cell-editor {
+  width: 100%;
+  min-width: 8rem;
+  padding: 0.24rem 0.34rem;
+  font-size: 0.75rem;
+  font-family: inherit;
+}
+
+.row-actions-cell {
+  white-space: nowrap;
+}
+
+.row-action-btn {
+  margin-right: 0.28rem;
+  padding: 0.22rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.row-action-btn:last-child {
+  margin-right: 0;
 }
 
 .ddl-pane {
