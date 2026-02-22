@@ -54,8 +54,9 @@ const props = defineProps<{
   isLikelyNumeric: (value: string) => boolean;
 }>();
 
-const editingRowIndex = ref<number | null>(null);
-const editingRowValues = ref<string[]>([]);
+const dataDraftRows = ref<string[][]>([]);
+const committingDataChanges = ref(false);
+const suppressDraftSync = ref(false);
 
 const isDataDetailTab = computed<boolean>(() => props.activeObjectDetailTabId === "data");
 const showEditableRowActions = computed<boolean>(() => {
@@ -66,45 +67,120 @@ const showEditableRowActions = computed<boolean>(() => {
   return props.activeObjectDetailResult.columns.length > 0;
 });
 
-function isEditingRow(rowIndex: number): boolean {
-  return editingRowIndex.value === rowIndex;
+function cloneRows(rows: string[][]): string[][] {
+  return rows.map((row) => [...row]);
 }
 
-function beginRowEdit(rowIndex: number, row: string[]): void {
-  editingRowIndex.value = rowIndex;
-  editingRowValues.value = [...row];
+function syncDraftRowsFromResult(): void {
+  if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
+    dataDraftRows.value = [];
+    return;
+  }
+
+  dataDraftRows.value = cloneRows(props.activeObjectDetailResult.rows);
 }
 
-function cancelRowEdit(): void {
-  editingRowIndex.value = null;
-  editingRowValues.value = [];
-}
-
-function onRowValueInput(colIndex: number, event: Event): void {
+function onCellDraftInput(rowIndex: number, colIndex: number, event: Event): void {
   const target = event.target as HTMLInputElement | null;
   if (!target) {
     return;
   }
 
-  editingRowValues.value[colIndex] = target.value;
+  if (!dataDraftRows.value[rowIndex]) {
+    dataDraftRows.value[rowIndex] = [];
+  }
+
+  dataDraftRows.value[rowIndex][colIndex] = target.value;
 }
 
-async function saveRowEdit(): Promise<void> {
-  if (editingRowIndex.value === null) {
+function isRowDirty(rowIndex: number): boolean {
+  if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
+    return false;
+  }
+
+  const sourceRow = props.activeObjectDetailResult.rows[rowIndex];
+  const draftRow = dataDraftRows.value[rowIndex];
+  if (!sourceRow || !draftRow || sourceRow.length !== draftRow.length) {
+    return false;
+  }
+
+  return sourceRow.some((value, colIndex) => value !== draftRow[colIndex]);
+}
+
+const dirtyRowIndexes = computed<number[]>(() => {
+  if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
+    return [];
+  }
+
+  const rows = props.activeObjectDetailResult.rows;
+  const dirtyIndexes: number[] = [];
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    if (isRowDirty(rowIndex)) {
+      dirtyIndexes.push(rowIndex);
+    }
+  }
+
+  return dirtyIndexes;
+});
+
+const hasPendingDataChanges = computed<boolean>(() => dirtyRowIndexes.value.length > 0);
+
+function revertDataChanges(): void {
+  if (!hasPendingDataChanges.value || committingDataChanges.value) {
     return;
   }
 
-  const didSave = await props.onUpdateActiveObjectDataRow(editingRowIndex.value, [...editingRowValues.value]);
-  if (didSave) {
-    cancelRowEdit();
+  syncDraftRowsFromResult();
+}
+
+async function commitDataChanges(): Promise<void> {
+  if (!hasPendingDataChanges.value || committingDataChanges.value) {
+    return;
+  }
+
+  const dirtyIndexes = [...dirtyRowIndexes.value];
+  let completedAllUpdates = true;
+
+  committingDataChanges.value = true;
+  suppressDraftSync.value = true;
+  try {
+    for (const rowIndex of dirtyIndexes) {
+      const rowValues = dataDraftRows.value[rowIndex];
+      if (!rowValues) {
+        continue;
+      }
+
+      const didSave = await props.onUpdateActiveObjectDataRow(rowIndex, [...rowValues]);
+      if (!didSave) {
+        completedAllUpdates = false;
+        break;
+      }
+    }
+  } finally {
+    suppressDraftSync.value = false;
+    committingDataChanges.value = false;
+  }
+
+  if (completedAllUpdates) {
+    syncDraftRowsFromResult();
   }
 }
 
 watch(
-  () => [props.activeWorkspaceTabId, props.activeObjectDetailTabId, props.activeObjectDetailResult],
+  () => [
+    props.activeWorkspaceTabId,
+    props.activeObjectDetailTabId,
+    props.activeObjectDetailResult,
+    props.isActiveObjectDataEditable,
+  ],
   () => {
-    cancelRowEdit();
+    if (suppressDraftSync.value) {
+      return;
+    }
+
+    syncDraftRowsFromResult();
   },
+  { immediate: true },
 );
 </script>
 
@@ -245,7 +321,7 @@ watch(
           <p v-else-if="!props.activeObjectDetailResult.columns.length" class="muted">No rows returned.</p>
           <template v-else>
             <p v-if="showEditableRowActions" class="muted object-detail-hint">
-              Edit a row and use Save Row to commit.
+              Cells are editable. Use Revert or Commit below.
             </p>
             <p v-else-if="isDataDetailTab" class="muted object-detail-hint">
               Data preview is read-only for this object type.
@@ -254,51 +330,54 @@ watch(
               <table class="results-table">
                 <thead>
                   <tr>
-                    <th v-if="showEditableRowActions">Actions</th>
                     <th v-for="column in props.activeObjectDetailResult.columns" :key="column">{{ column }}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, rowIndex) in props.activeObjectDetailResult.rows" :key="`obj-row-${rowIndex}`">
-                    <td v-if="showEditableRowActions" class="row-actions-cell">
-                      <template v-if="isEditingRow(rowIndex)">
-                        <button class="btn row-action-btn primary" :disabled="props.busy.updatingData" @click="saveRowEdit">
-                          {{ props.busy.updatingData ? "Saving..." : "Save Row" }}
-                        </button>
-                        <button class="btn row-action-btn" :disabled="props.busy.updatingData" @click="cancelRowEdit">
-                          Cancel
-                        </button>
-                      </template>
-                      <button
-                        v-else
-                        class="btn row-action-btn"
-                        :disabled="
-                          props.busy.updatingData || (editingRowIndex !== null && !isEditingRow(rowIndex))
-                        "
-                        @click="beginRowEdit(rowIndex, row)"
-                      >
-                        Edit
-                      </button>
-                    </td>
+                  <tr
+                    v-for="(row, rowIndex) in props.activeObjectDetailResult.rows"
+                    :key="`obj-row-${rowIndex}`"
+                    :class="{ 'results-row-dirty': showEditableRowActions && isRowDirty(rowIndex) }"
+                  >
                     <td
                       v-for="(value, colIndex) in row"
                       :key="`obj-col-${rowIndex}-${colIndex}`"
-                      :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
-                      @dblclick="showEditableRowActions && beginRowEdit(rowIndex, row)"
+                      :class="{
+                        'results-cell-number': props.isLikelyNumeric(
+                          showEditableRowActions ? dataDraftRows[rowIndex]?.[colIndex] ?? value : value,
+                        ),
+                      }"
                     >
                       <input
-                        v-if="showEditableRowActions && isEditingRow(rowIndex)"
+                        v-if="showEditableRowActions"
                         class="cell-editor"
-                        :value="editingRowValues[colIndex] ?? ''"
-                        @input="onRowValueInput(colIndex, $event)"
-                        @keydown.enter.prevent="saveRowEdit"
-                        @keydown.esc.prevent="cancelRowEdit"
+                        :value="dataDraftRows[rowIndex]?.[colIndex] ?? value"
+                        :disabled="committingDataChanges"
+                        @input="onCellDraftInput(rowIndex, colIndex, $event)"
+                        @keydown.meta.enter.prevent="commitDataChanges"
+                        @keydown.ctrl.enter.prevent="commitDataChanges"
+                        @keydown.esc.prevent="revertDataChanges"
                       />
                       <template v-else>{{ value }}</template>
                     </td>
                   </tr>
                 </tbody>
               </table>
+              <div v-if="showEditableRowActions" class="object-detail-edit-toolbar">
+                <div class="muted">Pending row changes: {{ dirtyRowIndexes.length }}</div>
+                <div class="object-detail-edit-actions">
+                  <button class="btn row-action-btn" :disabled="!hasPendingDataChanges || committingDataChanges" @click="revertDataChanges">
+                    Revert
+                  </button>
+                  <button
+                    class="btn row-action-btn primary"
+                    :disabled="!hasPendingDataChanges || committingDataChanges"
+                    @click="commitDataChanges"
+                  >
+                    {{ committingDataChanges ? "Committing..." : "Commit" }}
+                  </button>
+                </div>
+              </div>
             </div>
           </template>
         </template>
@@ -675,6 +754,10 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
+.results-row-dirty {
+  background: #fef7eb !important;
+}
+
 .results-cell-number {
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -690,10 +773,8 @@ button:focus-visible {
   padding: 0.24rem 0.34rem;
   font-size: 0.75rem;
   font-family: inherit;
-}
-
-.row-actions-cell {
-  white-space: nowrap;
+  border: 0;
+  background: transparent;
 }
 
 .row-action-btn {
@@ -704,6 +785,27 @@ button:focus-visible {
 
 .row-action-btn:last-child {
   margin-right: 0;
+}
+
+.object-detail-edit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--bg-surface);
+  box-shadow: 0 -8px 14px rgba(47, 58, 70, 0.06);
+  border-top: 1px solid var(--border);
+  margin-top: 0.35rem;
+  padding: 0.45rem 0 0.2rem;
+}
+
+.object-detail-edit-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.34rem;
 }
 
 .ddl-pane {
