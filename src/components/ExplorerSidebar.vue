@@ -114,7 +114,15 @@ function toggleConnectionPanel(): void {
           </div>
           <label>
             Profile Name
-            <input v-model.trim="profileName" placeholder="Local Oracle Dev" />
+            <input
+              v-model.trim="profileName"
+              placeholder="Local Oracle Dev"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
           <label class="profile-password-toggle">
             <input v-model="saveProfilePassword" type="checkbox" />
@@ -138,32 +146,83 @@ function toggleConnectionPanel(): void {
 
           <label>
             Host
-            <input v-model.trim="props.connection.host" placeholder="db.example.com" />
+            <input
+              v-model.trim="props.connection.host"
+              placeholder="db.example.com"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
 
           <label>
             Port
-            <input v-model.number="props.connection.port" type="number" min="1" max="65535" />
+            <input
+              v-model.number="props.connection.port"
+              type="number"
+              min="1"
+              max="65535"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
 
           <label>
             Service
-            <input v-model.trim="props.connection.serviceName" placeholder="XEPDB1" />
+            <input
+              v-model.trim="props.connection.serviceName"
+              placeholder="XEPDB1"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
 
           <label>
             Username
-            <input v-model.trim="props.connection.username" placeholder="hr" />
+            <input
+              v-model.trim="props.connection.username"
+              placeholder="hr"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
 
           <label>
             Schema
-            <input v-model.trim="props.connection.schema" placeholder="HR" />
+            <input
+              v-model.trim="props.connection.schema"
+              placeholder="HR"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
 
           <label>
             Password
-            <input v-model="props.connection.password" type="password" placeholder="********" />
+            <input
+              v-model="props.connection.password"
+              type="password"
+              placeholder="********"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
         </div>
 

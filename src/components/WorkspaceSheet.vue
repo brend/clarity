@@ -235,7 +235,18 @@ watch(
       <div class="sheet-tab-fill"></div>
       <label class="query-limit-control" title="Maximum rows returned for worksheet queries">
         Rows
-        <input v-model.number="queryRowLimit" type="number" min="1" max="10000" step="1" />
+        <input
+          v-model.number="queryRowLimit"
+          type="number"
+          min="1"
+          max="10000"
+          step="1"
+          spellcheck="false"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          data-gramm="false"
+        />
       </label>
       <button
         class="btn primary"
@@ -353,6 +364,11 @@ watch(
                         class="cell-editor"
                         :value="dataDraftRows[rowIndex]?.[colIndex] ?? value"
                         :disabled="committingDataChanges"
+                        spellcheck="false"
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="off"
+                        data-gramm="false"
                         @input="onCellDraftInput(rowIndex, colIndex, $event)"
                         @keydown.meta.enter.prevent="commitDataChanges"
                         @keydown.ctrl.enter.prevent="commitDataChanges"
@@ -363,20 +379,20 @@ watch(
                   </tr>
                 </tbody>
               </table>
-              <div v-if="showEditableRowActions" class="object-detail-edit-toolbar">
-                <div class="muted">Pending row changes: {{ dirtyRowIndexes.length }}</div>
-                <div class="object-detail-edit-actions">
-                  <button class="btn row-action-btn" :disabled="!hasPendingDataChanges || committingDataChanges" @click="revertDataChanges">
-                    Revert
-                  </button>
-                  <button
-                    class="btn row-action-btn primary"
-                    :disabled="!hasPendingDataChanges || committingDataChanges"
-                    @click="commitDataChanges"
-                  >
-                    {{ committingDataChanges ? "Committing..." : "Commit" }}
-                  </button>
-                </div>
+            </div>
+            <div v-if="showEditableRowActions" class="object-detail-edit-toolbar">
+              <div class="muted">Pending row changes: {{ dirtyRowIndexes.length }}</div>
+              <div class="object-detail-edit-actions">
+                <button class="btn row-action-btn" :disabled="!hasPendingDataChanges || committingDataChanges" @click="revertDataChanges">
+                  Revert
+                </button>
+                <button
+                  class="btn row-action-btn primary"
+                  :disabled="!hasPendingDataChanges || committingDataChanges"
+                  @click="commitDataChanges"
+                >
+                  {{ committingDataChanges ? "Committing..." : "Commit" }}
+                </button>
               </div>
             </div>
           </template>
@@ -390,6 +406,11 @@ watch(
           v-model="sourceSearchText"
           class="source-search-input"
           placeholder="Search procedures, packages, functions, triggers, and types"
+          spellcheck="false"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          data-gramm="false"
           @keydown.enter.prevent="props.onRunSourceSearch"
         />
         <button
@@ -792,11 +813,7 @@ button:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
   background: var(--bg-surface);
-  box-shadow: 0 -8px 14px rgba(47, 58, 70, 0.06);
   border-top: 1px solid var(--border);
   margin-top: 0.35rem;
   padding: 0.45rem 0 0.2rem;
@@ -857,12 +874,13 @@ button:focus-visible {
   min-height: 0;
   overflow: hidden;
   padding: 0.55rem;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0.45rem;
 }
 
 .object-detail-grid-wrap {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
