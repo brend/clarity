@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import AppIcon from "./AppIcon.vue";
 import SqlCodeEditor from "./SqlCodeEditor.vue";
 import type {
@@ -48,6 +48,7 @@ const props = defineProps<{
   onSaveDdl: () => void;
   onRefreshActiveObjectDetail: () => void;
   onUpdateActiveObjectDataRow: (rowIndex: number, values: string[]) => Promise<boolean>;
+  onInsertActiveObjectDataRow: (values: string[]) => Promise<boolean>;
   onActivateObjectDetailTab: (tabId: ObjectDetailTabId) => void;
   onRunSourceSearch: () => void;
   onOpenSourceSearchResult: (result: OracleSourceSearchResult) => void;
@@ -57,6 +58,7 @@ const props = defineProps<{
 const dataDraftRows = ref<string[][]>([]);
 const committingDataChanges = ref(false);
 const suppressDraftSync = ref(false);
+const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
 
 const isDataDetailTab = computed<boolean>(() => props.activeObjectDetailTabId === "data");
 const showEditableRowActions = computed<boolean>(() => {
@@ -66,6 +68,16 @@ const showEditableRowActions = computed<boolean>(() => {
 
   return props.activeObjectDetailResult.columns.length > 0;
 });
+const sourceDataRows = computed<string[][]>(() => props.activeObjectDetailResult?.rows ?? []);
+const sourceDataRowCount = computed<number>(() => sourceDataRows.value.length);
+const displayedDataRows = computed<string[][]>(() => {
+  if (showEditableRowActions.value) {
+    return dataDraftRows.value;
+  }
+
+  return sourceDataRows.value;
+});
+const editableColumnCount = computed<number>(() => props.activeObjectDetailResult?.columns.length ?? 0);
 
 function cloneRows(rows: string[][]): string[][] {
   return rows.map((row) => [...row]);
@@ -93,28 +105,58 @@ function onCellDraftInput(rowIndex: number, colIndex: number, event: Event): voi
   dataDraftRows.value[rowIndex][colIndex] = target.value;
 }
 
+function addDraftRow(): void {
+  if (!showEditableRowActions.value || committingDataChanges.value || editableColumnCount.value < 1) {
+    return;
+  }
+
+  const newRow = Array.from({ length: editableColumnCount.value }, () => "");
+  const newRowIndex = dataDraftRows.value.length;
+  dataDraftRows.value = [...dataDraftRows.value, newRow];
+
+  void nextTick(() => {
+    const gridWrap = objectDetailGridWrapEl.value;
+    if (!gridWrap) {
+      return;
+    }
+
+    gridWrap.scrollTop = gridWrap.scrollHeight;
+    const firstCellInput = gridWrap.querySelector<HTMLInputElement>(
+      `tr[data-draft-row="${newRowIndex}"] input.cell-editor`,
+    );
+    firstCellInput?.focus();
+  });
+}
+
 function isRowDirty(rowIndex: number): boolean {
   if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
     return false;
   }
 
-  const sourceRow = props.activeObjectDetailResult.rows[rowIndex];
+  const sourceRow = sourceDataRows.value[rowIndex];
   const draftRow = dataDraftRows.value[rowIndex];
-  if (!sourceRow || !draftRow || sourceRow.length !== draftRow.length) {
+  if (!draftRow) {
     return false;
+  }
+
+  if (!sourceRow) {
+    return draftRow.some((value) => value !== "");
+  }
+
+  if (sourceRow.length !== draftRow.length) {
+    return true;
   }
 
   return sourceRow.some((value, colIndex) => value !== draftRow[colIndex]);
 }
 
 const dirtyRowIndexes = computed<number[]>(() => {
-  if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
+  if (!showEditableRowActions.value) {
     return [];
   }
 
-  const rows = props.activeObjectDetailResult.rows;
   const dirtyIndexes: number[] = [];
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+  for (let rowIndex = 0; rowIndex < dataDraftRows.value.length; rowIndex += 1) {
     if (isRowDirty(rowIndex)) {
       dirtyIndexes.push(rowIndex);
     }
@@ -124,9 +166,17 @@ const dirtyRowIndexes = computed<number[]>(() => {
 });
 
 const hasPendingDataChanges = computed<boolean>(() => dirtyRowIndexes.value.length > 0);
+const hasDraftStructureChanges = computed<boolean>(() => {
+  if (!showEditableRowActions.value) {
+    return false;
+  }
+
+  return dataDraftRows.value.length !== sourceDataRowCount.value;
+});
+const canRevertDataChanges = computed<boolean>(() => hasPendingDataChanges.value || hasDraftStructureChanges.value);
 
 function revertDataChanges(): void {
-  if (!hasPendingDataChanges.value || committingDataChanges.value) {
+  if (!canRevertDataChanges.value || committingDataChanges.value) {
     return;
   }
 
@@ -140,6 +190,8 @@ async function commitDataChanges(): Promise<void> {
 
   const dirtyIndexes = [...dirtyRowIndexes.value];
   let completedAllUpdates = true;
+  let insertedRows = false;
+  const originalRowCount = sourceDataRowCount.value;
 
   committingDataChanges.value = true;
   suppressDraftSync.value = true;
@@ -150,10 +202,18 @@ async function commitDataChanges(): Promise<void> {
         continue;
       }
 
-      const didSave = await props.onUpdateActiveObjectDataRow(rowIndex, [...rowValues]);
+      const didSave =
+        rowIndex < originalRowCount
+          ? await props.onUpdateActiveObjectDataRow(rowIndex, [...rowValues])
+          : await props.onInsertActiveObjectDataRow([...rowValues]);
       if (!didSave) {
         completedAllUpdates = false;
         break;
+      }
+
+      if (rowIndex >= originalRowCount) {
+        insertedRows = true;
+        dataDraftRows.value[rowIndex] = Array.from({ length: rowValues.length }, () => "");
       }
     }
   } finally {
@@ -163,6 +223,9 @@ async function commitDataChanges(): Promise<void> {
 
   if (completedAllUpdates) {
     syncDraftRowsFromResult();
+    if (insertedRows) {
+      props.onRefreshActiveObjectDetail();
+    }
   }
 }
 
@@ -332,12 +395,12 @@ watch(
           <p v-else-if="!props.activeObjectDetailResult.columns.length" class="muted">No rows returned.</p>
           <template v-else>
             <p v-if="showEditableRowActions" class="muted object-detail-hint">
-              Cells are editable. Use Revert or Commit below.
+              Cells are editable. Use Add Row, Revert, or Commit below.
             </p>
             <p v-else-if="isDataDetailTab" class="muted object-detail-hint">
               Data preview is read-only for this object type.
             </p>
-            <div class="object-detail-grid-wrap">
+            <div ref="objectDetailGridWrapEl" class="object-detail-grid-wrap">
               <table class="results-table">
                 <thead>
                   <tr>
@@ -346,23 +409,23 @@ watch(
                 </thead>
                 <tbody>
                   <tr
-                    v-for="(row, rowIndex) in props.activeObjectDetailResult.rows"
+                    v-for="(row, rowIndex) in displayedDataRows"
                     :key="`obj-row-${rowIndex}`"
-                    :class="{ 'results-row-dirty': showEditableRowActions && isRowDirty(rowIndex) }"
+                    :data-draft-row="rowIndex"
+                    :class="{
+                      'results-row-dirty': showEditableRowActions && isRowDirty(rowIndex),
+                      'results-row-new': showEditableRowActions && rowIndex >= sourceDataRowCount,
+                    }"
                   >
                     <td
                       v-for="(value, colIndex) in row"
                       :key="`obj-col-${rowIndex}-${colIndex}`"
-                      :class="{
-                        'results-cell-number': props.isLikelyNumeric(
-                          showEditableRowActions ? dataDraftRows[rowIndex]?.[colIndex] ?? value : value,
-                        ),
-                      }"
+                      :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
                     >
                       <input
                         v-if="showEditableRowActions"
                         class="cell-editor"
-                        :value="dataDraftRows[rowIndex]?.[colIndex] ?? value"
+                        :value="value"
                         :disabled="committingDataChanges"
                         spellcheck="false"
                         autocomplete="off"
@@ -381,9 +444,12 @@ watch(
               </table>
             </div>
             <div v-if="showEditableRowActions" class="object-detail-edit-toolbar">
-              <div class="muted">Pending row changes: {{ dirtyRowIndexes.length }}</div>
+              <div class="object-detail-edit-leading">
+                <button class="btn row-action-btn" :disabled="committingDataChanges" @click="addDraftRow">Add Row</button>
+                <div class="muted">Pending row changes: {{ dirtyRowIndexes.length }}</div>
+              </div>
               <div class="object-detail-edit-actions">
-                <button class="btn row-action-btn" :disabled="!hasPendingDataChanges || committingDataChanges" @click="revertDataChanges">
+                <button class="btn row-action-btn" :disabled="!canRevertDataChanges || committingDataChanges" @click="revertDataChanges">
                   Revert
                 </button>
                 <button
@@ -775,6 +841,10 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
+.results-row-new {
+  background: #eef6ff !important;
+}
+
 .results-row-dirty {
   background: #fef7eb !important;
 }
@@ -817,6 +887,12 @@ button:focus-visible {
   border-top: 1px solid var(--border);
   margin-top: 0.35rem;
   padding: 0.45rem 0 0.2rem;
+}
+
+.object-detail-edit-leading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .object-detail-edit-actions {

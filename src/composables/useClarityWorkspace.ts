@@ -652,6 +652,70 @@ export function useClarityWorkspace() {
     }
   }
 
+  async function insertActiveObjectDataRow(values: string[]): Promise<boolean> {
+    const tab = activeDdlTab.value;
+    if (!session.value || !tab || tab.activeDetailTabId !== "data" || !isTableObject(tab.object.objectType)) {
+      return false;
+    }
+
+    if (busy.updatingData) {
+      return false;
+    }
+
+    if (!tab.dataResult) {
+      errorMessage.value = "No table data is loaded. Refresh the Data tab and try again.";
+      return false;
+    }
+
+    if (!hasObjectDataRowIdColumn(tab.dataResult)) {
+      errorMessage.value = "Row editing is not ready yet. Refresh the Data tab and try again.";
+      return false;
+    }
+
+    const editableColumns = tab.dataResult.columns.slice(1);
+    if (editableColumns.length !== values.length) {
+      errorMessage.value = "Unable to insert row: data preview shape changed. Refresh and try again.";
+      return false;
+    }
+
+    const providedIndexes = values.reduce<number[]>((acc, value, index) => {
+      if (value !== "") {
+        acc.push(index);
+      }
+      return acc;
+    }, []);
+
+    if (!providedIndexes.length) {
+      errorMessage.value = "Enter at least one column value before committing a new row.";
+      return false;
+    }
+
+    const columnsSql = providedIndexes.map((index) => toQuotedIdentifier(editableColumns[index])).join(", ");
+    const valuesSql = providedIndexes.map((index) => toSqlDataLiteral(values[index])).join(", ");
+    const sql = `insert into ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} (${columnsSql}) values (${valuesSql})`;
+
+    errorMessage.value = "";
+    busy.updatingData = true;
+
+    try {
+      const result = await invoke<OracleQueryResult>("db_run_query", {
+        request: {
+          sessionId: session.value.sessionId,
+          sql,
+          allowDestructive: true,
+        },
+      });
+
+      statusMessage.value = `${tab.object.schema}.${tab.object.objectName}: ${result.message}`;
+      return true;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+      return false;
+    } finally {
+      busy.updatingData = false;
+    }
+  }
+
   async function loadConnectionProfiles(): Promise<void> {
     busy.loadingProfiles = true;
     try {
@@ -1082,6 +1146,7 @@ export function useClarityWorkspace() {
     activateObjectDetailTab,
     refreshActiveObjectDetail,
     updateActiveObjectDataRow,
+    insertActiveObjectDataRow,
     loadConnectionProfiles,
     syncSelectedProfileUi,
     applySelectedProfile,

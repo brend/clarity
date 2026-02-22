@@ -61,6 +61,7 @@ const {
   activateObjectDetailTab,
   refreshActiveObjectDetail,
   updateActiveObjectDataRow,
+  insertActiveObjectDataRow,
   loadConnectionProfiles,
   syncSelectedProfileUi,
   applySelectedProfile,
@@ -151,6 +152,7 @@ onMounted(() => {
         :on-save-ddl="saveDdl"
         :on-refresh-active-object-detail="refreshActiveObjectDetail"
         :on-update-active-object-data-row="updateActiveObjectDataRow"
+        :on-insert-active-object-data-row="insertActiveObjectDataRow"
         :on-activate-object-detail-tab="activateObjectDetailTab"
         :on-run-source-search="runSourceSearch"
         :on-open-source-search-result="openSourceSearchResult"
