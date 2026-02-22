@@ -105,7 +105,7 @@ const props = defineProps<{
 }
 
 .results-table tbody tr:nth-child(even) {
-  background: #fafbfd;
+  background: var(--table-row-alt);
 }
 
 .results-table tbody tr:hover {

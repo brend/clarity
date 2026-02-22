@@ -9,7 +9,8 @@ type IconName =
   | "save"
   | "plus"
   | "close"
-  | "search";
+  | "search"
+  | "settings";
 
 withDefaults(
   defineProps<{
@@ -80,6 +81,11 @@ withDefaults(
     <g v-else-if="name === 'search'">
       <circle cx="11" cy="11" r="6.5" />
       <path d="m16 16 4 4" />
+    </g>
+
+    <g v-else-if="name === 'settings'">
+      <circle cx="12" cy="12" r="2.6" />
+      <path d="M19.4 14a1 1 0 0 0 .2 1.1l.1.1a1 1 0 1 1-1.4 1.4l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V18a1 1 0 1 1-2 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1 1 0 1 1-1.4-1.4l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H10a1 1 0 1 1 0-2h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1 1 0 1 1 1.4-1.4l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V6a1 1 0 1 1 2 0v.2a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a1 1 0 1 1 1.4 1.4l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H20a1 1 0 1 1 0 2h-.2a1 1 0 0 0-.9.6Z" />
     </g>
   </svg>
 </template>

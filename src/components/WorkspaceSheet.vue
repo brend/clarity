@@ -12,6 +12,7 @@ import type {
   WorkspaceDdlTab,
   WorkspaceQueryTab,
 } from "../types/clarity";
+import type { ThemeSetting } from "../types/settings";
 
 const queryText = defineModel<string>("queryText", { required: true });
 const ddlText = defineModel<string>("ddlText", { required: true });
@@ -39,10 +40,12 @@ const props = defineProps<{
   isQueryTabActive: boolean;
   sourceSearchResults: OracleSourceSearchResult[];
   sourceSearchPerformed: boolean;
+  theme: ThemeSetting;
   onActivateWorkspaceTab: (tabId: string) => void;
   onCloseQueryTab: (tabId: string) => void;
   onAddQueryTab: () => void;
   onOpenSearchTab: () => void;
+  onOpenSettings: () => void;
   onCloseDdlTab: (tabId: string) => void;
   onRunQuery: () => void;
   onSaveDdl: () => void;
@@ -250,7 +253,13 @@ watch(
 <template>
   <header class="workspace-toolbar">
     <div class="toolbar-title">SQL Worksheet</div>
-    <div class="toolbar-status">{{ props.statusMessage }}</div>
+    <div class="toolbar-trailing">
+      <div class="toolbar-status">{{ props.statusMessage }}</div>
+      <button class="btn toolbar-settings-btn" title="Open settings" @click="props.onOpenSettings">
+        <AppIcon name="settings" class="btn-icon" aria-hidden="true" />
+        Settings
+      </button>
+    </div>
   </header>
 
   <section class="sheet-pane">
@@ -336,6 +345,7 @@ watch(
       v-model="queryText"
       class="sql-editor"
       placeholder="Write SQL here"
+      :theme="props.theme"
     />
 
     <section v-else-if="props.activeDdlTab" class="ddl-pane">
@@ -380,6 +390,7 @@ watch(
         placeholder="Object DDL will appear here"
         :target-line="props.activeDdlTab.focusLine"
         :focus-token="props.activeDdlTab.focusToken"
+        :theme="props.theme"
       />
 
       <section v-else class="object-detail-grid-pane">
@@ -544,7 +555,7 @@ textarea {
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
-  outline: 2px solid rgba(79, 111, 150, 0.35);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -591,7 +602,7 @@ button:focus-visible {
 .workspace-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.6rem;
   height: var(--pane-header-height);
   padding: 0 0.8rem;
   border-bottom: 1px solid var(--border-strong);
@@ -603,13 +614,25 @@ button:focus-visible {
   font-weight: 600;
 }
 
+.toolbar-trailing {
+  min-width: 0;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
 .toolbar-status {
   font-size: 0.74rem;
   color: var(--text-secondary);
-  max-width: 65%;
+  max-width: min(56vw, 42rem);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.toolbar-settings-btn {
+  flex: 0 0 auto;
 }
 
 .sheet-pane {
@@ -734,9 +757,9 @@ button:focus-visible {
   margin-left: 0.45rem;
   margin-right: 0.45rem;
   font-size: 0.74rem;
-  color: var(--text-secondary);
-  background: #e8eff8;
-  border: 1px solid #c6d5e8;
+  color: var(--schema-chip-text);
+  background: var(--schema-chip-bg);
+  border: 1px solid var(--schema-chip-border);
   padding: 0.2rem 0.42rem;
   border-radius: 4px;
 }
@@ -746,7 +769,7 @@ button:focus-visible {
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: #ffffff;
+  background: var(--editor-surface);
 }
 
 .source-search-pane {
@@ -806,7 +829,7 @@ button:focus-visible {
 }
 
 .source-result-link:hover {
-  color: #2b4a6f;
+  color: var(--link-hover);
 }
 
 .source-search-line {
@@ -834,7 +857,7 @@ button:focus-visible {
 }
 
 .results-table tbody tr:nth-child(even) {
-  background: #fafbfd;
+  background: var(--table-row-alt);
 }
 
 .results-table tbody tr:hover {
@@ -842,11 +865,11 @@ button:focus-visible {
 }
 
 .results-row-new {
-  background: #eef6ff !important;
+  background: var(--row-new-bg) !important;
 }
 
 .results-row-dirty {
-  background: #fef7eb !important;
+  background: var(--row-dirty-bg) !important;
 }
 
 .results-cell-number {

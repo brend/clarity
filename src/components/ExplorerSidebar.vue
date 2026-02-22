@@ -414,7 +414,7 @@ textarea {
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
-  outline: 2px solid rgba(79, 111, 150, 0.35);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -555,7 +555,7 @@ button:focus-visible {
 
 .tree-node.selected {
   background: var(--bg-selected);
-  color: #1f3654;
+  color: var(--tree-selected-text);
 }
 
 .tree-leaf-icon {

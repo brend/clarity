@@ -14,7 +14,9 @@ use tauri::{Emitter, Manager};
 
 const PROFILE_STORE_FILE: &str = "connection_profiles.json";
 const KEYRING_SERVICE: &str = "com.waldencorp.clarity";
+const MENU_ID_TOOLS_SETTINGS: &str = "tools.settings";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
+const EVENT_OPEN_SETTINGS_DIALOG: &str = "clarity://open-settings-dialog";
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG: &str = "clarity://open-export-database-dialog";
 const EVENT_SCHEMA_EXPORT_PROGRESS: &str = "clarity://schema-export-progress";
 
@@ -891,6 +893,13 @@ fn clear_profile_secret(profile_id: &str) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .menu(|app| {
+            let settings = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_SETTINGS,
+                "Settings...",
+                true,
+                None::<&str>,
+            )?;
             let export_database = tauri::menu::MenuItem::with_id(
                 app,
                 MENU_ID_TOOLS_EXPORT_DATABASE,
@@ -899,7 +908,7 @@ pub fn run() {
                 None::<&str>,
             )?;
             let tools_menu =
-                tauri::menu::Submenu::with_items(app, "Tools", true, &[&export_database])?;
+                tauri::menu::Submenu::with_items(app, "Tools", true, &[&settings, &export_database])?;
             let menu = tauri::menu::Menu::default(app)?;
             let existing_items = menu.items()?;
             let help_position = existing_items
@@ -910,7 +919,11 @@ pub fn run() {
             Ok(menu)
         })
         .on_menu_event(|app, event| {
-            if event.id() == MENU_ID_TOOLS_EXPORT_DATABASE {
+            if event.id() == MENU_ID_TOOLS_SETTINGS {
+                if let Err(error) = app.emit(EVENT_OPEN_SETTINGS_DIALOG, ()) {
+                    eprintln!("failed to emit open settings event: {error}");
+                }
+            } else if event.id() == MENU_ID_TOOLS_EXPORT_DATABASE {
                 if let Err(error) = app.emit(EVENT_OPEN_EXPORT_DATABASE_DIALOG, ()) {
                     eprintln!("failed to emit export database event: {error}");
                 }
