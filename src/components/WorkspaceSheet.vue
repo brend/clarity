@@ -392,7 +392,7 @@ watch(
         :theme="props.theme"
       />
 
-      <section v-else class="object-detail-grid-pane">
+      <section v-else class="object-detail-grid-pane" :class="{ 'is-data-view': isDataDetailTab }">
         <p v-if="props.activeObjectDetailLoading" class="muted">Loading object detail...</p>
         <p v-else-if="!props.activeObjectDetailResult" class="muted">
           Select a detail tab to load information for this object.
@@ -1004,6 +1004,14 @@ button:focus-visible {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+
+.object-detail-grid-pane.is-data-view .results-table td {
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.object-detail-grid-pane.is-data-view .cell-editor {
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .muted {
