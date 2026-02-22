@@ -10,6 +10,8 @@ import type {
   OracleQueryResult,
   OracleSessionSummary,
   OracleSourceSearchResult,
+  SchemaExportResult,
+  SchemaExportTarget,
   WorkspaceDdlTab,
   WorkspaceQueryTab,
 } from "../types/clarity";
@@ -127,6 +129,12 @@ function buildMutatingQueryPrompt(reasons: string[]): string {
   return `This statement appears to modify data/schema (${reasonList}). Continue execution?`;
 }
 
+async function yieldUiFrame(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 export function useClarityWorkspace() {
   const connection = reactive<OracleConnectRequest>({
     provider: "oracle",
@@ -156,6 +164,8 @@ export function useClarityWorkspace() {
   const queryTabNumber = ref(2);
   const queryResult = ref<OracleQueryResult | null>(null);
   const sourceSearchText = ref("");
+  const exportDestinationDirectory = ref("");
+  const selectedExportSessionId = ref<number | null>(null);
   const queryRowLimit = ref(
     clampQueryRowLimit(readDebugPositiveInteger(import.meta.env.VITE_QUERY_ROW_LIMIT, DEFAULT_QUERY_ROW_LIMIT)),
   );
@@ -177,6 +187,7 @@ export function useClarityWorkspace() {
     savingDdl: false,
     runningQuery: false,
     updatingData: false,
+    exportingSchema: false,
     searchingSource: false,
   });
 
@@ -189,6 +200,20 @@ export function useClarityWorkspace() {
   const selectedProfile = computed(
     () => connectionProfiles.value.find((profile) => profile.id === selectedProfileId.value) ?? null,
   );
+  const schemaExportTargets = computed<SchemaExportTarget[]>(() => {
+    if (!session.value) {
+      return [];
+    }
+
+    return [
+      {
+        sessionId: session.value.sessionId,
+        label: session.value.displayName,
+        schema: session.value.schema,
+        provider: session.value.provider,
+      },
+    ];
+  });
   const activeQueryTab = computed(() =>
     queryTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
   );
@@ -716,6 +741,70 @@ export function useClarityWorkspace() {
     }
   }
 
+  function startSchemaExport(): boolean {
+    if (!session.value) {
+      errorMessage.value = "Connect to a database before exporting schema.";
+      return false;
+    }
+
+    selectedExportSessionId.value = session.value.sessionId;
+    exportDestinationDirectory.value = "";
+    errorMessage.value = "";
+    return true;
+  }
+
+  async function chooseSchemaExportDirectory(): Promise<string | null> {
+    try {
+      const selectedDirectory = await invoke<string | null>("db_pick_directory");
+      if (selectedDirectory) {
+        exportDestinationDirectory.value = selectedDirectory;
+      }
+      return selectedDirectory;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+      return null;
+    }
+  }
+
+  async function exportDatabaseSchema(): Promise<SchemaExportResult | null> {
+    if (!session.value) {
+      errorMessage.value = "Connect to a database before exporting schema.";
+      return null;
+    }
+
+    const destinationDirectory = exportDestinationDirectory.value.trim();
+    if (!destinationDirectory) {
+      errorMessage.value = "Choose a destination directory for schema export.";
+      return null;
+    }
+
+    const targetSessionId = selectedExportSessionId.value ?? session.value.sessionId;
+    if (!schemaExportTargets.value.some((target) => target.sessionId === targetSessionId)) {
+      errorMessage.value = "Selected export target is no longer available.";
+      return null;
+    }
+
+    errorMessage.value = "";
+    busy.exportingSchema = true;
+
+    try {
+      await yieldUiFrame();
+      const result = await invoke<SchemaExportResult>("db_export_schema", {
+        request: {
+          sessionId: targetSessionId,
+          destinationDirectory,
+        },
+      });
+      statusMessage.value = result.message;
+      return result;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+      return null;
+    } finally {
+      busy.exportingSchema = false;
+    }
+  }
+
   async function loadConnectionProfiles(): Promise<void> {
     busy.loadingProfiles = true;
     try {
@@ -874,6 +963,7 @@ export function useClarityWorkspace() {
       });
 
       session.value = summary;
+      selectedExportSessionId.value = summary.sessionId;
       const targetQueryTab = activeQueryTab.value ?? queryTabs.value[0];
       if (targetQueryTab) {
         targetQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
@@ -918,6 +1008,8 @@ export function useClarityWorkspace() {
       selectedObject.value = null;
       queryResult.value = null;
       sourceSearchText.value = "";
+      exportDestinationDirectory.value = "";
+      selectedExportSessionId.value = null;
       sourceSearchResults.value = [];
       sourceSearchPerformed.value = false;
       statusMessage.value = "Disconnected.";
@@ -1107,6 +1199,7 @@ export function useClarityWorkspace() {
     session,
     connectionProfiles,
     selectedProfile,
+    schemaExportTargets,
     busy,
     isConnected,
     connectedSchema,
@@ -1132,6 +1225,8 @@ export function useClarityWorkspace() {
     sourceSearchResults,
     sourceSearchPerformed,
     queryResult,
+    exportDestinationDirectory,
+    selectedExportSessionId,
     statusMessage,
     errorMessage,
     isQueryTabActive,
@@ -1147,6 +1242,9 @@ export function useClarityWorkspace() {
     refreshActiveObjectDetail,
     updateActiveObjectDataRow,
     insertActiveObjectDataRow,
+    startSchemaExport,
+    chooseSchemaExportDirectory,
+    exportDatabaseSchema,
     loadConnectionProfiles,
     syncSelectedProfileUi,
     applySelectedProfile,

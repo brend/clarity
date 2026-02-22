@@ -17,6 +17,21 @@ export interface OracleSessionSummary {
   provider: DatabaseProvider;
 }
 
+export interface SchemaExportTarget {
+  sessionId: number;
+  label: string;
+  schema: string;
+  provider: DatabaseProvider;
+}
+
+export interface SchemaExportResult {
+  destinationDirectory: string;
+  objectCount: number;
+  fileCount: number;
+  skippedCount: number;
+  message: string;
+}
+
 export interface ConnectionProfile {
   id: string;
   name: string;
@@ -87,6 +102,7 @@ export interface BusyState {
   savingDdl: boolean;
   runningQuery: boolean;
   updatingData: boolean;
+  exportingSchema: boolean;
   searchingSource: boolean;
 }
 
