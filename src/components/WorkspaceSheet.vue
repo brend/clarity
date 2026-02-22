@@ -255,9 +255,8 @@ watch(
     <div class="toolbar-title">SQL Worksheet</div>
     <div class="toolbar-trailing">
       <div class="toolbar-status">{{ props.statusMessage }}</div>
-      <button class="btn toolbar-settings-btn" title="Open settings" @click="props.onOpenSettings">
+      <button class="btn toolbar-settings-btn" title="Open settings" aria-label="Open settings" @click="props.onOpenSettings">
         <AppIcon name="settings" class="btn-icon" aria-hidden="true" />
-        Settings
       </button>
     </div>
   </header>
@@ -546,25 +545,25 @@ button {
 input,
 select,
 textarea {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-surface);
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-bg);
   padding: 0.38rem 0.45rem;
 }
 
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
 .btn {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-surface);
-  padding: 0.34rem 0.6rem;
-  font-size: 0.76rem;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-bg);
+  padding: 0.26rem 0.52rem;
+  font-size: 0.73rem;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
   display: inline-flex;
@@ -573,8 +572,8 @@ button:focus-visible {
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
+  background: var(--control-hover);
+  border-color: var(--control-border);
 }
 
 .btn:disabled {
@@ -604,14 +603,15 @@ button:focus-visible {
   align-items: center;
   gap: 0.6rem;
   height: var(--pane-header-height);
-  padding: 0 0.8rem;
-  border-bottom: 1px solid var(--border-strong);
+  padding: 0 0.68rem;
+  border-bottom: 1px solid var(--panel-separator);
   background: var(--bg-surface-muted);
 }
 
 .toolbar-title {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.77rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .toolbar-trailing {
@@ -623,7 +623,7 @@ button:focus-visible {
 }
 
 .toolbar-status {
-  font-size: 0.74rem;
+  font-size: 0.71rem;
   color: var(--text-secondary);
   max-width: min(56vw, 42rem);
   white-space: nowrap;
@@ -633,12 +633,15 @@ button:focus-visible {
 
 .toolbar-settings-btn {
   flex: 0 0 auto;
+  min-width: 1.7rem;
+  min-height: 1.7rem;
+  padding: 0;
+  justify-content: center;
 }
 
 .sheet-pane {
   display: grid;
   grid-template-rows: auto 1fr;
-  border-bottom: 1px solid var(--border-strong);
   min-height: 0;
   background: var(--bg-surface);
   overflow-y: auto;
@@ -648,30 +651,38 @@ button:focus-visible {
 .sheet-tabs {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--panel-separator);
   background: var(--bg-surface-muted);
-  gap: 0;
+  gap: 0.22rem;
+  padding: 0.18rem 0.32rem;
   min-width: 0;
 }
 
 .sheet-tab-wrap {
   display: flex;
   align-items: center;
-  border-right: 1px solid var(--border);
   min-width: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
 }
 
 .sheet-tab {
   border: 0;
-  border-radius: 0;
+  border-radius: 5px;
   background: transparent;
-  padding: 0.46rem 0.72rem;
-  font-size: 0.77rem;
+  padding: 0.24rem 0.48rem;
+  font-size: 0.73rem;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 12rem;
+  color: var(--text-secondary);
+}
+
+.sheet-tab:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
 }
 
 .sheet-tab-search {
@@ -682,20 +693,22 @@ button:focus-visible {
 
 .sheet-tab.active,
 .sheet-tab-wrap.active {
-  background: var(--bg-surface);
+  border-color: transparent;
+  background: var(--tab-active-bg);
+  box-shadow: inset 0 -1px 0 var(--accent);
 }
 
 .sheet-tab-wrap.active .sheet-tab {
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .sheet-tab-add {
-  border: 0;
-  border-right: 1px solid var(--border);
-  border-radius: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
-  padding: 0.46rem 0.62rem;
-  font-size: 0.8rem;
+  padding: 0.23rem 0.45rem;
+  font-size: 0.74rem;
   cursor: pointer;
   color: var(--accent);
   display: inline-flex;
@@ -704,15 +717,14 @@ button:focus-visible {
 }
 
 .sheet-tab-add:hover {
-  background: var(--bg-hover);
+  background: var(--control-hover);
 }
 
 .sheet-tab-close {
   border: 0;
-  border-left: 1px solid var(--border);
   background: transparent;
-  padding: 0.46rem 0.42rem;
-  font-size: 0.75rem;
+  padding: 0.24rem 0.25rem;
+  font-size: 0.72rem;
   cursor: pointer;
   color: var(--text-subtle);
   display: inline-flex;
@@ -722,7 +734,8 @@ button:focus-visible {
 
 .sheet-tab-close:hover {
   color: var(--text-primary);
-  background: var(--bg-hover);
+  background: var(--control-hover);
+  border-radius: 4px;
 }
 
 .sheet-tab-fill {
@@ -730,38 +743,40 @@ button:focus-visible {
 }
 
 .query-limit-control {
-  margin-left: 0.5rem;
+  margin-left: 0.25rem;
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--text-secondary);
+  letter-spacing: 0.01em;
 }
 
 .query-limit-control input {
-  width: 5.25rem;
-  padding: 0.28rem 0.38rem;
-  font-size: 0.74rem;
+  width: 4.3rem;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.7rem;
 }
 
 .sheet-tab-icon {
-  width: 0.76rem;
-  height: 0.76rem;
+  width: 0.72rem;
+  height: 0.72rem;
 }
 
 .sheet-tabs > .btn {
-  margin-left: 0.45rem;
+  margin-left: 0.2rem;
 }
 
 .schema-chip {
-  margin-left: 0.45rem;
-  margin-right: 0.45rem;
-  font-size: 0.74rem;
+  margin-left: 0.34rem;
+  margin-right: 0;
+  font-size: 0.68rem;
   color: var(--schema-chip-text);
-  background: var(--schema-chip-bg);
-  border: 1px solid var(--schema-chip-border);
-  padding: 0.2rem 0.42rem;
-  border-radius: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
+  letter-spacing: 0.01em;
 }
 
 .sql-editor,
@@ -782,9 +797,9 @@ button:focus-visible {
 .source-search-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.55rem;
-  border-bottom: 1px solid var(--border);
+  gap: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--panel-separator);
   background: var(--bg-surface-muted);
 }
 
@@ -801,21 +816,23 @@ button:focus-visible {
 .source-search-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .source-search-table th,
 .source-search-table td {
-  border: 1px solid var(--border);
+  border: 0;
+  border-bottom: 1px solid var(--table-divider);
   text-align: left;
-  padding: 0.32rem 0.44rem;
+  padding: 0.28rem 0.4rem;
 }
 
 .source-search-table th {
   position: sticky;
   top: 0;
-  background: var(--bg-surface-muted);
+  background: var(--table-header-bg);
   z-index: 1;
+  font-weight: 600;
 }
 
 .source-result-link {
@@ -824,8 +841,7 @@ button:focus-visible {
   color: var(--accent-strong);
   cursor: pointer;
   padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration: none;
 }
 
 .source-result-link:hover {
@@ -839,21 +855,23 @@ button:focus-visible {
 .results-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   margin: 0;
 }
 
 .results-table th,
 .results-table td {
-  border: 1px solid var(--border);
+  border: 0;
+  border-bottom: 1px solid var(--table-divider);
   text-align: left;
-  padding: 0.32rem 0.44rem;
+  padding: 0.28rem 0.4rem;
 }
 
 .results-table th {
-  background: var(--bg-surface-muted);
+  background: var(--table-header-bg);
   position: sticky;
   top: 0;
+  font-weight: 600;
 }
 
 .results-table tbody tr:nth-child(even) {
@@ -884,8 +902,8 @@ button:focus-visible {
 .cell-editor {
   width: 100%;
   min-width: 8rem;
-  padding: 0.24rem 0.34rem;
-  font-size: 0.75rem;
+  padding: 0.2rem 0.28rem;
+  font-size: 0.72rem;
   font-family: inherit;
   border: 0;
   background: transparent;
@@ -893,8 +911,8 @@ button:focus-visible {
 
 .row-action-btn {
   margin-right: 0.28rem;
-  padding: 0.22rem 0.45rem;
-  font-size: 0.72rem;
+  padding: 0.19rem 0.4rem;
+  font-size: 0.69rem;
 }
 
 .row-action-btn:last-child {
@@ -907,7 +925,7 @@ button:focus-visible {
   justify-content: space-between;
   gap: 0.5rem;
   background: var(--bg-surface);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--panel-separator);
   margin-top: 0.35rem;
   padding: 0.45rem 0 0.2rem;
 }
@@ -936,37 +954,41 @@ button:focus-visible {
   justify-content: space-between;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.55rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.44rem 0.55rem;
+  border-bottom: 1px solid var(--panel-separator);
   background: var(--bg-surface-muted);
 }
 
 .object-detail-tabs {
   display: flex;
   align-items: center;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
+  gap: 0.2rem;
+  padding: 0.2rem 0.42rem;
+  border-bottom: 1px solid var(--panel-separator);
   background: var(--bg-surface-muted);
 }
 
 .object-detail-tab {
-  border: 0;
-  border-right: 1px solid var(--border);
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
-  padding: 0.42rem 0.68rem;
-  font-size: 0.76rem;
+  padding: 0.24rem 0.5rem;
+  font-size: 0.72rem;
   color: var(--text-secondary);
   cursor: pointer;
 }
 
 .object-detail-tab:hover {
-  background: var(--bg-hover);
+  background: var(--control-hover);
+  color: var(--text-primary);
 }
 
 .object-detail-tab.active {
-  background: var(--bg-surface);
+  border-color: transparent;
+  background: var(--tab-active-bg);
   color: var(--text-primary);
   font-weight: 600;
+  box-shadow: inset 0 -1px 0 var(--accent);
 }
 
 .object-detail-grid-pane {

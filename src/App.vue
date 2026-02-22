@@ -412,42 +412,70 @@ onBeforeUnmount(() => {
 <style>
 :root,
 :root[data-theme="light"] {
-  --font-ui: "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
-  --bg-canvas: #e7ebf0;
-  --bg-shell: #dfe5ec;
-  --bg-sidebar: #f6f8fa;
+  --font-ui: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  --bg-canvas: #edf1f6;
+  --bg-shell: #e7ecf3;
+  --bg-sidebar: #f4f7fb;
   --bg-surface: #ffffff;
-  --bg-surface-muted: #f2f5f8;
-  --bg-hover: #edf2f8;
-  --bg-active: #e4ecf8;
-  --bg-selected: #d4e1f3;
-  --border: #d7dee7;
-  --border-strong: #c5cfdb;
-  --text-primary: #2f3a46;
-  --text-secondary: #657487;
-  --text-subtle: #778599;
-  --accent: #4f6f96;
-  --accent-strong: #446488;
-  --accent-contrast: #f8fbff;
-  --danger: #a04545;
-  --focus-ring: rgba(79, 111, 150, 0.35);
-  --dialog-backdrop: rgba(23, 31, 41, 0.42);
+  --bg-surface-muted: #f6f8fc;
+  --bg-hover: #eef3fb;
+  --bg-active: #e4ecf9;
+  --bg-selected: #dbe7fb;
+  --border: #dce3ee;
+  --border-strong: #c9d4e3;
+  --panel-separator: #dbe3ef;
+  --text-primary: #1f2938;
+  --text-secondary: #61728a;
+  --text-subtle: #8392a6;
+  --accent: #2f74d8;
+  --accent-strong: #4686e5;
+  --accent-contrast: #f3f8ff;
+  --danger: #b04f4f;
+  --focus-ring: rgba(47, 116, 216, 0.26);
+  --dialog-backdrop: rgba(26, 34, 46, 0.34);
   --dialog-shadow: 0 16px 36px rgba(0, 0, 0, 0.18);
-  --splitter-hover: rgba(79, 111, 150, 0.2);
-  --table-row-alt: #fafbfd;
-  --schema-chip-bg: #e8eff8;
-  --schema-chip-border: #c6d5e8;
-  --schema-chip-text: #5f748f;
-  --link-hover: #2b4a6f;
-  --row-new-bg: #eef6ff;
-  --row-dirty-bg: #fef7eb;
-  --tree-selected-text: #1f3654;
+  --splitter-hover: rgba(47, 116, 216, 0.24);
+  --control-bg: #f4f8fe;
+  --control-border: #d7e1ee;
+  --control-hover: #edf4fd;
+  --tab-active-bg: #ffffff;
+  --tab-active-border: #d7e3f2;
+  --table-divider: #e0e8f3;
+  --table-header-bg: #f5f8fd;
+  --table-row-alt: transparent;
+  --schema-chip-bg: #e9f0fb;
+  --schema-chip-border: #ccdaee;
+  --schema-chip-text: #56708f;
+  --link-hover: #1f4f8c;
+  --row-new-bg: rgba(84, 157, 242, 0.12);
+  --row-dirty-bg: rgba(221, 171, 89, 0.18);
+  --tree-selected-text: #193a67;
   --editor-surface: #ffffff;
-  --editor-gutter-bg: #f5f7fa;
-  --editor-gutter-border: #dfe6ee;
-  --editor-gutter-text: #7a8798;
-  --editor-focus-outline: #c7d7ea;
-  --pane-header-height: 58px;
+  --editor-gutter-bg: #f5f8fd;
+  --editor-gutter-border: #d9e2ef;
+  --editor-gutter-text: #8291a5;
+  --editor-focus-outline: #bbcee7;
+  --editor-text: #1f2e43;
+  --editor-caret: #2f74d8;
+  --editor-active-line: rgba(47, 116, 216, 0.08);
+  --editor-active-gutter: rgba(47, 116, 216, 0.15);
+  --editor-selection: rgba(47, 116, 216, 0.2);
+  --editor-selection-focused: rgba(47, 116, 216, 0.28);
+  --editor-placeholder: #8f9db0;
+  --editor-token-keyword: #9b2fd2;
+  --editor-token-operator: #4d6e95;
+  --editor-token-string: #b35a1d;
+  --editor-token-number: #0c74bc;
+  --editor-token-comment: #7388a5;
+  --editor-token-type: #1c6da9;
+  --editor-token-variable: #1f2e43;
+  --editor-token-property: #1f2e43;
+  --editor-token-function: #0b5f9f;
+  --resizer-line: #dbe4f1;
+  --resizer-line-hover: #6da0e4;
+  --scrollbar-thumb: rgba(103, 125, 152, 0.42);
+  --scrollbar-thumb-hover: rgba(90, 114, 146, 0.62);
+  --pane-header-height: 42px;
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -455,40 +483,68 @@ onBeforeUnmount(() => {
 }
 
 :root[data-theme="dark"] {
-  --bg-canvas: #0f151d;
-  --bg-shell: #131b25;
-  --bg-sidebar: #18212d;
-  --bg-surface: #1e2835;
-  --bg-surface-muted: #253142;
-  --bg-hover: #2f3d50;
-  --bg-active: #32465e;
-  --bg-selected: #3a5270;
-  --border: #394a5f;
-  --border-strong: #4a5d75;
-  --text-primary: #d7e2ef;
-  --text-secondary: #9fb1c6;
-  --text-subtle: #889db5;
-  --accent: #6e96c8;
-  --accent-strong: #87addb;
-  --accent-contrast: #0f1a27;
-  --danger: #e38d8d;
-  --focus-ring: rgba(110, 149, 197, 0.45);
-  --dialog-backdrop: rgba(6, 10, 14, 0.65);
+  --bg-canvas: #090d13;
+  --bg-shell: #0f151e;
+  --bg-sidebar: #161d29;
+  --bg-surface: #111826;
+  --bg-surface-muted: #151d2b;
+  --bg-hover: #202b3b;
+  --bg-active: #28384f;
+  --bg-selected: #2e4360;
+  --border: #243246;
+  --border-strong: #334760;
+  --panel-separator: #253348;
+  --text-primary: #d7e1ed;
+  --text-secondary: #96a8be;
+  --text-subtle: #7e91a8;
+  --accent: #57a2ff;
+  --accent-strong: #7bb6ff;
+  --accent-contrast: #041325;
+  --danger: #e39393;
+  --focus-ring: rgba(87, 162, 255, 0.36);
+  --dialog-backdrop: rgba(4, 8, 12, 0.7);
   --dialog-shadow: 0 18px 38px rgba(0, 0, 0, 0.42);
-  --splitter-hover: rgba(110, 149, 197, 0.3);
-  --table-row-alt: #263241;
-  --schema-chip-bg: #2a3c53;
-  --schema-chip-border: #3f5979;
-  --schema-chip-text: #b3c8e0;
-  --link-hover: #a8c5e9;
-  --row-new-bg: #27445f;
-  --row-dirty-bg: #52422b;
-  --tree-selected-text: #e1ecf9;
-  --editor-surface: #1a2330;
-  --editor-gutter-bg: #1b2431;
-  --editor-gutter-border: #334659;
-  --editor-gutter-text: #8ba1bb;
-  --editor-focus-outline: #5878a0;
+  --splitter-hover: rgba(87, 162, 255, 0.36);
+  --control-bg: #1a2433;
+  --control-border: #2d4058;
+  --control-hover: #222f43;
+  --tab-active-bg: #121a27;
+  --tab-active-border: #405773;
+  --table-divider: #223245;
+  --table-header-bg: #131d2d;
+  --table-row-alt: transparent;
+  --schema-chip-bg: #20324a;
+  --schema-chip-border: #3a5578;
+  --schema-chip-text: #adc3de;
+  --link-hover: #c1d7ef;
+  --row-new-bg: rgba(68, 134, 207, 0.22);
+  --row-dirty-bg: rgba(124, 94, 49, 0.28);
+  --tree-selected-text: #e6eefb;
+  --editor-surface: #0d1522;
+  --editor-gutter-bg: #141c2a;
+  --editor-gutter-border: #29384d;
+  --editor-gutter-text: #8196b2;
+  --editor-focus-outline: #4b6e99;
+  --editor-text: #dbe7f6;
+  --editor-caret: #7ab6ff;
+  --editor-active-line: rgba(82, 120, 166, 0.22);
+  --editor-active-gutter: rgba(82, 120, 166, 0.3);
+  --editor-selection: rgba(93, 145, 207, 0.3);
+  --editor-selection-focused: rgba(105, 163, 231, 0.42);
+  --editor-placeholder: #7489a3;
+  --editor-token-keyword: #cf78ff;
+  --editor-token-operator: #9bb2cd;
+  --editor-token-string: #ffb569;
+  --editor-token-number: #7bd8ff;
+  --editor-token-comment: #7e95b3;
+  --editor-token-type: #76c7ff;
+  --editor-token-variable: #dbe7f6;
+  --editor-token-property: #e4edf9;
+  --editor-token-function: #9bc4ff;
+  --resizer-line: #2a3c53;
+  --resizer-line-hover: #69adff;
+  --scrollbar-thumb: rgba(123, 147, 175, 0.34);
+  --scrollbar-thumb-hover: rgba(123, 157, 196, 0.54);
   color-scheme: dark;
 }
 
@@ -501,6 +557,8 @@ body {
   height: 100vh;
   margin: 0;
   overflow: hidden;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
 }
 
 #app {
@@ -508,8 +566,25 @@ body {
   overflow: hidden;
 }
 
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
 .desktop-shell {
-  --splitter-size: 6px;
+  --splitter-size: 5px;
   height: 100%;
   display: grid;
   grid-template-columns: var(--sidebar-width, 330px) var(--splitter-size) minmax(0, 1fr);
@@ -539,8 +614,8 @@ body {
 .dialog {
   width: min(36rem, 100%);
   background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border: 1px solid var(--panel-separator);
+  border-radius: 10px;
   box-shadow: var(--dialog-shadow);
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -548,19 +623,19 @@ body {
 }
 
 .dialog-header {
-  padding: 0.75rem 0.85rem;
+  padding: 0.6rem 0.75rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface-muted);
 }
 
 .dialog-title {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   font-weight: 600;
 }
 
 .dialog-body {
-  padding: 0.8rem;
+  padding: 0.7rem;
   display: grid;
   gap: 0.6rem;
   overflow: auto;
@@ -582,9 +657,9 @@ body {
 
 .dialog-body input,
 .dialog-body select {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-surface);
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-bg);
   padding: 0.38rem 0.45rem;
   font: inherit;
   color: var(--text-primary);
@@ -592,7 +667,7 @@ body {
 
 .dialog-body input:focus-visible,
 .dialog-body select:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -626,23 +701,23 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: 0.45rem;
-  padding: 0.65rem 0.8rem;
+  padding: 0.55rem 0.75rem;
   border-top: 1px solid var(--border);
   background: var(--bg-surface-muted);
 }
 
 .dialog .btn {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-surface);
-  padding: 0.34rem 0.62rem;
-  font-size: 0.76rem;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-bg);
+  padding: 0.28rem 0.54rem;
+  font-size: 0.74rem;
   cursor: pointer;
   color: var(--text-primary);
 }
 
 .dialog .btn:hover:not(:disabled) {
-  background: var(--bg-hover);
+  background: var(--control-hover);
 }
 
 .dialog .btn:disabled {
@@ -696,7 +771,7 @@ body {
 }
 
 .panel-resizer {
-  background: var(--bg-surface-muted);
+  background: transparent;
   position: relative;
   z-index: 2;
   touch-action: none;
@@ -705,24 +780,37 @@ body {
 .panel-resizer::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--resizer-line);
   transition: background-color 0.12s ease;
+  opacity: 0.9;
 }
 
 .panel-resizer:hover::after {
-  background: var(--splitter-hover);
+  background: var(--resizer-line-hover);
 }
 
 .panel-resizer.vertical {
   cursor: col-resize;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  border: 0;
 }
 
 .panel-resizer.horizontal {
   cursor: row-resize;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border: 0;
+}
+
+.panel-resizer.horizontal::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  width: auto;
+  height: 1px;
+  transform: translateY(-50%);
 }
 
 @media (max-width: 980px) {
@@ -733,10 +821,16 @@ body {
 
   .panel-resizer.vertical {
     cursor: row-resize;
-    border-left: 0;
-    border-right: 0;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
+    border: 0;
+  }
+
+  .panel-resizer.vertical::after {
+    left: 0;
+    right: 0;
+    top: 50%;
+    width: auto;
+    height: 1px;
+    transform: translateY(-50%);
   }
 
   .workspace {

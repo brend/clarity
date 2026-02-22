@@ -2,8 +2,10 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView, placeholder as cmPlaceholder, type ViewUpdate } from "@codemirror/view";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { basicSetup } from "codemirror";
 import { sql } from "@codemirror/lang-sql";
+import { tags } from "@lezer/highlight";
 import type { ThemeSetting } from "../types/settings";
 
 const props = withDefaults(
@@ -35,9 +37,9 @@ const readOnlyCompartment = new Compartment();
 const placeholderCompartment = new Compartment();
 const languageCompartment = new Compartment();
 const themeCompartment = new Compartment();
+const syntaxCompartment = new Compartment();
 
 function buildEditorTheme(theme: ThemeSetting): Extension {
-  const isDark = theme === "dark";
   return EditorView.theme({
     "&": {
       height: "100%",
@@ -46,16 +48,17 @@ function buildEditorTheme(theme: ThemeSetting): Extension {
     },
     ".cm-scroller": {
       fontFamily: 'Consolas, "Courier New", monospace',
-      fontSize: "0.82rem",
-      lineHeight: "1.42",
-      color: "var(--text-primary)",
+      fontSize: "0.8rem",
+      lineHeight: "1.38",
+      color: "var(--editor-text)",
     },
     ".cm-content": {
-      padding: "0.6rem 0",
-      caretColor: isDark ? "#9ec8ff" : "#4f6f96",
+      padding: "0.44rem 0",
+      caretColor: "var(--editor-caret)",
     },
     ".cm-line": {
-      padding: "0 0.6rem",
+      padding: "0 0.5rem",
+      color: "var(--editor-text)",
     },
     ".cm-gutters": {
       borderRight: "1px solid var(--editor-gutter-border)",
@@ -63,24 +66,41 @@ function buildEditorTheme(theme: ThemeSetting): Extension {
       color: "var(--editor-gutter-text)",
     },
     ".cm-activeLine": {
-      backgroundColor: isDark ? "rgba(76, 96, 124, 0.28)" : "rgba(248, 250, 253, 0.55)",
+      backgroundColor: "var(--editor-active-line)",
     },
     ".cm-activeLineGutter": {
-      backgroundColor: isDark ? "rgba(62, 81, 106, 0.42)" : "#eff3f8",
+      backgroundColor: "var(--editor-active-gutter)",
     },
     ".cm-selectionBackground": {
-      backgroundColor: isDark ? "rgba(88, 125, 168, 0.45)" : "#dbe7f5",
+      backgroundColor: "var(--editor-selection)",
     },
     "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
-      backgroundColor: isDark ? "rgba(99, 145, 197, 0.56)" : "#c7dbf2",
+      backgroundColor: "var(--editor-selection-focused)",
     },
     ".cm-cursor": {
-      borderLeftColor: isDark ? "#9ec8ff" : "#5f7fa7",
+      borderLeftColor: "var(--editor-caret)",
     },
     ".cm-placeholder": {
-      color: isDark ? "#7e90a7" : "#8a97a6",
+      color: "var(--editor-placeholder)",
     },
-  });
+  }, { dark: theme === "dark" });
+}
+
+function buildHighlightTheme(): Extension {
+  return syntaxHighlighting(
+    HighlightStyle.define([
+      { tag: [tags.keyword, tags.controlKeyword, tags.modifier], color: "var(--editor-token-keyword)" },
+      { tag: [tags.operator, tags.derefOperator], color: "var(--editor-token-operator)" },
+      { tag: [tags.string, tags.special(tags.string)], color: "var(--editor-token-string)" },
+      { tag: [tags.number, tags.bool, tags.null], color: "var(--editor-token-number)" },
+      { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--editor-token-comment)" },
+      { tag: [tags.typeName, tags.className, tags.namespace], color: "var(--editor-token-type)" },
+      { tag: [tags.variableName, tags.standard(tags.name)], color: "var(--editor-token-variable)" },
+      { tag: [tags.propertyName, tags.attributeName], color: "var(--editor-token-property)" },
+      { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--editor-token-function)" },
+      { tag: [tags.punctuation, tags.bracket, tags.paren], color: "var(--editor-text)" },
+    ]),
+  );
 }
 
 function buildPlaceholderExtension(value: string): Extension {
@@ -125,6 +145,7 @@ onMounted(() => {
       extensions: [
         basicSetup,
         themeCompartment.of(buildEditorTheme(props.theme)),
+        syntaxCompartment.of(buildHighlightTheme()),
         languageCompartment.of(sql()),
         readOnlyCompartment.of(EditorState.readOnly.of(props.readOnly)),
         placeholderCompartment.of(buildPlaceholderExtension(props.placeholder)),
@@ -185,6 +206,7 @@ watch(
   () => props.theme,
   (nextTheme) => {
     updateCompartment(themeCompartment, buildEditorTheme(nextTheme));
+    updateCompartment(syntaxCompartment, buildHighlightTheme());
   },
 );
 

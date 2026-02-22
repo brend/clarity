@@ -47,7 +47,7 @@ const props = defineProps<{
 <style scoped>
 .results-pane {
   display: grid;
-  grid-template-rows: 34px 1fr;
+  grid-template-rows: 30px 1fr;
   min-height: 0;
   background: var(--bg-surface);
   overflow: hidden;
@@ -56,20 +56,20 @@ const props = defineProps<{
 .results-header {
   display: flex;
   align-items: center;
-  padding: 0 0.55rem;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface-muted);
+  padding: 0 0.48rem;
+  border-bottom: 1px solid var(--panel-separator);
+  background: var(--table-header-bg);
 }
 
 .results-title {
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.73rem;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
 .error-inline {
   margin-left: auto;
-  font-size: 0.74rem;
+  font-size: 0.69rem;
   color: var(--danger);
   white-space: nowrap;
   overflow: hidden;
@@ -87,21 +87,23 @@ const props = defineProps<{
 .results-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.78rem;
+  font-size: 0.73rem;
   margin: 0;
 }
 
 .results-table th,
 .results-table td {
-  border: 1px solid var(--border);
+  border: 0;
+  border-bottom: 1px solid var(--table-divider);
   text-align: left;
-  padding: 0.32rem 0.44rem;
+  padding: 0.26rem 0.38rem;
 }
 
 .results-table th {
-  background: var(--bg-surface-muted);
+  background: var(--table-header-bg);
   position: sticky;
   top: 0;
+  font-weight: 600;
 }
 
 .results-table tbody tr:nth-child(even) {
@@ -119,6 +121,6 @@ const props = defineProps<{
 
 .muted {
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.71rem;
 }
 </style>

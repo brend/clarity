@@ -295,7 +295,7 @@ function toggleConnectionPanel(): void {
 
 <style scoped>
 .explorer-sidebar {
-  border-right: 1px solid var(--border-strong);
+  border-right: 1px solid var(--panel-separator);
   background: var(--bg-sidebar);
   display: flex;
   flex-direction: column;
@@ -306,24 +306,24 @@ function toggleConnectionPanel(): void {
 
 .sidebar-header {
   height: var(--pane-header-height);
-  padding: 0 0.8rem;
+  padding: 0 0.68rem;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.82rem;
-  font-weight: 600;
+  border-bottom: 1px solid var(--panel-separator);
+  font-size: 0.77rem;
+  font-weight: 500;
   letter-spacing: 0.01em;
   background: var(--bg-surface-muted);
 }
 
 .connect-box {
-  padding: 0.65rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 0.55rem;
+  border-bottom: 1px solid var(--panel-separator);
 }
 
 .connect-title {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.76rem;
+  font-weight: 500;
 }
 
 .connect-heading {
@@ -357,10 +357,10 @@ function toggleConnectionPanel(): void {
 
 .profile-controls {
   display: grid;
-  gap: 0.45rem;
-  margin-bottom: 0.65rem;
-  padding-bottom: 0.65rem;
-  border-bottom: 1px solid var(--border);
+  gap: 0.38rem;
+  margin-bottom: 0.52rem;
+  padding-bottom: 0.52rem;
+  border-bottom: 1px solid var(--panel-separator);
 }
 
 .profile-actions {
@@ -389,8 +389,8 @@ function toggleConnectionPanel(): void {
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.75rem;
+  gap: 0.2rem;
+  font-size: 0.71rem;
   color: var(--text-secondary);
 }
 
@@ -405,16 +405,16 @@ button {
 input,
 select,
 textarea {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-surface);
-  padding: 0.38rem 0.45rem;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-bg);
+  padding: 0.27rem 0.36rem;
 }
 
 input:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -425,11 +425,11 @@ button:focus-visible {
 }
 
 .btn {
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  background: var(--bg-surface);
-  padding: 0.34rem 0.6rem;
-  font-size: 0.76rem;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: var(--control-bg);
+  padding: 0.24rem 0.46rem;
+  font-size: 0.71rem;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
   display: inline-flex;
@@ -438,8 +438,8 @@ button:focus-visible {
 }
 
 .btn:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border-strong);
+  background: var(--control-hover);
+  border-color: var(--control-border);
 }
 
 .btn:disabled {
@@ -466,7 +466,7 @@ button:focus-visible {
 
 .session-line {
   margin-top: 0.24rem;
-  font-size: 0.72rem;
+  font-size: 0.69rem;
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -478,11 +478,11 @@ button:focus-visible {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.65rem;
+  padding: 0.48rem 0.52rem;
 }
 
 .tree-caption {
-  font-size: 0.76rem;
+  font-size: 0.71rem;
   color: var(--text-secondary);
   margin-bottom: 0.45rem;
 }
@@ -500,15 +500,15 @@ button:focus-visible {
 
 .tree-row {
   width: 100%;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.24rem 0.34rem;
-  border-radius: 4px;
-  font-size: 0.74rem;
+  gap: 0.26rem;
+  padding: 0.2rem 0.28rem;
+  border-radius: 5px;
+  font-size: 0.71rem;
   cursor: pointer;
 }
 
@@ -518,7 +518,7 @@ button:focus-visible {
 }
 
 .tree-type:hover {
-  background: var(--bg-hover);
+  background: var(--control-hover);
 }
 
 .tree-caret-icon {
@@ -550,11 +550,12 @@ button:focus-visible {
 }
 
 .tree-node:hover {
-  background: var(--bg-hover);
+  background: var(--control-hover);
 }
 
 .tree-node.selected {
-  background: var(--bg-selected);
+  background: var(--tab-active-bg);
+  border-color: var(--tab-active-border);
   color: var(--tree-selected-text);
 }
 
@@ -573,13 +574,13 @@ button:focus-visible {
 
 .muted {
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.71rem;
 }
 
 @media (max-width: 980px) {
   .explorer-sidebar {
     border-right: 0;
-    border-bottom: 1px solid var(--border-strong);
+    border-bottom: 1px solid var(--panel-separator);
   }
 
   .field-grid {
