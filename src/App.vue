@@ -99,8 +99,9 @@ const exportProgressUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressProcessed = ref(0);
 const exportProgressTotal = ref(0);
 const exportProgressCurrentObject = ref("");
-const { theme, updateTheme } = useUserSettings();
+const { settings, theme, updateTheme, updateOracleClientLibDir } = useUserSettings();
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
+const settingsDialogOracleClientLibDir = ref(settings.value.oracleClientLibDir);
 const canRunSchemaExport = computed<boolean>(() => {
   return (
     Number.isFinite(selectedExportSessionId.value) &&
@@ -142,6 +143,7 @@ function openExportDialogFromMenu(): void {
 
 function openSettingsDialog(): void {
   settingsDialogTheme.value = theme.value;
+  settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
   showSettingsDialog.value = true;
 }
 
@@ -151,6 +153,7 @@ function closeSettingsDialog(): void {
 
 function saveSettingsDialog(): void {
   updateTheme(settingsDialogTheme.value);
+  updateOracleClientLibDir(settingsDialogOracleClientLibDir.value);
   showSettingsDialog.value = false;
 }
 
@@ -240,7 +243,7 @@ onBeforeUnmount(() => {
       :on-apply-selected-profile="applySelectedProfile"
       :on-delete-selected-profile="deleteSelectedProfile"
       :on-save-connection-profile="saveConnectionProfile"
-      :on-connect="connectOracle"
+      :on-connect="() => connectOracle(settings.oracleClientLibDir)"
       :on-disconnect="disconnectOracle"
       :on-refresh-objects="refreshObjects"
       :on-toggle-object-type="toggleObjectType"
@@ -332,6 +335,24 @@ onBeforeUnmount(() => {
             <input v-model="settingsDialogTheme" type="radio" value="dark" />
             <span>Dark</span>
           </label>
+        </fieldset>
+        <fieldset class="settings-group">
+          <legend>Oracle</legend>
+          <label class="settings-field">
+            <span>Instant Client Library Directory (optional)</span>
+            <input
+              v-model.trim="settingsDialogOracleClientLibDir"
+              placeholder="/opt/homebrew/lib/instantclient_23_3"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+          <p class="muted settings-hint">
+            Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new Oracle connections in this app.
+          </p>
         </fieldset>
       </div>
 
@@ -695,6 +716,16 @@ body {
 
 .settings-option input {
   margin: 0;
+}
+
+.settings-field {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.settings-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
 }
 
 .dialog-footer {

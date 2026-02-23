@@ -21,7 +21,7 @@ pub(crate) struct OracleSession {
 pub(crate) fn connect(
     request: &DbConnectRequest,
 ) -> Result<(OracleSession, String, String), String> {
-    ensure_oracle_client_initialized()?;
+    ensure_oracle_client_initialized(request.oracle_client_lib_dir.as_deref())?;
 
     let host = request.host.trim();
     let port = request.port.unwrap_or(1521);
@@ -413,7 +413,16 @@ fn normalize_ddl_for_execute(ddl: String) -> String {
     lines.join("\n")
 }
 
-fn ensure_oracle_client_initialized() -> Result<(), String> {
+fn ensure_oracle_client_initialized(oracle_client_lib_dir_override: Option<&str>) -> Result<(), String> {
+    let normalized_override = oracle_client_lib_dir_override
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+
+    if let Some(path) = normalized_override.as_ref() {
+        env::set_var("ORACLE_CLIENT_LIB_DIR", path);
+    }
+
     if InitParams::is_initialized() {
         return Ok(());
     }
@@ -421,13 +430,16 @@ fn ensure_oracle_client_initialized() -> Result<(), String> {
     let mut params = InitParams::new();
     let mut chosen_lib_dir: Option<PathBuf> = None;
 
-    if let Some(path) = env::var_os("ORACLE_CLIENT_LIB_DIR").map(PathBuf::from) {
+    if let Some(path) = normalized_override {
+        chosen_lib_dir = Some(path);
+    } else if let Some(path) = env::var_os("ORACLE_CLIENT_LIB_DIR").map(PathBuf::from) {
         chosen_lib_dir = Some(path);
     } else if cfg!(target_os = "macos") {
         chosen_lib_dir = detect_macos_instant_client_dir();
     }
 
     if let Some(dir) = chosen_lib_dir.as_ref() {
+        env::set_var("ORACLE_CLIENT_LIB_DIR", dir);
         params
             .oracle_client_lib_dir(dir)
             .map_err(map_oracle_error)?;
@@ -449,7 +461,7 @@ fn ensure_oracle_client_initialized() -> Result<(), String> {
             };
 
             return format!(
-                "{} Oracle Client libraries are required.{} On macOS, install Instant Client and start the app with ORACLE_CLIENT_LIB_DIR set.",
+                "{} Oracle Client libraries are required.{} Configure Oracle Instant Client in app settings or set ORACLE_CLIENT_LIB_DIR before launch.",
                 base, env_hint
             );
         }

@@ -8,6 +8,7 @@ export interface OracleConnectRequest {
   username: string;
   password: string;
   schema: string;
+  oracleClientLibDir?: string;
 }
 
 export interface OracleSessionSummary {

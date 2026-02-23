@@ -19,7 +19,8 @@ The app now uses a live Oracle provider via the Rust `oracle` crate.
 
 - Oracle Client libraries are required at runtime (Oracle Instant Client is the common setup).
 - If they are not available, connection attempts typically fail with `DPI-1047`.
-- On macOS dev runs, set `ORACLE_CLIENT_LIB_DIR` to the directory containing `libclntsh.dylib`.
+- You can configure the Oracle client library directory in the app via `Tools -> Settings -> Oracle`.
+- You can also set `ORACLE_CLIENT_LIB_DIR` to the directory containing `libclntsh.dylib`.
 
 Example:
 

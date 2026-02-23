@@ -5,6 +5,7 @@ const USER_SETTINGS_STORAGE_KEY = "clarity.user-settings.v1";
 const THEME_ATTRIBUTE_NAME = "data-theme";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   theme: "light",
+  oracleClientLibDir: "",
 };
 
 function isThemeSetting(value: unknown): value is ThemeSetting {
@@ -17,8 +18,11 @@ function normalizeUserSettings(value: unknown): UserSettings {
   }
 
   const raw = value as Partial<UserSettings>;
+  const normalizedOracleClientLibDir =
+    typeof raw.oracleClientLibDir === "string" ? raw.oracleClientLibDir.trim() : "";
   return {
     theme: isThemeSetting(raw.theme) ? raw.theme : DEFAULT_USER_SETTINGS.theme,
+    oracleClientLibDir: normalizedOracleClientLibDir,
   };
 }
 
@@ -89,9 +93,22 @@ export function useUserSettings() {
     };
   }
 
+  function updateOracleClientLibDir(value: string): void {
+    const normalized = value.trim();
+    if (settings.value.oracleClientLibDir === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      oracleClientLibDir: normalized,
+    };
+  }
+
   return {
     settings,
     theme,
     updateTheme,
+    updateOracleClientLibDir,
   };
 }

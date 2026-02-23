@@ -953,13 +953,18 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function connectOracle(): Promise<void> {
+  async function connectOracle(oracleClientLibDirOverride?: string): Promise<void> {
     errorMessage.value = "";
     busy.connecting = true;
 
     try {
+      const oracleClientLibDir = oracleClientLibDirOverride?.trim();
+      const connectRequest: OracleConnectRequest = {
+        ...connection,
+        ...(oracleClientLibDir ? { oracleClientLibDir } : {}),
+      };
       const summary = await invoke<OracleSessionSummary>("db_connect", {
-        request: connection,
+        request: connectRequest,
       });
 
       session.value = summary;

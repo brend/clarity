@@ -30,6 +30,7 @@ struct DbConnectRequest {
     username: String,
     password: String,
     schema: String,
+    oracle_client_lib_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
