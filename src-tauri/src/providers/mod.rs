@@ -1,8 +1,8 @@
 pub(crate) mod oracle;
 
 use crate::{
-    DbConnectRequest, OracleDdlUpdateRequest, OracleObjectEntry, OracleObjectRef,
-    OracleQueryRequest, OracleQueryResult, OracleSourceSearchRequest, OracleSourceSearchResult,
+    DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
+    OracleObjectEntry, OracleObjectRef, OracleQueryRequest, OracleQueryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -93,13 +93,13 @@ impl ProviderRegistry {
         }
     }
 
-    pub(crate) fn search_source_code(
+    pub(crate) fn search_schema_text(
         session: &AppSession,
-        request: &OracleSourceSearchRequest,
-    ) -> Result<Vec<OracleSourceSearchResult>, String> {
+        request: &DbSchemaSearchRequest,
+    ) -> Result<Vec<DbSchemaSearchResult>, String> {
         match (session.provider, &session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
-                oracle::search_source_code(oracle_session, request)
+                oracle::search_schema_text(oracle_session, request)
             }
             (provider, _) => Err(not_implemented_error(provider)),
         }

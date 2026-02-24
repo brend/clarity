@@ -11,6 +11,7 @@ import type { ThemeSetting } from "./types/settings";
 
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG = "clarity://open-export-database-dialog";
 const EVENT_OPEN_SETTINGS_DIALOG = "clarity://open-settings-dialog";
+const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
 
 const desktopShellEl = ref<HTMLElement | null>(null);
@@ -51,9 +52,13 @@ const {
   activeQueryText,
   activeDdlText,
   queryRowLimit,
-  sourceSearchText,
-  sourceSearchResults,
-  sourceSearchPerformed,
+  schemaSearchText,
+  schemaSearchIncludeObjectNames,
+  schemaSearchIncludeSource,
+  schemaSearchIncludeDdl,
+  schemaSearchFocusToken,
+  schemaSearchResults,
+  schemaSearchPerformed,
   queryResult,
   exportDestinationDirectory,
   selectedExportSessionId,
@@ -85,8 +90,8 @@ const {
   refreshObjects,
   saveDdl,
   runQuery,
-  runSourceSearch,
-  openSourceSearchResult,
+  runSchemaSearch,
+  openSchemaSearchResult,
   isLikelyNumeric,
 } = useClarityWorkspace();
 
@@ -95,6 +100,7 @@ const showSettingsDialog = ref(false);
 const exportSummaryMessage = ref("");
 const exportMenuUnlisten = ref<UnlistenFn | null>(null);
 const settingsMenuUnlisten = ref<UnlistenFn | null>(null);
+const searchMenuUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressProcessed = ref(0);
 const exportProgressTotal = ref(0);
@@ -197,6 +203,11 @@ onMounted(() => {
   }).then((unlisten) => {
     settingsMenuUnlisten.value = unlisten;
   });
+  void listen(EVENT_OPEN_SCHEMA_SEARCH, () => {
+    openSearchTab(true);
+  }).then((unlisten) => {
+    searchMenuUnlisten.value = unlisten;
+  });
   void listen<SchemaExportProgressPayload>(EVENT_SCHEMA_EXPORT_PROGRESS, (event) => {
     const payload = event.payload;
     exportProgressProcessed.value = payload.processedObjects ?? 0;
@@ -219,6 +230,10 @@ onBeforeUnmount(() => {
   if (settingsMenuUnlisten.value) {
     settingsMenuUnlisten.value();
     settingsMenuUnlisten.value = null;
+  }
+  if (searchMenuUnlisten.value) {
+    searchMenuUnlisten.value();
+    searchMenuUnlisten.value = null;
   }
 });
 </script>
@@ -263,12 +278,16 @@ onBeforeUnmount(() => {
         v-model:query-text="activeQueryText"
         v-model:ddl-text="activeDdlText"
         v-model:query-row-limit="queryRowLimit"
-        v-model:source-search-text="sourceSearchText"
+        v-model:schema-search-text="schemaSearchText"
+        v-model:schema-search-include-object-names="schemaSearchIncludeObjectNames"
+        v-model:schema-search-include-source="schemaSearchIncludeSource"
+        v-model:schema-search-include-ddl="schemaSearchIncludeDdl"
         :status-message="statusMessage"
         :query-tabs="queryTabs"
         :ddl-tabs="ddlTabs"
         :active-workspace-tab-id="activeWorkspaceTabId"
         :is-search-tab-active="isSearchTabActive"
+        :schema-search-focus-token="schemaSearchFocusToken"
         :is-connected="isConnected"
         :busy="busy"
         :active-query-tab="activeQueryTab"
@@ -282,13 +301,13 @@ onBeforeUnmount(() => {
         :selected-provider-label="selectedProviderLabel"
         :connected-schema="connectedSchema"
         :is-query-tab-active="isQueryTabActive"
-        :source-search-results="sourceSearchResults"
-        :source-search-performed="sourceSearchPerformed"
+        :schema-search-results="schemaSearchResults"
+        :schema-search-performed="schemaSearchPerformed"
         :theme="theme"
         :on-activate-workspace-tab="activateWorkspaceTab"
         :on-close-query-tab="closeQueryTab"
         :on-add-query-tab="addQueryTab"
-        :on-open-search-tab="openSearchTab"
+        :on-open-search-tab="() => openSearchTab(true)"
         :on-open-settings="openSettingsDialog"
         :on-close-ddl-tab="closeDdlTab"
         :on-run-query="runQuery"
@@ -297,8 +316,8 @@ onBeforeUnmount(() => {
         :on-update-active-object-data-row="updateActiveObjectDataRow"
         :on-insert-active-object-data-row="insertActiveObjectDataRow"
         :on-activate-object-detail-tab="activateObjectDetailTab"
-        :on-run-source-search="runSourceSearch"
-        :on-open-source-search-result="openSourceSearchResult"
+        :on-run-schema-search="runSchemaSearch"
+        :on-open-schema-search-result="openSchemaSearchResult"
         :is-likely-numeric="isLikelyNumeric"
       />
 

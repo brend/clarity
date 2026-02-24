@@ -8,7 +8,7 @@ import type {
   ObjectDetailTabId,
   OracleObjectEntry,
   OracleQueryResult,
-  OracleSourceSearchResult,
+  OracleSchemaSearchResult,
   WorkspaceDdlTab,
   WorkspaceQueryTab,
 } from "../types/clarity";
@@ -17,7 +17,10 @@ import type { ThemeSetting } from "../types/settings";
 const queryText = defineModel<string>("queryText", { required: true });
 const ddlText = defineModel<string>("ddlText", { required: true });
 const queryRowLimit = defineModel<number>("queryRowLimit", { required: true });
-const sourceSearchText = defineModel<string>("sourceSearchText", { required: true });
+const schemaSearchText = defineModel<string>("schemaSearchText", { required: true });
+const schemaSearchIncludeObjectNames = defineModel<boolean>("schemaSearchIncludeObjectNames", { required: true });
+const schemaSearchIncludeSource = defineModel<boolean>("schemaSearchIncludeSource", { required: true });
+const schemaSearchIncludeDdl = defineModel<boolean>("schemaSearchIncludeDdl", { required: true });
 
 const props = defineProps<{
   statusMessage: string;
@@ -25,6 +28,7 @@ const props = defineProps<{
   ddlTabs: WorkspaceDdlTab[];
   activeWorkspaceTabId: string;
   isSearchTabActive: boolean;
+  schemaSearchFocusToken: number;
   isConnected: boolean;
   busy: BusyState;
   activeQueryTab: WorkspaceQueryTab | null;
@@ -38,8 +42,8 @@ const props = defineProps<{
   selectedProviderLabel: string;
   connectedSchema: string;
   isQueryTabActive: boolean;
-  sourceSearchResults: OracleSourceSearchResult[];
-  sourceSearchPerformed: boolean;
+  schemaSearchResults: OracleSchemaSearchResult[];
+  schemaSearchPerformed: boolean;
   theme: ThemeSetting;
   onActivateWorkspaceTab: (tabId: string) => void;
   onCloseQueryTab: (tabId: string) => void;
@@ -53,8 +57,8 @@ const props = defineProps<{
   onUpdateActiveObjectDataRow: (rowIndex: number, values: string[]) => Promise<boolean>;
   onInsertActiveObjectDataRow: (values: string[]) => Promise<boolean>;
   onActivateObjectDetailTab: (tabId: ObjectDetailTabId) => void;
-  onRunSourceSearch: () => void;
-  onOpenSourceSearchResult: (result: OracleSourceSearchResult) => void;
+  onRunSchemaSearch: () => void;
+  onOpenSchemaSearchResult: (result: OracleSchemaSearchResult) => void;
   isLikelyNumeric: (value: string) => boolean;
 }>();
 
@@ -62,6 +66,7 @@ const dataDraftRows = ref<string[][]>([]);
 const committingDataChanges = ref(false);
 const suppressDraftSync = ref(false);
 const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
+const schemaSearchInputEl = ref<HTMLInputElement | null>(null);
 
 const isDataDetailTab = computed<boolean>(() => props.activeObjectDetailTabId === "data");
 const showEditableRowActions = computed<boolean>(() => {
@@ -248,6 +253,37 @@ watch(
   },
   { immediate: true },
 );
+
+function focusSchemaSearchInput(selectText: boolean): void {
+  void nextTick(() => {
+    const input = schemaSearchInputEl.value;
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    if (selectText) {
+      input.select();
+    }
+  });
+}
+
+function formatSearchScopeLabel(scope: OracleSchemaSearchResult["matchScope"]): string {
+  if (scope === "object_name") {
+    return "Object Name";
+  }
+  if (scope === "ddl") {
+    return "DDL";
+  }
+  return "Source";
+}
+
+watch(
+  () => props.schemaSearchFocusToken,
+  () => {
+    focusSchemaSearchInput(true);
+  },
+);
 </script>
 
 <template>
@@ -287,7 +323,7 @@ watch(
       <div class="sheet-tab-wrap" :class="{ active: props.isSearchTabActive }">
         <button class="sheet-tab sheet-tab-search" @click="props.onOpenSearchTab">
           <AppIcon name="search" class="sheet-tab-icon" aria-hidden="true" />
-          Code Search
+          Search
         </button>
       </div>
       <div
@@ -479,52 +515,72 @@ watch(
     <section v-else-if="props.isSearchTabActive" class="source-search-pane">
       <div class="source-search-toolbar">
         <input
-          v-model="sourceSearchText"
+          ref="schemaSearchInputEl"
+          v-model="schemaSearchText"
           class="source-search-input"
-          placeholder="Search procedures, packages, functions, triggers, and types"
+          placeholder="Search object names, source, and DDL in this schema"
           spellcheck="false"
           autocomplete="off"
           autocorrect="off"
           autocapitalize="off"
           data-gramm="false"
-          @keydown.enter.prevent="props.onRunSourceSearch"
+          @keydown.enter.prevent="props.onRunSchemaSearch"
         />
+        <label class="search-scope-toggle">
+          <input v-model="schemaSearchIncludeObjectNames" type="checkbox" />
+          Object names
+        </label>
+        <label class="search-scope-toggle">
+          <input v-model="schemaSearchIncludeSource" type="checkbox" />
+          Source
+        </label>
+        <label class="search-scope-toggle">
+          <input v-model="schemaSearchIncludeDdl" type="checkbox" />
+          DDL
+        </label>
         <button
           class="btn primary"
-          :disabled="!props.isConnected || props.busy.searchingSource || !sourceSearchText.trim()"
-          @click="props.onRunSourceSearch"
+          :disabled="
+            !props.isConnected ||
+            props.busy.searchingSchema ||
+            !schemaSearchText.trim() ||
+            (!schemaSearchIncludeObjectNames && !schemaSearchIncludeSource && !schemaSearchIncludeDdl)
+          "
+          @click="props.onRunSchemaSearch"
         >
           <AppIcon name="search" class="btn-icon" aria-hidden="true" />
-          {{ props.busy.searchingSource ? "Searching..." : "Search" }}
+          {{ props.busy.searchingSchema ? "Searching..." : "Search" }}
         </button>
       </div>
 
       <div class="source-search-content">
-        <p v-if="!props.sourceSearchPerformed" class="muted">Run a search to find matching code lines.</p>
-        <p v-else-if="!props.sourceSearchResults.length" class="muted">No matches found.</p>
+        <p v-if="!props.schemaSearchPerformed" class="muted">Run a schema search to find matching objects and text.</p>
+        <p v-else-if="!props.schemaSearchResults.length" class="muted">No matches found.</p>
 
         <table v-else class="source-search-table">
           <thead>
             <tr>
               <th>Object</th>
               <th>Type</th>
+              <th>Scope</th>
               <th>Line</th>
-              <th>Source</th>
+              <th>Snippet</th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="match in props.sourceSearchResults"
-              :key="`${match.schema}:${match.objectType}:${match.objectName}:${match.line}:${match.text}`"
+              v-for="match in props.schemaSearchResults"
+              :key="`${match.schema}:${match.objectType}:${match.objectName}:${match.matchScope}:${match.line}:${match.snippet}`"
             >
               <td>
-                <button class="source-result-link" @click="props.onOpenSourceSearchResult(match)">
+                <button class="source-result-link" @click="props.onOpenSchemaSearchResult(match)">
                   {{ match.schema }}.{{ match.objectName }}
                 </button>
               </td>
               <td>{{ match.objectType }}</td>
-              <td class="results-cell-number">{{ match.line }}</td>
-              <td class="source-search-line">{{ match.text }}</td>
+              <td>{{ formatSearchScopeLabel(match.matchScope) }}</td>
+              <td class="results-cell-number">{{ match.line ?? "-" }}</td>
+              <td class="source-search-line">{{ match.snippet }}</td>
             </tr>
           </tbody>
         </table>
@@ -797,6 +853,7 @@ button:focus-visible {
 .source-search-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.4rem;
   padding: 0.45rem 0.55rem;
   border-bottom: 1px solid var(--panel-separator);
@@ -804,7 +861,21 @@ button:focus-visible {
 }
 
 .source-search-input {
-  width: min(34rem, 100%);
+  flex: 1 1 18rem;
+  min-width: 14rem;
+}
+
+.search-scope-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  font-size: 0.69rem;
+  color: var(--text-secondary);
+}
+
+.search-scope-toggle input {
+  width: auto;
+  margin: 0;
 }
 
 .source-search-content {

@@ -8,8 +8,8 @@ import type {
   OracleConnectRequest,
   OracleObjectEntry,
   OracleQueryResult,
+  OracleSchemaSearchResult,
   OracleSessionSummary,
-  OracleSourceSearchResult,
   SchemaExportResult,
   SchemaExportTarget,
   WorkspaceDdlTab,
@@ -163,14 +163,18 @@ export function useClarityWorkspace() {
   ]);
   const queryTabNumber = ref(2);
   const queryResult = ref<OracleQueryResult | null>(null);
-  const sourceSearchText = ref("");
+  const schemaSearchText = ref("");
+  const schemaSearchIncludeObjectNames = ref(true);
+  const schemaSearchIncludeSource = ref(true);
+  const schemaSearchIncludeDdl = ref(true);
+  const schemaSearchFocusToken = ref(0);
   const exportDestinationDirectory = ref("");
   const selectedExportSessionId = ref<number | null>(null);
   const queryRowLimit = ref(
     clampQueryRowLimit(readDebugPositiveInteger(import.meta.env.VITE_QUERY_ROW_LIMIT, DEFAULT_QUERY_ROW_LIMIT)),
   );
-  const sourceSearchResults = ref<OracleSourceSearchResult[]>([]);
-  const sourceSearchPerformed = ref(false);
+  const schemaSearchResults = ref<OracleSchemaSearchResult[]>([]);
+  const schemaSearchPerformed = ref(false);
   const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
   const errorMessage = ref("");
   const activeWorkspaceTabId = ref(FIRST_QUERY_TAB_ID);
@@ -188,7 +192,7 @@ export function useClarityWorkspace() {
     runningQuery: false,
     updatingData: false,
     exportingSchema: false,
-    searchingSource: false,
+    searchingSchema: false,
   });
 
   const isConnected = computed(() => session.value !== null);
@@ -434,8 +438,11 @@ export function useClarityWorkspace() {
     activateWorkspaceTab(tabId);
   }
 
-  function openSearchTab(): void {
+  function openSearchTab(focusInput = false): void {
     activateWorkspaceTab(SEARCH_TAB_ID);
+    if (focusInput) {
+      schemaSearchFocusToken.value += 1;
+    }
   }
 
   function activateWorkspaceTab(tabId: string): void {
@@ -1012,11 +1019,12 @@ export function useClarityWorkspace() {
       activeWorkspaceTabId.value = FIRST_QUERY_TAB_ID;
       selectedObject.value = null;
       queryResult.value = null;
-      sourceSearchText.value = "";
+      schemaSearchText.value = "";
       exportDestinationDirectory.value = "";
       selectedExportSessionId.value = null;
-      sourceSearchResults.value = [];
-      sourceSearchPerformed.value = false;
+      schemaSearchResults.value = [];
+      schemaSearchPerformed.value = false;
+      schemaSearchFocusToken.value = 0;
       statusMessage.value = "Disconnected.";
     }
   }
@@ -1154,45 +1162,52 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function runSourceSearch(): Promise<void> {
+  async function runSchemaSearch(): Promise<void> {
     if (!session.value) {
       return;
     }
 
-    const searchTerm = sourceSearchText.value.trim();
+    const searchTerm = schemaSearchText.value.trim();
     if (!searchTerm) {
       errorMessage.value = "Search term is required.";
       return;
     }
+    if (!schemaSearchIncludeObjectNames.value && !schemaSearchIncludeSource.value && !schemaSearchIncludeDdl.value) {
+      errorMessage.value = "Select at least one search scope.";
+      return;
+    }
 
     errorMessage.value = "";
-    busy.searchingSource = true;
-    sourceSearchPerformed.value = true;
+    busy.searchingSchema = true;
+    schemaSearchPerformed.value = true;
 
     try {
-      sourceSearchResults.value = await invoke<OracleSourceSearchResult[]>("db_search_source_code", {
+      schemaSearchResults.value = await invoke<OracleSchemaSearchResult[]>("db_search_schema_text", {
         request: {
           sessionId: session.value.sessionId,
           searchTerm,
           limit: 500,
+          includeObjectNames: schemaSearchIncludeObjectNames.value,
+          includeSource: schemaSearchIncludeSource.value,
+          includeDdl: schemaSearchIncludeDdl.value,
         },
       });
-      statusMessage.value = `Search complete. ${sourceSearchResults.value.length} match(es).`;
+      statusMessage.value = `Search complete. ${schemaSearchResults.value.length} match(es).`;
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
     } finally {
-      busy.searchingSource = false;
+      busy.searchingSchema = false;
     }
   }
 
-  async function openSourceSearchResult(match: OracleSourceSearchResult): Promise<void> {
+  async function openSchemaSearchResult(match: OracleSchemaSearchResult): Promise<void> {
     await loadDdl(
       {
         schema: match.schema,
         objectType: match.objectType,
         objectName: match.objectName,
       },
-      match.line,
+      match.line ?? null,
     );
   }
 
@@ -1226,9 +1241,13 @@ export function useClarityWorkspace() {
     activeQueryText,
     activeDdlText,
     queryRowLimit,
-    sourceSearchText,
-    sourceSearchResults,
-    sourceSearchPerformed,
+    schemaSearchText,
+    schemaSearchIncludeObjectNames,
+    schemaSearchIncludeSource,
+    schemaSearchIncludeDdl,
+    schemaSearchFocusToken,
+    schemaSearchResults,
+    schemaSearchPerformed,
     queryResult,
     exportDestinationDirectory,
     selectedExportSessionId,
@@ -1260,8 +1279,8 @@ export function useClarityWorkspace() {
     refreshObjects,
     saveDdl,
     runQuery,
-    runSourceSearch,
-    openSourceSearchResult,
+    runSchemaSearch,
+    openSchemaSearchResult,
     isLikelyNumeric,
   };
 }

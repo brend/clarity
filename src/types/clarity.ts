@@ -58,12 +58,15 @@ export interface OracleQueryResult {
   message: string;
 }
 
-export interface OracleSourceSearchResult {
+export type SchemaSearchMatchScope = "object_name" | "source" | "ddl";
+
+export interface OracleSchemaSearchResult {
   schema: string;
   objectType: string;
   objectName: string;
-  line: number;
-  text: string;
+  matchScope: SchemaSearchMatchScope;
+  line: number | null;
+  snippet: string;
 }
 
 export type ObjectDetailTabId = "data" | "ddl" | "metadata";
@@ -104,7 +107,7 @@ export interface BusyState {
   runningQuery: boolean;
   updatingData: boolean;
   exportingSchema: boolean;
-  searchingSource: boolean;
+  searchingSchema: boolean;
 }
 
 export interface ObjectTreeNode {

@@ -1,6 +1,6 @@
 use crate::{
-    DbConnectRequest, OracleDdlUpdateRequest, OracleObjectEntry, OracleObjectRef,
-    OracleQueryRequest, OracleQueryResult, OracleSourceSearchRequest, OracleSourceSearchResult,
+    DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
+    OracleObjectEntry, OracleObjectRef, OracleQueryRequest, OracleQueryResult,
 };
 use oracle::{Connection, Error as OracleError, InitParams, SqlValue};
 use std::env;
@@ -10,8 +10,10 @@ use std::path::{Path, PathBuf};
 const MAX_EXPLORER_OBJECTS: u32 = 5000;
 const DEFAULT_QUERY_ROW_LIMIT: u32 = 1000;
 const MAX_QUERY_ROW_LIMIT: u32 = 10000;
-const DEFAULT_SOURCE_SEARCH_LIMIT: u32 = 200;
-const MAX_SOURCE_SEARCH_RESULTS: u32 = 1000;
+const DEFAULT_SCHEMA_SEARCH_LIMIT: u32 = 200;
+const MAX_SCHEMA_SEARCH_RESULTS: u32 = 1000;
+const MAX_DDL_SEARCH_OBJECTS: u32 = 2000;
+const MAX_SEARCH_SNIPPET_CHARS: usize = 220;
 
 pub(crate) struct OracleSession {
     pub(crate) connection: Connection,
@@ -115,20 +117,103 @@ pub(crate) fn get_object_ddl(
         .map_err(map_oracle_error)
 }
 
-pub(crate) fn search_source_code(
+pub(crate) fn search_schema_text(
     session: &OracleSession,
-    request: &OracleSourceSearchRequest,
-) -> Result<Vec<OracleSourceSearchResult>, String> {
+    request: &DbSchemaSearchRequest,
+) -> Result<Vec<DbSchemaSearchResult>, String> {
     let search_term = request.search_term.trim();
     if search_term.is_empty() {
         return Err("Search term is required".to_string());
     }
 
+    let include_object_names = request.include_object_names.unwrap_or(true);
+    let include_source = request.include_source.unwrap_or(true);
+    let include_ddl = request.include_ddl.unwrap_or(true);
+    if !(include_object_names || include_source || include_ddl) {
+        return Err("Select at least one search scope".to_string());
+    }
+
     let search_term = search_term.to_string();
     let limit = request
         .limit
-        .unwrap_or(DEFAULT_SOURCE_SEARCH_LIMIT)
-        .clamp(1, MAX_SOURCE_SEARCH_RESULTS);
+        .unwrap_or(DEFAULT_SCHEMA_SEARCH_LIMIT)
+        .clamp(1, MAX_SCHEMA_SEARCH_RESULTS);
+    let mut matches = Vec::new();
+
+    if include_object_names {
+        search_object_names(session, search_term.as_str(), limit, &mut matches)?;
+    }
+
+    if include_source {
+        search_source_text(session, search_term.as_str(), limit, &mut matches)?;
+    }
+
+    if include_ddl {
+        search_ddl_text(session, search_term.as_str(), limit, &mut matches)?;
+    }
+
+    Ok(matches)
+}
+
+fn search_object_names(
+    session: &OracleSession,
+    search_term: &str,
+    limit: u32,
+    matches: &mut Vec<DbSchemaSearchResult>,
+) -> Result<(), String> {
+    let remaining = (limit as usize).saturating_sub(matches.len());
+    if remaining == 0 {
+        return Ok(());
+    }
+
+    let remaining = remaining.min(MAX_SCHEMA_SEARCH_RESULTS as usize) as u32;
+    let sql = r#"
+        SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
+        FROM (
+            SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
+            FROM ALL_OBJECTS
+            WHERE OWNER = :1
+              AND INSTR(UPPER(OBJECT_NAME), UPPER(:2)) > 0
+            ORDER BY OBJECT_TYPE, OBJECT_NAME
+        )
+        WHERE ROWNUM <= :3
+    "#;
+
+    let rows = session
+        .connection
+        .query(sql, &[&session.target_schema, &search_term, &remaining])
+        .map_err(map_oracle_error)?;
+
+    for row_result in rows {
+        let row = row_result.map_err(map_oracle_error)?;
+        let schema = row.get::<usize, String>(0).map_err(map_oracle_error)?;
+        let object_type = row.get::<usize, String>(1).map_err(map_oracle_error)?;
+        let object_name = row.get::<usize, String>(2).map_err(map_oracle_error)?;
+        matches.push(DbSchemaSearchResult {
+            schema,
+            object_type,
+            object_name: object_name.clone(),
+            match_scope: "object_name".to_string(),
+            line: None,
+            snippet: truncate_for_snippet(object_name.as_str()),
+        });
+    }
+
+    Ok(())
+}
+
+fn search_source_text(
+    session: &OracleSession,
+    search_term: &str,
+    limit: u32,
+    matches: &mut Vec<DbSchemaSearchResult>,
+) -> Result<(), String> {
+    let remaining = (limit as usize).saturating_sub(matches.len());
+    if remaining == 0 {
+        return Ok(());
+    }
+
+    let remaining = remaining.min(MAX_SCHEMA_SEARCH_RESULTS as usize) as u32;
     let sql = r#"
         SELECT OWNER, TYPE, NAME, LINE, TEXT
         FROM (
@@ -152,9 +237,8 @@ pub(crate) fn search_source_code(
 
     let rows = session
         .connection
-        .query(sql, &[&session.target_schema, &search_term, &limit])
+        .query(sql, &[&session.target_schema, &search_term, &remaining])
         .map_err(map_oracle_error)?;
-    let mut matches = Vec::new();
 
     for row_result in rows {
         let row = row_result.map_err(map_oracle_error)?;
@@ -166,16 +250,91 @@ pub(crate) fn search_source_code(
             .trim_end_matches(&['\r', '\n'][..])
             .to_string();
 
-        matches.push(OracleSourceSearchResult {
+        matches.push(DbSchemaSearchResult {
             schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
             object_type: row.get::<usize, String>(1).map_err(map_oracle_error)?,
             object_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
-            line,
-            text,
+            match_scope: "source".to_string(),
+            line: Some(line),
+            snippet: truncate_for_snippet(text.as_str()),
         });
     }
 
-    Ok(matches)
+    Ok(())
+}
+
+fn search_ddl_text(
+    session: &OracleSession,
+    search_term: &str,
+    limit: u32,
+    matches: &mut Vec<DbSchemaSearchResult>,
+) -> Result<(), String> {
+    let remaining = (limit as usize).saturating_sub(matches.len());
+    if remaining == 0 {
+        return Ok(());
+    }
+
+    let object_sql = r#"
+        SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
+        FROM (
+            SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
+            FROM ALL_OBJECTS
+            WHERE OWNER = :1
+              AND OBJECT_TYPE IN (
+                  'TABLE',
+                  'VIEW',
+                  'PROCEDURE',
+                  'FUNCTION',
+                  'PACKAGE',
+                  'PACKAGE BODY',
+                  'TRIGGER',
+                  'SEQUENCE'
+              )
+            ORDER BY OBJECT_TYPE, OBJECT_NAME
+        )
+        WHERE ROWNUM <= :2
+    "#;
+
+    let rows = session
+        .connection
+        .query(object_sql, &[&session.target_schema, &MAX_DDL_SEARCH_OBJECTS])
+        .map_err(map_oracle_error)?;
+
+    let needle_upper = search_term.to_ascii_uppercase();
+    for row_result in rows {
+        if matches.len() >= limit as usize {
+            break;
+        }
+
+        let row = row_result.map_err(map_oracle_error)?;
+        let schema = row.get::<usize, String>(0).map_err(map_oracle_error)?;
+        let object_type = row.get::<usize, String>(1).map_err(map_oracle_error)?;
+        let object_name = row.get::<usize, String>(2).map_err(map_oracle_error)?;
+
+        let ddl = fetch_object_ddl_for_search(
+            &session.connection,
+            schema.as_str(),
+            object_type.as_str(),
+            object_name.as_str(),
+        )
+        .map_err(map_oracle_error)?;
+        let Some(ddl_text) = ddl else {
+            continue;
+        };
+
+        if let Some((line, snippet)) = find_matching_line(ddl_text.as_str(), needle_upper.as_str()) {
+            matches.push(DbSchemaSearchResult {
+                schema,
+                object_type,
+                object_name,
+                match_scope: "ddl".to_string(),
+                line: Some(line),
+                snippet: truncate_for_snippet(snippet.as_str()),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 pub(crate) fn update_object_ddl(
@@ -394,6 +553,54 @@ fn fetch_source_ddl(
     } else {
         Ok(Some(ddl))
     }
+}
+
+fn fetch_object_ddl_for_search(
+    connection: &Connection,
+    schema: &str,
+    object_type: &str,
+    object_name: &str,
+) -> Result<Option<String>, OracleError> {
+    let source_type = normalize_source_type(object_type);
+    if let Some(source_ddl) = fetch_source_ddl(connection, schema, source_type.as_str(), object_name)? {
+        return Ok(Some(source_ddl));
+    }
+
+    let metadata_type = normalize_metadata_type(object_type);
+    let ddl_sql = "SELECT DBMS_METADATA.GET_DDL(:1, :2, :3) FROM DUAL";
+    match connection.query_row_as::<String>(ddl_sql, &[&metadata_type, &object_name, &schema]) {
+        Ok(ddl) => Ok(Some(ddl)),
+        Err(_) => Ok(None),
+    }
+}
+
+fn find_matching_line(text: &str, needle_upper: &str) -> Option<(u32, String)> {
+    for (idx, line) in text.lines().enumerate() {
+        if line.to_ascii_uppercase().contains(needle_upper) {
+            let line_number = (idx + 1).min(u32::MAX as usize) as u32;
+            return Some((line_number, line.trim().to_string()));
+        }
+    }
+
+    None
+}
+
+fn truncate_for_snippet(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= MAX_SEARCH_SNIPPET_CHARS {
+        return trimmed.to_string();
+    }
+
+    let mut snippet = String::new();
+    for (index, ch) in trimmed.chars().enumerate() {
+        if index >= MAX_SEARCH_SNIPPET_CHARS {
+            break;
+        }
+        snippet.push(ch);
+    }
+    snippet.push_str("...");
+
+    snippet
 }
 
 fn sql_value_to_string(value: &SqlValue<'_>) -> String {

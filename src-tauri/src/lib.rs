@@ -15,8 +15,10 @@ use tauri::{Emitter, Manager};
 const PROFILE_STORE_FILE: &str = "connection_profiles.json";
 const KEYRING_SERVICE: &str = "com.waldencorp.clarity";
 const MENU_ID_TOOLS_SETTINGS: &str = "tools.settings";
+const MENU_ID_TOOLS_FIND_IN_SCHEMA: &str = "tools.find_in_schema";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
 const EVENT_OPEN_SETTINGS_DIALOG: &str = "clarity://open-settings-dialog";
+const EVENT_OPEN_SCHEMA_SEARCH: &str = "clarity://open-schema-search";
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG: &str = "clarity://open-export-database-dialog";
 const EVENT_SCHEMA_EXPORT_PROGRESS: &str = "clarity://schema-export-progress";
 
@@ -50,10 +52,13 @@ struct OracleQueryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct OracleSourceSearchRequest {
+struct DbSchemaSearchRequest {
     session_id: u64,
     search_term: String,
     limit: Option<u32>,
+    include_object_names: Option<bool>,
+    include_source: Option<bool>,
+    include_ddl: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -158,12 +163,13 @@ struct OracleQueryResult {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct OracleSourceSearchResult {
+struct DbSchemaSearchResult {
     schema: String,
     object_type: String,
     object_name: String,
-    line: u32,
-    text: String,
+    match_scope: String,
+    line: Option<u32>,
+    snippet: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -305,10 +311,10 @@ fn db_run_query(
 }
 
 #[tauri::command]
-fn db_search_source_code(
-    request: OracleSourceSearchRequest,
+fn db_search_schema_text(
+    request: DbSchemaSearchRequest,
     state: tauri::State<AppState>,
-) -> Result<Vec<OracleSourceSearchResult>, String> {
+) -> Result<Vec<DbSchemaSearchResult>, String> {
     let sessions = state
         .sessions
         .lock()
@@ -317,7 +323,7 @@ fn db_search_source_code(
         .get(&request.session_id)
         .ok_or_else(|| "Session not found".to_string())?;
 
-    ProviderRegistry::search_source_code(session, &request)
+    ProviderRegistry::search_schema_text(session, &request)
 }
 
 #[tauri::command]
@@ -901,6 +907,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let find_in_schema = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_FIND_IN_SCHEMA,
+                "Find in Schema...",
+                true,
+                Some("CmdOrCtrl+Shift+F"),
+            )?;
             let export_database = tauri::menu::MenuItem::with_id(
                 app,
                 MENU_ID_TOOLS_EXPORT_DATABASE,
@@ -909,7 +922,12 @@ pub fn run() {
                 None::<&str>,
             )?;
             let tools_menu =
-                tauri::menu::Submenu::with_items(app, "Tools", true, &[&settings, &export_database])?;
+                tauri::menu::Submenu::with_items(
+                    app,
+                    "Tools",
+                    true,
+                    &[&settings, &find_in_schema, &export_database],
+                )?;
             let menu = tauri::menu::Menu::default(app)?;
             let existing_items = menu.items()?;
             let help_position = existing_items
@@ -924,6 +942,10 @@ pub fn run() {
                 if let Err(error) = app.emit(EVENT_OPEN_SETTINGS_DIALOG, ()) {
                     eprintln!("failed to emit open settings event: {error}");
                 }
+            } else if event.id() == MENU_ID_TOOLS_FIND_IN_SCHEMA {
+                if let Err(error) = app.emit(EVENT_OPEN_SCHEMA_SEARCH, ()) {
+                    eprintln!("failed to emit open schema search event: {error}");
+                }
             } else if event.id() == MENU_ID_TOOLS_EXPORT_DATABASE {
                 if let Err(error) = app.emit(EVENT_OPEN_EXPORT_DATABASE_DIALOG, ()) {
                     eprintln!("failed to emit export database event: {error}");
@@ -937,7 +959,7 @@ pub fn run() {
             db_disconnect,
             db_list_objects,
             db_run_query,
-            db_search_source_code,
+            db_search_schema_text,
             db_get_object_ddl,
             db_update_object_ddl,
             db_list_connection_profiles,
