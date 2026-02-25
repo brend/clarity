@@ -39,6 +39,68 @@ const AI_MIN_QUERY_LENGTH = 8;
 const AI_MAX_SCHEMA_OBJECTS = 120;
 const AI_MAX_REFERENCED_COLUMNS = 60;
 const AI_MAX_OTHER_COLUMNS = 20;
+const SQL_IDENTIFIER_STOP_WORDS = new Set([
+  "SELECT",
+  "FROM",
+  "WHERE",
+  "JOIN",
+  "LEFT",
+  "RIGHT",
+  "FULL",
+  "INNER",
+  "OUTER",
+  "ON",
+  "GROUP",
+  "ORDER",
+  "BY",
+  "HAVING",
+  "AS",
+  "DISTINCT",
+  "UNION",
+  "ALL",
+  "WITH",
+  "AND",
+  "OR",
+  "NOT",
+  "NULL",
+  "IS",
+  "IN",
+  "EXISTS",
+  "CASE",
+  "WHEN",
+  "THEN",
+  "ELSE",
+  "END",
+  "LIKE",
+  "BETWEEN",
+  "FETCH",
+  "FIRST",
+  "NEXT",
+  "ROWS",
+  "ROW",
+  "ONLY",
+  "OFFSET",
+  "INSERT",
+  "INTO",
+  "VALUES",
+  "UPDATE",
+  "SET",
+  "DELETE",
+  "MERGE",
+  "TRUNCATE",
+  "ALTER",
+  "DROP",
+  "CREATE",
+  "TABLE",
+  "VIEW",
+  "INDEX",
+  "SEQUENCE",
+  "GRANT",
+  "REVOKE",
+  "DESC",
+  "DESCRIBE",
+  "EXPLAIN",
+]);
 
 const desktopShellEl = ref<HTMLElement | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
@@ -302,12 +364,36 @@ function detectClauseContext(sql: string): string | undefined {
   return undefined;
 }
 
+function normalizeSqlForAnalysis(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--.*$/gm, " ")
+    .replace(/'(?:''|[^'])*'/g, " ")
+    .replace(/"(?:\"\"|[^"])*"/g, " ");
+}
+
+function extractSqlIdentifierHints(sql: string): Set<string> {
+  const normalized = normalizeSqlForAnalysis(sql).toUpperCase();
+  const matches = normalized.match(/[A-Z_][A-Z0-9_$#]*/g) ?? [];
+  const tokens = new Set<string>();
+
+  for (const token of matches) {
+    if (token.length < 2 || SQL_IDENTIFIER_STOP_WORDS.has(token)) {
+      continue;
+    }
+    tokens.add(token);
+  }
+
+  return tokens;
+}
+
 function buildAiSchemaContext(
   completionSchema: SqlCompletionSchema,
   columns: OracleObjectColumnEntry[],
   currentSql: string,
 ): AiSchemaContextObject[] {
   const referencedNames = extractReferencedTables(currentSql);
+  const identifierHints = extractSqlIdentifierHints(currentSql);
 
   // Build a lookup: schema.objectName -> { colName: "COL_NAME DATA_TYPE [NOT NULL]" }
   const columnDetailMap = new Map<string, Map<string, string>>();
@@ -321,14 +407,15 @@ function buildAiSchemaContext(
       columnDetailMap.set(key, colMap);
     }
     const colName = entry.columnName.trim();
+    const colNameUpper = colName.toUpperCase();
     const dataType = entry.dataType?.trim() || "";
     const nullable = entry.nullable?.trim() === "N" ? " NOT NULL" : "";
     const detail = dataType ? `${colName} ${dataType}${nullable}` : colName;
-    colMap.set(colName, detail);
+    colMap.set(colNameUpper, detail);
   }
 
-  const referenced: AiSchemaContextObject[] = [];
-  const other: AiSchemaContextObject[] = [];
+  const scoredEntries: Array<{ entry: AiSchemaContextObject; score: number }> =
+    [];
 
   const schemaNames = Object.keys(completionSchema).sort((a, b) =>
     a.localeCompare(b),
@@ -344,6 +431,15 @@ function buildAiSchemaContext(
       const isReferenced =
         referencedNames.has(qualifiedName) ||
         referencedNames.has(bareNameUpper);
+      let score = isReferenced ? 1000 : 0;
+      if (identifierHints.has(bareNameUpper)) {
+        score += 200;
+      }
+      for (const hint of identifierHints) {
+        if (hint.length >= 3 && bareNameUpper.includes(hint)) {
+          score += 25;
+        }
+      }
 
       // Get column details with types
       const colDetailMap = columnDetailMap.get(qualifiedName);
@@ -351,10 +447,19 @@ function buildAiSchemaContext(
       const maxCols = isReferenced
         ? AI_MAX_REFERENCED_COLUMNS
         : AI_MAX_OTHER_COLUMNS;
+      let columnHintMatches = 0;
       const columnsWithTypes = rawColumns.slice(0, maxCols).map((colName) => {
-        const detail = colDetailMap?.get(colName.trim());
+        const normalized = colName.trim();
+        if (identifierHints.has(normalized.toUpperCase())) {
+          columnHintMatches += 1;
+        }
+        const detail = colDetailMap?.get(normalized.toUpperCase());
         return detail || colName;
       });
+      score += Math.min(8, columnHintMatches) * 20;
+      if (rawColumns.length > 0) {
+        score += 5;
+      }
 
       const entry: AiSchemaContextObject = {
         schema: schemaName,
@@ -363,20 +468,24 @@ function buildAiSchemaContext(
         isReferencedInQuery: isReferenced,
       };
 
-      if (isReferenced) {
-        referenced.push(entry);
-      } else {
-        other.push(entry);
-      }
-
-      if (referenced.length + other.length >= AI_MAX_SCHEMA_OBJECTS) {
-        return [...referenced, ...other];
-      }
+      scoredEntries.push({ entry, score });
     }
   }
 
-  // Referenced tables first so the AI sees them prominently
-  return [...referenced, ...other];
+  scoredEntries.sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    const schemaCompare = left.entry.schema.localeCompare(right.entry.schema);
+    if (schemaCompare !== 0) {
+      return schemaCompare;
+    }
+    return left.entry.objectName.localeCompare(right.entry.objectName);
+  });
+
+  return scoredEntries
+    .slice(0, AI_MAX_SCHEMA_OBJECTS)
+    .map((candidate) => candidate.entry);
 }
 
 function clearAiSuggestionState(clearError = true): void {
