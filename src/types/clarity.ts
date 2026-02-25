@@ -51,6 +51,14 @@ export interface OracleObjectEntry {
   objectName: string;
 }
 
+export interface OracleObjectColumnEntry {
+  schema: string;
+  objectName: string;
+  columnName: string;
+}
+
+export type SqlCompletionSchema = Record<string, Record<string, string[]>>;
+
 export interface OracleQueryResult {
   columns: string[];
   rows: string[][];

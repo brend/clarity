@@ -7,12 +7,15 @@ import WorkspaceSheet from "./components/WorkspaceSheet.vue";
 import { useClarityWorkspace } from "./composables/useClarityWorkspace";
 import { usePaneLayout } from "./composables/usePaneLayout";
 import { useUserSettings } from "./composables/useUserSettings";
+import type { SqlCompletionSchema } from "./types/clarity";
 import type { ThemeSetting } from "./types/settings";
 
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG = "clarity://open-export-database-dialog";
 const EVENT_OPEN_SETTINGS_DIALOG = "clarity://open-settings-dialog";
 const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
+const SQL_COMPLETION_OBJECT_TYPES = new Set(["TABLE", "VIEW", "MATERIALIZED VIEW", "SYNONYM", "SEQUENCE"]);
+const SQL_COMPLETION_COLUMN_OBJECT_TYPES = new Set(["TABLE", "VIEW", "MATERIALIZED VIEW"]);
 
 const desktopShellEl = ref<HTMLElement | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
@@ -36,6 +39,7 @@ const {
   connectedSchema,
   selectedProviderLabel,
   objectTree,
+  objectColumns,
   selectedObject,
   queryTabs,
   ddlTabs,
@@ -131,6 +135,61 @@ const exportProgressPercent = computed<number>(() => {
     Math.max(0, Math.round((exportProgressProcessed.value / exportProgressTotal.value) * 100)),
   );
 });
+const sqlCompletionSchema = computed<SqlCompletionSchema>(() => {
+  const schema: SqlCompletionSchema = {};
+  const columnsBySchemaAndObject = new Map<string, Map<string, string[]>>();
+  for (const entry of objectColumns.value) {
+    const schemaName = entry.schema.trim().toUpperCase();
+    const objectName = entry.objectName.trim();
+    const columnName = entry.columnName.trim();
+    if (!schemaName || !objectName || !columnName) {
+      continue;
+    }
+
+    let objectColumnsByName = columnsBySchemaAndObject.get(schemaName);
+    if (!objectColumnsByName) {
+      objectColumnsByName = new Map<string, string[]>();
+      columnsBySchemaAndObject.set(schemaName, objectColumnsByName);
+    }
+
+    const columnList = objectColumnsByName.get(objectName);
+    if (!columnList) {
+      objectColumnsByName.set(objectName, [columnName]);
+      continue;
+    }
+    if (!columnList.includes(columnName)) {
+      columnList.push(columnName);
+    }
+  }
+
+  for (const typeNode of objectTree.value) {
+    const objectType = typeNode.objectType.trim().toUpperCase();
+    if (!SQL_COMPLETION_OBJECT_TYPES.has(objectType)) {
+      continue;
+    }
+
+    for (const entry of typeNode.entries) {
+      const schemaName = entry.schema.trim().toUpperCase();
+      const objectName = entry.objectName.trim();
+      if (!schemaName || !objectName) {
+        continue;
+      }
+
+      schema[schemaName] ??= {};
+      if (schema[schemaName][objectName]) {
+        continue;
+      }
+
+      const columnList = SQL_COMPLETION_COLUMN_OBJECT_TYPES.has(objectType)
+        ? columnsBySchemaAndObject.get(schemaName)?.get(objectName)
+        : undefined;
+      schema[schemaName][objectName] = columnList ? [...columnList] : [];
+    }
+  }
+
+  return schema;
+});
+const sqlCompletionDefaultSchema = computed<string>(() => connectedSchema.value.trim().toUpperCase());
 
 interface SchemaExportProgressPayload {
   processedObjects: number;
@@ -308,6 +367,8 @@ onBeforeUnmount(() => {
         :is-query-tab-active="isQueryTabActive"
         :schema-search-results="schemaSearchResults"
         :schema-search-performed="schemaSearchPerformed"
+        :sql-completion-schema="sqlCompletionSchema"
+        :sql-completion-default-schema="sqlCompletionDefaultSchema"
         :theme="theme"
         :on-activate-workspace-tab="activateWorkspaceTab"
         :on-close-query-tab="closeQueryTab"

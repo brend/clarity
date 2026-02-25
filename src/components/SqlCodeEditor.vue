@@ -6,6 +6,7 @@ import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { basicSetup } from "codemirror";
 import { sql } from "@codemirror/lang-sql";
 import { tags } from "@lezer/highlight";
+import type { SqlCompletionSchema } from "../types/clarity";
 import type { ThemeSetting } from "../types/settings";
 
 const props = withDefaults(
@@ -15,6 +16,8 @@ const props = withDefaults(
     readOnly?: boolean;
     targetLine?: number | null;
     focusToken?: number;
+    completionSchema?: SqlCompletionSchema | null;
+    completionDefaultSchema?: string;
     theme?: ThemeSetting;
   }>(),
   {
@@ -22,6 +25,8 @@ const props = withDefaults(
     readOnly: false,
     targetLine: null,
     focusToken: 0,
+    completionSchema: null,
+    completionDefaultSchema: "",
     theme: "light",
   },
 );
@@ -107,6 +112,19 @@ function buildPlaceholderExtension(value: string): Extension {
   return value ? cmPlaceholder(value) : [];
 }
 
+function buildLanguageExtension(completionSchema: SqlCompletionSchema | null, completionDefaultSchema: string): Extension {
+  const defaultSchema = completionDefaultSchema.trim().toUpperCase();
+  if (!completionSchema || Object.keys(completionSchema).length < 1) {
+    return sql({ upperCaseKeywords: true });
+  }
+
+  return sql({
+    schema: completionSchema,
+    defaultSchema: defaultSchema || undefined,
+    upperCaseKeywords: true,
+  });
+}
+
 function updateCompartment(compartment: Compartment, extension: Extension): void {
   if (!editorView) {
     return;
@@ -146,7 +164,7 @@ onMounted(() => {
         basicSetup,
         themeCompartment.of(buildEditorTheme(props.theme)),
         syntaxCompartment.of(buildHighlightTheme()),
-        languageCompartment.of(sql()),
+        languageCompartment.of(buildLanguageExtension(props.completionSchema, props.completionDefaultSchema)),
         readOnlyCompartment.of(EditorState.readOnly.of(props.readOnly)),
         placeholderCompartment.of(buildPlaceholderExtension(props.placeholder)),
         EditorView.updateListener.of((update: ViewUpdate) => {
@@ -207,6 +225,16 @@ watch(
   (nextTheme) => {
     updateCompartment(themeCompartment, buildEditorTheme(nextTheme));
     updateCompartment(syntaxCompartment, buildHighlightTheme());
+  },
+);
+
+watch(
+  () => [props.completionSchema, props.completionDefaultSchema] as const,
+  ([completionSchema, completionDefaultSchema]) => {
+    updateCompartment(
+      languageCompartment,
+      buildLanguageExtension(completionSchema, completionDefaultSchema),
+    );
   },
 );
 

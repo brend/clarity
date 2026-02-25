@@ -6,6 +6,7 @@ import type {
   ObjectDetailTabDefinition,
   ObjectDetailTabId,
   OracleConnectRequest,
+  OracleObjectColumnEntry,
   OracleObjectEntry,
   OracleQueryResult,
   OracleSchemaSearchResult,
@@ -368,6 +369,7 @@ export function useClarityWorkspace() {
   const session = ref<OracleSessionSummary | null>(null);
   const connectionProfiles = ref<ConnectionProfile[]>([]);
   const objects = ref<OracleObjectEntry[]>([]);
+  const objectColumns = ref<OracleObjectColumnEntry[]>([]);
   const selectedObject = ref<OracleObjectEntry | null>(null);
   const ddlTabs = ref<WorkspaceDdlTab[]>([]);
   const queryTabs = ref<WorkspaceQueryTab[]>([createQueryTab(1, connection.schema)]);
@@ -1189,10 +1191,16 @@ export function useClarityWorkspace() {
     busy.loadingObjects = true;
 
     try {
-      const result = await invoke<OracleObjectEntry[]>("db_list_objects", {
-        request: { sessionId: session.value.sessionId },
-      });
-      objects.value = result;
+      const [nextObjects, nextObjectColumns] = await Promise.all([
+        invoke<OracleObjectEntry[]>("db_list_objects", {
+          request: { sessionId: session.value.sessionId },
+        }),
+        invoke<OracleObjectColumnEntry[]>("db_list_object_columns", {
+          request: { sessionId: session.value.sessionId },
+        }),
+      ]);
+      objects.value = nextObjects;
+      objectColumns.value = nextObjectColumns;
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
     } finally {
@@ -1246,6 +1254,7 @@ export function useClarityWorkspace() {
     } finally {
       session.value = null;
       objects.value = [];
+      objectColumns.value = [];
       expandedObjectTypes.value = {};
       queryTabs.value = [
         createQueryTab(1, connection.schema),
@@ -1492,6 +1501,7 @@ export function useClarityWorkspace() {
     connectedSchema,
     selectedProviderLabel,
     objectTree,
+    objectColumns,
     selectedObject,
     queryTabs,
     ddlTabs,

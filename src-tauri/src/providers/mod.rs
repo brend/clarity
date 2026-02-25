@@ -2,7 +2,8 @@ pub(crate) mod oracle;
 
 use crate::{
     DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleObjectEntry, OracleObjectRef, OracleQueryRequest, OracleQueryResult,
+    OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
+    OracleQueryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +53,17 @@ impl ProviderRegistry {
         match (session.provider, &session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::list_objects(oracle_session)
+            }
+            (provider, _) => Err(not_implemented_error(provider)),
+        }
+    }
+
+    pub(crate) fn list_object_columns(
+        session: &AppSession,
+    ) -> Result<Vec<OracleObjectColumnEntry>, String> {
+        match (session.provider, &session.session) {
+            (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
+                oracle::list_object_columns(oracle_session)
             }
             (provider, _) => Err(not_implemented_error(provider)),
         }

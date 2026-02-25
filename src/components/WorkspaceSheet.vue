@@ -9,6 +9,7 @@ import type {
   OracleObjectEntry,
   OracleQueryResult,
   OracleSchemaSearchResult,
+  SqlCompletionSchema,
   WorkspaceDdlTab,
   WorkspaceQueryTab,
 } from "../types/clarity";
@@ -41,6 +42,8 @@ const props = defineProps<{
   isActiveObjectDataEditable: boolean;
   selectedProviderLabel: string;
   connectedSchema: string;
+  sqlCompletionSchema: SqlCompletionSchema;
+  sqlCompletionDefaultSchema: string;
   isQueryTabActive: boolean;
   schemaSearchResults: OracleSchemaSearchResult[];
   schemaSearchPerformed: boolean;
@@ -380,6 +383,8 @@ watch(
       v-model="queryText"
       class="sql-editor"
       placeholder="Write SQL here"
+      :completion-schema="props.sqlCompletionSchema"
+      :completion-default-schema="props.sqlCompletionDefaultSchema"
       :theme="props.theme"
     />
 
@@ -425,6 +430,8 @@ watch(
         placeholder="Object DDL will appear here"
         :target-line="props.activeDdlTab.focusLine"
         :focus-token="props.activeDdlTab.focusToken"
+        :completion-schema="props.sqlCompletionSchema"
+        :completion-default-schema="props.sqlCompletionDefaultSchema"
         :theme="props.theme"
       />
 

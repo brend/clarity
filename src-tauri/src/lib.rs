@@ -152,6 +152,14 @@ struct OracleObjectEntry {
     object_name: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OracleObjectColumnEntry {
+    schema: String,
+    object_name: String,
+    column_name: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OracleQueryResult {
@@ -260,6 +268,22 @@ fn db_list_objects(
         .ok_or_else(|| "Session not found".to_string())?;
 
     ProviderRegistry::list_objects(session)
+}
+
+#[tauri::command]
+fn db_list_object_columns(
+    request: SessionRequest,
+    state: tauri::State<AppState>,
+) -> Result<Vec<OracleObjectColumnEntry>, String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    ProviderRegistry::list_object_columns(session)
 }
 
 #[tauri::command]
@@ -958,6 +982,7 @@ pub fn run() {
             db_connect,
             db_disconnect,
             db_list_objects,
+            db_list_object_columns,
             db_run_query,
             db_search_schema_text,
             db_get_object_ddl,

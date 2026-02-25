@@ -1,6 +1,7 @@
 use crate::{
     DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleObjectEntry, OracleObjectRef, OracleQueryRequest, OracleQueryResult,
+    OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
+    OracleQueryResult,
 };
 use oracle::{Connection, Error as OracleError, InitParams, SqlValue};
 use std::env;
@@ -87,6 +88,34 @@ pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<OracleObjectEn
     }
 
     Ok(objects)
+}
+
+pub(crate) fn list_object_columns(
+    session: &OracleSession,
+) -> Result<Vec<OracleObjectColumnEntry>, String> {
+    let sql = r#"
+        SELECT OWNER, TABLE_NAME, COLUMN_NAME
+        FROM ALL_TAB_COLUMNS
+        WHERE OWNER = :1
+        ORDER BY TABLE_NAME, COLUMN_ID
+    "#;
+
+    let rows = session
+        .connection
+        .query(sql, &[&session.target_schema])
+        .map_err(map_oracle_error)?;
+
+    let mut columns = Vec::new();
+    for row_result in rows {
+        let row = row_result.map_err(map_oracle_error)?;
+        columns.push(OracleObjectColumnEntry {
+            schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
+            object_name: row.get::<usize, String>(1).map_err(map_oracle_error)?,
+            column_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
+        });
+    }
+
+    Ok(columns)
 }
 
 pub(crate) fn get_object_ddl(
