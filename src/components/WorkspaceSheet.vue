@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AppIcon from "./AppIcon.vue";
 import SqlCodeEditor from "./SqlCodeEditor.vue";
 import type {
@@ -95,6 +95,8 @@ const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
 const schemaSearchInputEl = ref<HTMLInputElement | null>(null);
 const MIN_COLUMN_WIDTH = 88;
 const DEFAULT_COLUMN_WIDTH = 180;
+const DEFAULT_OBJECT_DETAIL_ROW_HEIGHT = 30;
+const OBJECT_DETAIL_VIRTUAL_OVERSCAN_ROWS = 20;
 
 const isDataDetailTab = computed<boolean>(
     () => props.activeObjectDetailTabId === "data",
@@ -131,6 +133,12 @@ const objectDetailColumns = computed<string[]>(
     () => props.activeObjectDetailResult?.columns ?? [],
 );
 const objectDetailColumnWidths = ref<number[]>([]);
+const objectDetailVisibleColumnCount = computed<number>(() =>
+    Math.max(1, objectDetailColumns.value.length),
+);
+const objectDetailScrollTop = ref(0);
+const objectDetailViewportHeight = ref(0);
+const objectDetailRowHeight = ref(DEFAULT_OBJECT_DETAIL_ROW_HEIGHT);
 
 type ColumnResizeState = {
     index: number;
@@ -139,10 +147,58 @@ type ColumnResizeState = {
 };
 
 const objectDetailResizeState = ref<ColumnResizeState | null>(null);
+let objectDetailResizeRafId: number | null = null;
+let pendingObjectDetailResizePointerX: number | null = null;
 
 const objectDetailColumnKey = computed<string>(() =>
     objectDetailColumns.value.join("\u001f"),
 );
+const visibleObjectDetailStartRow = computed<number>(() => {
+    if (!displayedDataRows.value.length || objectDetailRowHeight.value <= 0) {
+        return 0;
+    }
+
+    const rawStart = Math.floor(
+        objectDetailScrollTop.value / objectDetailRowHeight.value,
+    );
+    return Math.max(0, rawStart - OBJECT_DETAIL_VIRTUAL_OVERSCAN_ROWS);
+});
+const visibleObjectDetailEndRow = computed<number>(() => {
+    const rowCount = displayedDataRows.value.length;
+    if (!rowCount || objectDetailRowHeight.value <= 0) {
+        return 0;
+    }
+
+    const visibleRows = Math.ceil(
+        Math.max(objectDetailViewportHeight.value, objectDetailRowHeight.value) /
+            objectDetailRowHeight.value,
+    );
+    const bufferedEnd =
+        visibleObjectDetailStartRow.value +
+        visibleRows +
+        OBJECT_DETAIL_VIRTUAL_OVERSCAN_ROWS * 2;
+    return Math.min(rowCount, bufferedEnd);
+});
+const visibleObjectDetailRows = computed<
+    Array<{ row: string[]; rowIndex: number }>
+>(() =>
+    displayedDataRows.value
+        .slice(visibleObjectDetailStartRow.value, visibleObjectDetailEndRow.value)
+        .map((row, localIndex) => ({
+            row,
+            rowIndex: visibleObjectDetailStartRow.value + localIndex,
+        })),
+);
+const objectDetailTopSpacerHeight = computed<number>(
+    () => visibleObjectDetailStartRow.value * objectDetailRowHeight.value,
+);
+const objectDetailBottomSpacerHeight = computed<number>(() => {
+    const remainingRows = Math.max(
+        0,
+        displayedDataRows.value.length - visibleObjectDetailEndRow.value,
+    );
+    return remainingRows * objectDetailRowHeight.value;
+});
 
 function cloneRows(rows: string[][]): string[][] {
     return rows.map((row) => [...row]);
@@ -342,8 +398,28 @@ watch(
         objectDetailColumnWidths.value = objectDetailColumns.value.map(
             () => DEFAULT_COLUMN_WIDTH,
         );
+        objectDetailRowHeight.value = DEFAULT_OBJECT_DETAIL_ROW_HEIGHT;
+        const gridWrap = objectDetailGridWrapEl.value;
+        if (gridWrap) {
+            gridWrap.scrollTop = 0;
+        }
+        objectDetailScrollTop.value = 0;
+        void nextTick(() => {
+            updateObjectDetailViewportMetrics();
+            measureObjectDetailRowHeight();
+        });
     },
     { immediate: true },
+);
+
+watch(
+    () => displayedDataRows.value.length,
+    () => {
+        void nextTick(() => {
+            updateObjectDetailViewportMetrics();
+            measureObjectDetailRowHeight();
+        });
+    },
 );
 
 function getObjectDetailColumnWidth(index: number): number {
@@ -351,18 +427,29 @@ function getObjectDetailColumnWidth(index: number): number {
 }
 
 function onObjectDetailColumnResizeMove(event: MouseEvent): void {
-    const state = objectDetailResizeState.value;
-    if (!state) {
+    if (!objectDetailResizeState.value) {
         return;
     }
 
-    const nextWidth = Math.max(
-        MIN_COLUMN_WIDTH,
-        state.startWidth + (event.clientX - state.startX),
-    );
-    const nextWidths = [...objectDetailColumnWidths.value];
-    nextWidths[state.index] = nextWidth;
-    objectDetailColumnWidths.value = nextWidths;
+    pendingObjectDetailResizePointerX = event.clientX;
+    if (objectDetailResizeRafId !== null) {
+        return;
+    }
+
+    objectDetailResizeRafId = window.requestAnimationFrame(() => {
+        objectDetailResizeRafId = null;
+        const state = objectDetailResizeState.value;
+        const pointerX = pendingObjectDetailResizePointerX;
+        if (!state || pointerX === null) {
+            return;
+        }
+
+        const nextWidth = Math.max(
+            MIN_COLUMN_WIDTH,
+            state.startWidth + (pointerX - state.startX),
+        );
+        objectDetailColumnWidths.value[state.index] = nextWidth;
+    });
 }
 
 function stopObjectDetailColumnResize(): void {
@@ -371,6 +458,11 @@ function stopObjectDetailColumnResize(): void {
     }
 
     objectDetailResizeState.value = null;
+    pendingObjectDetailResizePointerX = null;
+    if (objectDetailResizeRafId !== null) {
+        window.cancelAnimationFrame(objectDetailResizeRafId);
+        objectDetailResizeRafId = null;
+    }
     window.removeEventListener("mousemove", onObjectDetailColumnResizeMove);
     window.removeEventListener("mouseup", stopObjectDetailColumnResize);
 }
@@ -387,12 +479,61 @@ function startObjectDetailColumnResize(index: number, event: MouseEvent): void {
         startX: event.clientX,
         startWidth: getObjectDetailColumnWidth(index),
     };
+    pendingObjectDetailResizePointerX = event.clientX;
     window.addEventListener("mousemove", onObjectDetailColumnResizeMove);
     window.addEventListener("mouseup", stopObjectDetailColumnResize);
 }
 
+function updateObjectDetailViewportMetrics(): void {
+    const gridWrap = objectDetailGridWrapEl.value;
+    if (!gridWrap) {
+        objectDetailViewportHeight.value = 0;
+        return;
+    }
+
+    objectDetailViewportHeight.value = gridWrap.clientHeight;
+    objectDetailScrollTop.value = gridWrap.scrollTop;
+}
+
+function onObjectDetailGridScroll(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    if (!target) {
+        return;
+    }
+
+    objectDetailScrollTop.value = target.scrollTop;
+}
+
+function measureObjectDetailRowHeight(): void {
+    const gridWrap = objectDetailGridWrapEl.value;
+    if (!gridWrap) {
+        return;
+    }
+
+    const firstRow = gridWrap.querySelector<HTMLTableRowElement>(
+        "tr[data-object-row]",
+    );
+    if (!firstRow) {
+        return;
+    }
+
+    const measuredHeight = firstRow.getBoundingClientRect().height;
+    if (Number.isFinite(measuredHeight) && measuredHeight > 1) {
+        objectDetailRowHeight.value = measuredHeight;
+    }
+}
+
+onMounted(() => {
+    window.addEventListener("resize", updateObjectDetailViewportMetrics);
+    void nextTick(() => {
+        updateObjectDetailViewportMetrics();
+        measureObjectDetailRowHeight();
+    });
+});
+
 onBeforeUnmount(() => {
     stopObjectDetailColumnResize();
+    window.removeEventListener("resize", updateObjectDetailViewportMetrics);
 });
 
 function focusSchemaSearchInput(selectText: boolean): void {
@@ -826,6 +967,7 @@ watch(
                         <div
                             ref="objectDetailGridWrapEl"
                             class="object-detail-grid-wrap"
+                            @scroll="onObjectDetailGridScroll"
                         >
                             <table
                                 class="results-table"
@@ -833,6 +975,18 @@ watch(
                                     'is-resizing': !!objectDetailResizeState,
                                 }"
                             >
+                                <colgroup>
+                                    <col
+                                        v-for="(
+                                            column, columnIndex
+                                        ) in props.activeObjectDetailResult
+                                            .columns"
+                                        :key="`detail-col-${column}-${columnIndex}`"
+                                        :style="{
+                                            width: `${getObjectDetailColumnWidth(columnIndex)}px`,
+                                        }"
+                                    />
+                                </colgroup>
                                 <thead>
                                     <tr>
                                         <th
@@ -841,11 +995,6 @@ watch(
                                             ) in props.activeObjectDetailResult
                                                 .columns"
                                             :key="column"
-                                            :style="{
-                                                width: `${getObjectDetailColumnWidth(columnIndex)}px`,
-                                                minWidth: `${getObjectDetailColumnWidth(columnIndex)}px`,
-                                                maxWidth: `${getObjectDetailColumnWidth(columnIndex)}px`,
-                                            }"
                                         >
                                             <span
                                                 class="results-cell-text"
@@ -869,12 +1018,26 @@ watch(
                                 </thead>
                                 <tbody>
                                     <tr
-                                        v-for="(
+                                        v-if="objectDetailTopSpacerHeight > 0"
+                                        class="results-spacer-row"
+                                        aria-hidden="true"
+                                    >
+                                        <td
+                                            :colspan="objectDetailVisibleColumnCount"
+                                            :style="{
+                                                height: `${objectDetailTopSpacerHeight}px`,
+                                            }"
+                                        ></td>
+                                    </tr>
+                                    <tr
+                                        v-for="{
                                             row, rowIndex
-                                        ) in displayedDataRows"
+                                        } in visibleObjectDetailRows"
                                         :key="`obj-row-${rowIndex}`"
                                         :data-draft-row="rowIndex"
+                                        :data-object-row="rowIndex"
                                         :class="{
+                                            'results-row-alt': rowIndex % 2 === 1,
                                             'results-row-dirty':
                                                 showEditableRowActions &&
                                                 isRowDirty(rowIndex),
@@ -891,11 +1054,6 @@ watch(
                                                     props.isLikelyNumeric(
                                                         value,
                                                     ),
-                                            }"
-                                            :style="{
-                                                width: `${getObjectDetailColumnWidth(colIndex)}px`,
-                                                minWidth: `${getObjectDetailColumnWidth(colIndex)}px`,
-                                                maxWidth: `${getObjectDetailColumnWidth(colIndex)}px`,
                                             }"
                                         >
                                             <input
@@ -935,6 +1093,18 @@ watch(
                                                 >
                                             </template>
                                         </td>
+                                    </tr>
+                                    <tr
+                                        v-if="objectDetailBottomSpacerHeight > 0"
+                                        class="results-spacer-row"
+                                        aria-hidden="true"
+                                    >
+                                        <td
+                                            :colspan="objectDetailVisibleColumnCount"
+                                            :style="{
+                                                height: `${objectDetailBottomSpacerHeight}px`,
+                                            }"
+                                        ></td>
                                     </tr>
                                 </tbody>
                             </table>
@@ -1487,7 +1657,7 @@ button:focus-visible {
     min-width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    table-layout: auto;
+    table-layout: fixed;
     font-size: 0.74rem;
     margin: 0;
 }
@@ -1522,12 +1692,19 @@ button:focus-visible {
     border-right: 0;
 }
 
-.results-table tbody tr:nth-child(even) {
+.results-table tbody tr.results-row-alt {
     background: var(--table-row-alt);
 }
 
-.results-table tbody tr:hover {
+.results-table tbody tr:not(.results-spacer-row):hover {
     background: var(--bg-hover);
+}
+
+.results-spacer-row td {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    pointer-events: none;
 }
 
 .results-row-new {

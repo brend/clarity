@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { WorkspaceQueryResultPane } from "../types/clarity";
 
 const props = defineProps<{
@@ -24,6 +24,8 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
 
 const MIN_COLUMN_WIDTH = 88;
 const DEFAULT_COLUMN_WIDTH = 180;
+const DEFAULT_ROW_HEIGHT = 28;
+const VIRTUAL_OVERSCAN_ROWS = 20;
 
 type ColumnResizeState = {
   index: number;
@@ -34,6 +36,15 @@ type ColumnResizeState = {
 const columnWidths = ref<number[]>([]);
 const resizeState = ref<ColumnResizeState | null>(null);
 const activeColumns = computed<string[]>(() => activePane.value?.queryResult?.columns ?? []);
+const activeRows = computed<string[][]>(() => activePane.value?.queryResult?.rows ?? []);
+const visibleColumnCount = computed<number>(() => Math.max(1, activeColumns.value.length));
+const resultsContentEl = ref<HTMLElement | null>(null);
+const resultsScrollTop = ref(0);
+const resultsViewportHeight = ref(0);
+const resultRowHeight = ref(DEFAULT_ROW_HEIGHT);
+let resizeRafId: number | null = null;
+let pendingResizePointerX: number | null = null;
+let resultsResizeObserver: ResizeObserver | null = null;
 
 function resetColumnWidths(): void {
   columnWidths.value = activeColumns.value.map(() => DEFAULT_COLUMN_WIDTH);
@@ -43,8 +54,28 @@ watch(
   () => [activePane.value?.id ?? "", activeColumns.value.length],
   () => {
     resetColumnWidths();
+    resultRowHeight.value = DEFAULT_ROW_HEIGHT;
+    const contentEl = resultsContentEl.value;
+    if (contentEl) {
+      contentEl.scrollTop = 0;
+    }
+    resultsScrollTop.value = 0;
+    void nextTick(() => {
+      updateResultsViewportMetrics();
+      measureResultRowHeight();
+    });
   },
   { immediate: true },
+);
+
+watch(
+  () => activeRows.value.length,
+  () => {
+    void nextTick(() => {
+      updateResultsViewportMetrics();
+      measureResultRowHeight();
+    });
+  },
 );
 
 function getColumnWidth(index: number): number {
@@ -52,15 +83,29 @@ function getColumnWidth(index: number): number {
 }
 
 function onColumnResizeMove(event: MouseEvent): void {
-  const state = resizeState.value;
-  if (!state) {
+  if (!resizeState.value) {
     return;
   }
 
-  const nextWidth = Math.max(MIN_COLUMN_WIDTH, state.startWidth + (event.clientX - state.startX));
-  const nextWidths = [...columnWidths.value];
-  nextWidths[state.index] = nextWidth;
-  columnWidths.value = nextWidths;
+  pendingResizePointerX = event.clientX;
+  if (resizeRafId !== null) {
+    return;
+  }
+
+  resizeRafId = window.requestAnimationFrame(() => {
+    resizeRafId = null;
+    const state = resizeState.value;
+    const pointerX = pendingResizePointerX;
+    if (!state || pointerX === null) {
+      return;
+    }
+
+    const nextWidth = Math.max(
+      MIN_COLUMN_WIDTH,
+      state.startWidth + (pointerX - state.startX),
+    );
+    columnWidths.value[state.index] = nextWidth;
+  });
 }
 
 function stopColumnResize(): void {
@@ -69,6 +114,11 @@ function stopColumnResize(): void {
   }
 
   resizeState.value = null;
+  pendingResizePointerX = null;
+  if (resizeRafId !== null) {
+    window.cancelAnimationFrame(resizeRafId);
+    resizeRafId = null;
+  }
   window.removeEventListener("mousemove", onColumnResizeMove);
   window.removeEventListener("mouseup", stopColumnResize);
 }
@@ -85,12 +135,116 @@ function startColumnResize(index: number, event: MouseEvent): void {
     startX: event.clientX,
     startWidth: getColumnWidth(index),
   };
+  pendingResizePointerX = event.clientX;
   window.addEventListener("mousemove", onColumnResizeMove);
   window.addEventListener("mouseup", stopColumnResize);
 }
 
+function updateResultsViewportMetrics(): void {
+  const contentEl = resultsContentEl.value;
+  if (!contentEl) {
+    resultsViewportHeight.value = 0;
+    return;
+  }
+
+  resultsViewportHeight.value = contentEl.clientHeight;
+  resultsScrollTop.value = contentEl.scrollTop;
+}
+
+function onResultsScroll(event: Event): void {
+  const target = event.target as HTMLElement | null;
+  if (!target) {
+    return;
+  }
+
+  resultsScrollTop.value = target.scrollTop;
+}
+
+function measureResultRowHeight(): void {
+  const contentEl = resultsContentEl.value;
+  if (!contentEl) {
+    return;
+  }
+
+  const firstRow = contentEl.querySelector<HTMLTableRowElement>(
+    "tr[data-result-row]",
+  );
+  if (!firstRow) {
+    return;
+  }
+
+  const measuredHeight = firstRow.getBoundingClientRect().height;
+  if (Number.isFinite(measuredHeight) && measuredHeight > 1) {
+    resultRowHeight.value = measuredHeight;
+  }
+}
+
+const visibleStartRow = computed<number>(() => {
+  if (!activeRows.value.length || resultRowHeight.value <= 0) {
+    return 0;
+  }
+
+  const rawStart = Math.floor(resultsScrollTop.value / resultRowHeight.value);
+  return Math.max(0, rawStart - VIRTUAL_OVERSCAN_ROWS);
+});
+
+const visibleEndRow = computed<number>(() => {
+  const rowCount = activeRows.value.length;
+  if (!rowCount || resultRowHeight.value <= 0) {
+    return 0;
+  }
+
+  const visibleRows = Math.ceil(
+    Math.max(resultsViewportHeight.value, resultRowHeight.value) /
+      resultRowHeight.value,
+  );
+  const bufferedEnd = visibleStartRow.value + visibleRows + VIRTUAL_OVERSCAN_ROWS * 2;
+  return Math.min(rowCount, bufferedEnd);
+});
+
+const visibleRows = computed<Array<{ row: string[]; rowIndex: number }>>(() => {
+  if (!activeRows.value.length) {
+    return [];
+  }
+
+  return activeRows.value
+    .slice(visibleStartRow.value, visibleEndRow.value)
+    .map((row, localIndex) => ({
+      row,
+      rowIndex: visibleStartRow.value + localIndex,
+    }));
+});
+
+const topSpacerHeight = computed<number>(() => {
+  return visibleStartRow.value * resultRowHeight.value;
+});
+
+const bottomSpacerHeight = computed<number>(() => {
+  const remainingRows = Math.max(0, activeRows.value.length - visibleEndRow.value);
+  return remainingRows * resultRowHeight.value;
+});
+
+onMounted(() => {
+  window.addEventListener("resize", updateResultsViewportMetrics);
+  if (typeof ResizeObserver !== "undefined" && resultsContentEl.value) {
+    resultsResizeObserver = new ResizeObserver(() => {
+      updateResultsViewportMetrics();
+    });
+    resultsResizeObserver.observe(resultsContentEl.value);
+  }
+  void nextTick(() => {
+    updateResultsViewportMetrics();
+    measureResultRowHeight();
+  });
+});
+
 onBeforeUnmount(() => {
   stopColumnResize();
+  if (resultsResizeObserver) {
+    resultsResizeObserver.disconnect();
+    resultsResizeObserver = null;
+  }
+  window.removeEventListener("resize", updateResultsViewportMetrics);
 });
 </script>
 
@@ -115,7 +269,7 @@ onBeforeUnmount(() => {
       <div v-if="activePane?.errorMessage" class="error-inline">{{ activePane.errorMessage }}</div>
     </div>
 
-    <div class="results-content">
+    <div ref="resultsContentEl" class="results-content" @scroll="onResultsScroll">
       <p v-if="!activePane || !activePane.queryResult" class="muted">{{ props.emptyStateMessage }}</p>
 
       <p v-else-if="activePane.queryResult.rowsAffected !== null" class="muted">
@@ -123,16 +277,18 @@ onBeforeUnmount(() => {
       </p>
 
       <table v-else-if="activePane.queryResult.columns.length" class="results-table" :class="{ 'is-resizing': !!resizeState }">
+        <colgroup>
+          <col
+            v-for="(column, columnIndex) in activePane.queryResult.columns"
+            :key="`col-${column}-${columnIndex}`"
+            :style="{ width: `${getColumnWidth(columnIndex)}px` }"
+          />
+        </colgroup>
         <thead>
           <tr>
             <th
               v-for="(column, columnIndex) in activePane.queryResult.columns"
               :key="column"
-              :style="{
-                width: `${getColumnWidth(columnIndex)}px`,
-                minWidth: `${getColumnWidth(columnIndex)}px`,
-                maxWidth: `${getColumnWidth(columnIndex)}px`,
-              }"
             >
               <span class="results-cell-text" :title="column">{{ column }}</span>
               <button
@@ -146,19 +302,25 @@ onBeforeUnmount(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, rowIndex) in activePane.queryResult.rows" :key="`row-${rowIndex}`">
+          <tr v-if="topSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
+            <td :colspan="visibleColumnCount" :style="{ height: `${topSpacerHeight}px` }"></td>
+          </tr>
+          <tr
+            v-for="{ row, rowIndex } in visibleRows"
+            :key="`row-${rowIndex}`"
+            :data-result-row="rowIndex"
+            :class="{ 'results-row-alt': rowIndex % 2 === 1 }"
+          >
             <td
               v-for="(value, colIndex) in row"
               :key="`col-${rowIndex}-${colIndex}`"
               :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
-              :style="{
-                width: `${getColumnWidth(colIndex)}px`,
-                minWidth: `${getColumnWidth(colIndex)}px`,
-                maxWidth: `${getColumnWidth(colIndex)}px`,
-              }"
             >
               <span class="results-cell-text" :title="value">{{ value }}</span>
             </td>
+          </tr>
+          <tr v-if="bottomSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
+            <td :colspan="visibleColumnCount" :style="{ height: `${bottomSpacerHeight}px` }"></td>
           </tr>
         </tbody>
       </table>
@@ -239,7 +401,7 @@ onBeforeUnmount(() => {
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  table-layout: auto;
+  table-layout: fixed;
   font-size: 0.73rem;
   margin: 0;
 }
@@ -272,12 +434,19 @@ onBeforeUnmount(() => {
   border-right: 0;
 }
 
-.results-table tbody tr:nth-child(even) {
+.results-table tbody tr.results-row-alt {
   background: var(--table-row-alt);
 }
 
-.results-table tbody tr:hover {
+.results-table tbody tr:not(.results-spacer-row):hover {
   background: var(--bg-hover);
+}
+
+.results-spacer-row td {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
 }
 
 .results-cell-number {
