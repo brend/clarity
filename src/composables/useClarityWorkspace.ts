@@ -25,6 +25,15 @@ const OBJECT_DATA_ROW_ID_COLUMN = "__CLARITY_ROWID__";
 const DEFAULT_QUERY_ROW_LIMIT = 1000;
 const MAX_QUERY_ROW_LIMIT = 10000;
 const SAFE_SQL_LEADING_KEYWORDS = new Set(["SELECT", "WITH", "EXPLAIN", "DESCRIBE", "DESC"]);
+const NON_STANDALONE_SQL_KEYWORDS = new Set([
+  "END",
+  "EXCEPTION",
+  "WHEN",
+  "ELSE",
+  "ELSIF",
+  "LOOP",
+  "THEN",
+]);
 const MUTATING_SQL_KEYWORD_PATTERN =
   /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|RENAME|GRANT|REVOKE|COMMENT|BEGIN|DECLARE|CALL|EXECUTE)\b/g;
 
@@ -128,6 +137,182 @@ function shouldConfirmBeforeExecution(sql: string): { shouldConfirm: boolean; re
 function buildMutatingQueryPrompt(reasons: string[]): string {
   const reasonList = reasons.slice(0, 4).join(", ");
   return `This statement appears to modify data/schema (${reasonList}). Continue execution?`;
+}
+
+function removeSqlComments(sql: string): string {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--.*$/gm, " ");
+}
+
+function isCommentOnlySqlFragment(sql: string): boolean {
+  return removeSqlComments(sql).trim().length === 0;
+}
+
+function normalizeStatementForExecution(sql: string): string {
+  const trimmed = sql.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const leadingKeyword = extractLeadingSqlKeyword(trimmed);
+  if (leadingKeyword === "BEGIN" || leadingKeyword === "DECLARE") {
+    return trimmed;
+  }
+
+  return trimmed.replace(/;+\s*$/g, "").trimEnd();
+}
+
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let buffer = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  const pushBuffer = () => {
+    const statement = buffer.trim();
+    buffer = "";
+    if (!statement || isCommentOnlySqlFragment(statement)) {
+      return;
+    }
+    statements.push(statement);
+  };
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index];
+    const nextChar = sql[index + 1] ?? "";
+
+    if (inLineComment) {
+      buffer += char;
+      if (char === "\n") {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      buffer += char;
+      if (char === "*" && nextChar === "/") {
+        buffer += "/";
+        index += 1;
+        inBlockComment = false;
+      }
+      continue;
+    }
+
+    if (inSingleQuote) {
+      buffer += char;
+      if (char === "'" && nextChar === "'") {
+        buffer += "'";
+        index += 1;
+        continue;
+      }
+      if (char === "'") {
+        inSingleQuote = false;
+      }
+      continue;
+    }
+
+    if (inDoubleQuote) {
+      buffer += char;
+      if (char === '"' && nextChar === '"') {
+        buffer += '"';
+        index += 1;
+        continue;
+      }
+      if (char === '"') {
+        inDoubleQuote = false;
+      }
+      continue;
+    }
+
+    if (char === "-" && nextChar === "-") {
+      buffer += "--";
+      index += 1;
+      inLineComment = true;
+      continue;
+    }
+
+    if (char === "/" && nextChar === "*") {
+      buffer += "/*";
+      index += 1;
+      inBlockComment = true;
+      continue;
+    }
+
+    if (char === "'") {
+      buffer += char;
+      inSingleQuote = true;
+      continue;
+    }
+
+    if (char === '"') {
+      buffer += char;
+      inDoubleQuote = true;
+      continue;
+    }
+
+    if (char === ";") {
+      pushBuffer();
+      continue;
+    }
+
+    buffer += char;
+  }
+
+  pushBuffer();
+  return statements;
+}
+
+function splitQueryTextForExecution(sql: string): string[] {
+  const trimmed = sql.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  const candidates = splitSqlStatements(trimmed)
+    .map((statement) => normalizeStatementForExecution(statement))
+    .filter((statement) => statement.length > 0);
+
+  if (candidates.length <= 1) {
+    const fallback = normalizeStatementForExecution(candidates[0] ?? trimmed);
+    return fallback ? [fallback] : [];
+  }
+
+  for (const statement of candidates) {
+    const keyword = extractLeadingSqlKeyword(statement);
+    if (!keyword || NON_STANDALONE_SQL_KEYWORDS.has(keyword)) {
+      const fallback = normalizeStatementForExecution(trimmed);
+      return fallback ? [fallback] : [];
+    }
+  }
+
+  return candidates;
+}
+
+function collectExecutionPreflight(statements: string[]): { shouldConfirm: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  const seen = new Set<string>();
+
+  for (const statement of statements) {
+    const preflight = shouldConfirmBeforeExecution(statement);
+    if (!preflight.shouldConfirm) {
+      continue;
+    }
+
+    for (const reason of preflight.reasons) {
+      if (seen.has(reason)) {
+        continue;
+      }
+      seen.add(reason);
+      reasons.push(reason);
+    }
+  }
+
+  return {
+    shouldConfirm: reasons.length > 0,
+    reasons,
+  };
 }
 
 async function yieldUiFrame(): Promise<void> {
@@ -463,23 +648,12 @@ export function useClarityWorkspace() {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
   }
 
-  function ensureActiveQueryResultPane(tab: WorkspaceQueryTab): WorkspaceQueryResultPane {
-    if (!tab.resultPanes.length) {
-      const paneNumber = tab.nextResultPaneNumber;
-      tab.nextResultPaneNumber += 1;
-      const pane = createQueryResultPane(tab.id, paneNumber);
-      tab.resultPanes.push(pane);
-      tab.activeResultPaneId = pane.id;
-      return pane;
-    }
-
-    const activePane = tab.resultPanes.find((pane) => pane.id === tab.activeResultPaneId);
-    if (activePane) {
-      return activePane;
-    }
-
-    tab.activeResultPaneId = tab.resultPanes[0].id;
-    return tab.resultPanes[0];
+  function prepareQueryResultPanes(tab: WorkspaceQueryTab, statementCount: number): void {
+    const paneCount = Math.max(1, statementCount);
+    const panes = Array.from({ length: paneCount }, (_, index) => createQueryResultPane(tab.id, index + 1));
+    tab.resultPanes = panes;
+    tab.activeResultPaneId = panes[0].id;
+    tab.nextResultPaneNumber = paneCount + 1;
   }
 
   function addQueryTab(): void {
@@ -1185,13 +1359,18 @@ export function useClarityWorkspace() {
     }
 
     const queryTab = activeQueryTab.value;
-    const resultPane = ensureActiveQueryResultPane(queryTab);
     const effectiveRowLimit = clampQueryRowLimit(queryRowLimit.value);
     if (effectiveRowLimit !== queryRowLimit.value) {
       queryRowLimit.value = effectiveRowLimit;
     }
 
-    const preflight = shouldConfirmBeforeExecution(queryTab.queryText);
+    const statements = splitQueryTextForExecution(queryTab.queryText);
+    if (!statements.length) {
+      errorMessage.value = "Query cannot be empty.";
+      return;
+    }
+
+    const preflight = collectExecutionPreflight(statements);
     let allowDestructive = false;
     if (preflight.shouldConfirm) {
       const shouldContinue = window.confirm(buildMutatingQueryPrompt(preflight.reasons));
@@ -1203,27 +1382,48 @@ export function useClarityWorkspace() {
       allowDestructive = true;
     }
 
+    prepareQueryResultPanes(queryTab, statements.length);
     errorMessage.value = "";
-    resultPane.errorMessage = "";
     busy.runningQuery = true;
+    let completedStatements = 0;
 
     try {
-      const result = await invoke<OracleQueryResult>("db_run_query", {
-        request: {
-          sessionId: session.value.sessionId,
-          sql: queryTab.queryText,
-          rowLimit: effectiveRowLimit,
-          allowDestructive,
-        },
-      });
+      for (let index = 0; index < statements.length; index += 1) {
+        const result = await invoke<OracleQueryResult>("db_run_query", {
+          request: {
+            sessionId: session.value.sessionId,
+            sql: statements[index],
+            rowLimit: effectiveRowLimit,
+            allowDestructive,
+          },
+        });
 
-      resultPane.queryResult = result;
-      resultPane.errorMessage = "";
-      statusMessage.value = result.message;
+        const pane = queryTab.resultPanes[index];
+        if (pane) {
+          pane.queryResult = result;
+          pane.errorMessage = "";
+        }
+        completedStatements += 1;
+
+        if (statements.length === 1) {
+          statusMessage.value = result.message;
+        }
+      }
+
+      if (statements.length > 1) {
+        statusMessage.value = `Executed ${statements.length} statements.`;
+      }
     } catch (error) {
       const message = toErrorMessage(error);
-      resultPane.errorMessage = message;
+      const failedPane = queryTab.resultPanes[completedStatements];
+      if (failedPane) {
+        failedPane.errorMessage = message;
+        queryTab.activeResultPaneId = failedPane.id;
+      }
       errorMessage.value = message;
+      if (statements.length > 1) {
+        statusMessage.value = `Execution stopped at statement ${completedStatements + 1} of ${statements.length}.`;
+      }
     } finally {
       busy.runningQuery = false;
     }
