@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
@@ -748,26 +746,23 @@ fn normalize_export_file_content(ddl: &str) -> String {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn pick_directory_os() -> Result<Option<String>, String> {
-    let script = r#"try
-POSIX path of (choose folder with prompt "Select Export Directory")
-on error number -128
-return ""
-end try"#;
-
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .map_err(|error| format!("Failed to open directory picker: {error}"))?;
-
+fn parse_directory_picker_output(
+    output: std::process::Output,
+    cancel_exit_codes: &[i32],
+    fallback_error: &str,
+) -> Result<Option<String>, String> {
     if !output.status.success() {
+        if let Some(code) = output.status.code() {
+            if cancel_exit_codes.contains(&code) {
+                return Ok(None);
+            }
+        }
+
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
-            "Directory picker returned a non-zero exit code.".to_string()
+            fallback_error.to_string()
         } else {
-            format!("Directory picker failed: {stderr}")
+            format!("{fallback_error}: {stderr}")
         });
     }
 
@@ -779,9 +774,82 @@ end try"#;
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "macos")]
 fn pick_directory_os() -> Result<Option<String>, String> {
-    Err("Directory picker is currently supported on macOS only.".to_string())
+    let script = r#"try
+POSIX path of (choose folder with prompt "Select Export Directory")
+on error number -128
+return ""
+end try"#;
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|error| format!("Failed to open directory picker: {error}"))?;
+
+    parse_directory_picker_output(output, &[], "Directory picker returned a non-zero exit code.")
+}
+
+#[cfg(target_os = "windows")]
+fn pick_directory_os() -> Result<Option<String>, String> {
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = "Select Export Directory"
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.SelectedPath)
+} elseif ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+  [Console]::Out.Write("")
+} else {
+  [Console]::Error.Write("Directory picker returned unexpected result: $result")
+  exit 1
+}
+"#;
+
+    let output = std::process::Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-STA")
+        .arg("-Command")
+        .arg(script)
+        .output()
+        .map_err(|error| format!("Failed to open directory picker: {error}"))?;
+
+    parse_directory_picker_output(output, &[], "Directory picker returned a non-zero exit code.")
+}
+
+#[cfg(target_os = "linux")]
+fn pick_directory_os() -> Result<Option<String>, String> {
+    match std::process::Command::new("zenity")
+        .arg("--file-selection")
+        .arg("--directory")
+        .arg("--title=Select Export Directory")
+        .output()
+    {
+        Ok(output) => return parse_directory_picker_output(output, &[1], "Directory picker failed"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Failed to open directory picker: {error}")),
+    }
+
+    match std::process::Command::new("kdialog")
+        .arg("--getexistingdirectory")
+        .arg(".")
+        .arg("Select Export Directory")
+        .output()
+    {
+        Ok(output) => parse_directory_picker_output(output, &[1], "Directory picker failed"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(
+            "Failed to open directory picker: neither 'zenity' nor 'kdialog' is installed."
+                .to_string(),
+        ),
+        Err(error) => Err(format!("Failed to open directory picker: {error}")),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn pick_directory_os() -> Result<Option<String>, String> {
+    Err("Directory picker is not currently supported on this operating system.".to_string())
 }
 
 fn validate_connect_request(request: &DbConnectRequest) -> Result<(), String> {
