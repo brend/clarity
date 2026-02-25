@@ -59,6 +59,27 @@ export interface OracleObjectColumnEntry {
 
 export type SqlCompletionSchema = Record<string, Record<string, string[]>>;
 
+export interface AiSchemaContextObject {
+  schema: string;
+  objectName: string;
+  columns: string[];
+}
+
+export interface AiQuerySuggestionRequest {
+  currentSql: string;
+  connectedSchema: string;
+  endpoint: string;
+  model: string;
+  schemaContext: AiSchemaContextObject[];
+}
+
+export interface AiQuerySuggestionResponse {
+  suggestionText: string;
+  confidence: number;
+  reasoningShort: string;
+  isPotentiallyMutating: boolean;
+}
+
 export interface OracleQueryResult {
   columns: string[];
   rows: string[][];

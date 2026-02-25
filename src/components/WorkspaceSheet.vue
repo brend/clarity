@@ -47,6 +47,13 @@ const props = defineProps<{
   isQueryTabActive: boolean;
   schemaSearchResults: OracleSchemaSearchResult[];
   schemaSearchPerformed: boolean;
+  aiSuggestionText: string;
+  aiSuggestionRationale: string;
+  aiSuggestionError: string;
+  aiSuggestionConfidence: number | null;
+  aiSuggestionMutating: boolean;
+  aiSuggestionLoading: boolean;
+  canUseAiSuggestions: boolean;
   theme: ThemeSetting;
   onActivateWorkspaceTab: (tabId: string) => void;
   onCloseQueryTab: (tabId: string) => void;
@@ -62,6 +69,9 @@ const props = defineProps<{
   onActivateObjectDetailTab: (tabId: ObjectDetailTabId) => void;
   onRunSchemaSearch: () => void;
   onOpenSchemaSearchResult: (result: OracleSchemaSearchResult) => void;
+  onRequestAiSuggestion: () => void;
+  onApplyAiSuggestion: () => void;
+  onDismissAiSuggestion: () => void;
   isLikelyNumeric: (value: string) => boolean;
 }>();
 
@@ -89,6 +99,7 @@ const displayedDataRows = computed<string[][]>(() => {
   return sourceDataRows.value;
 });
 const editableColumnCount = computed<number>(() => props.activeObjectDetailResult?.columns.length ?? 0);
+const hasAiSuggestion = computed<boolean>(() => props.aiSuggestionText.trim().length > 0);
 
 function cloneRows(rows: string[][]): string[][] {
   return rows.map((row) => [...row]);
@@ -368,6 +379,14 @@ watch(
       </button>
       <button
         class="btn"
+        :disabled="!props.canUseAiSuggestions || !props.activeQueryTab || props.aiSuggestionLoading"
+        @click="props.onRequestAiSuggestion"
+      >
+        <AppIcon name="search" class="btn-icon" aria-hidden="true" />
+        {{ props.aiSuggestionLoading ? "Suggesting..." : "AI Suggest" }}
+      </button>
+      <button
+        class="btn"
         :disabled="!props.activeDdlTab || props.activeObjectDetailTabId !== 'ddl' || props.busy.savingDdl"
         @click="props.onSaveDdl"
       >
@@ -378,15 +397,59 @@ watch(
       <span class="schema-chip">Schema: {{ props.connectedSchema }}</span>
     </div>
 
-    <SqlCodeEditor
-      v-if="props.isQueryTabActive"
-      v-model="queryText"
-      class="sql-editor"
-      placeholder="Write SQL here"
-      :completion-schema="props.sqlCompletionSchema"
-      :completion-default-schema="props.sqlCompletionDefaultSchema"
-      :theme="props.theme"
-    />
+    <section v-if="props.isQueryTabActive" class="query-sheet-pane">
+      <div
+        v-if="props.aiSuggestionLoading || hasAiSuggestion || props.aiSuggestionError"
+        class="ai-suggestion-banner"
+        :class="{ warning: hasAiSuggestion && props.aiSuggestionMutating, error: !!props.aiSuggestionError }"
+      >
+        <div class="ai-suggestion-body">
+          <p v-if="props.aiSuggestionLoading" class="ai-suggestion-text">Generating suggestion...</p>
+          <p v-else-if="props.aiSuggestionError" class="ai-suggestion-text">{{ props.aiSuggestionError }}</p>
+          <template v-else-if="hasAiSuggestion">
+            <p class="ai-suggestion-text">{{ props.aiSuggestionText }}</p>
+            <p v-if="props.aiSuggestionRationale" class="ai-suggestion-meta">
+              {{ props.aiSuggestionRationale }}
+            </p>
+            <p v-if="props.aiSuggestionConfidence !== null" class="ai-suggestion-meta">
+              Confidence: {{ Math.round(props.aiSuggestionConfidence * 100) }}%
+            </p>
+            <p v-if="props.aiSuggestionMutating" class="ai-suggestion-meta ai-suggestion-warning">
+              Potentially mutating SQL detected.
+            </p>
+          </template>
+        </div>
+        <div class="ai-suggestion-actions">
+          <button
+            class="btn"
+            :disabled="!hasAiSuggestion || props.aiSuggestionLoading"
+            @click="props.onApplyAiSuggestion"
+          >
+            Apply (Tab)
+          </button>
+          <button
+            class="btn"
+            :disabled="(!hasAiSuggestion && !props.aiSuggestionError) || props.aiSuggestionLoading"
+            @click="props.onDismissAiSuggestion"
+          >
+            Dismiss (Esc)
+          </button>
+        </div>
+      </div>
+
+      <SqlCodeEditor
+        v-model="queryText"
+        class="sql-editor"
+        placeholder="Write SQL here"
+        :completion-schema="props.sqlCompletionSchema"
+        :completion-default-schema="props.sqlCompletionDefaultSchema"
+        :theme="props.theme"
+        :ai-suggestion-active="hasAiSuggestion"
+        @request-ai-suggestion="props.onRequestAiSuggestion"
+        @accept-ai-suggestion="props.onApplyAiSuggestion"
+        @dismiss-ai-suggestion="props.onDismissAiSuggestion"
+      />
+    </section>
 
     <section v-else-if="props.activeDdlTab" class="ddl-pane">
       <div class="ddl-header">
@@ -711,6 +774,13 @@ button:focus-visible {
   overflow-x: hidden;
 }
 
+.query-sheet-pane {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
 .sheet-tabs {
   display: flex;
   align-items: center;
@@ -840,6 +910,51 @@ button:focus-visible {
   padding: 0;
   border-radius: 0;
   letter-spacing: 0.01em;
+}
+
+.ai-suggestion-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--panel-separator);
+  background: var(--bg-surface-muted);
+}
+
+.ai-suggestion-banner.warning {
+  border-left: 3px solid #c28e31;
+}
+
+.ai-suggestion-banner.error {
+  border-left: 3px solid var(--danger);
+}
+
+.ai-suggestion-body {
+  min-width: 0;
+}
+
+.ai-suggestion-text {
+  margin: 0;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+}
+
+.ai-suggestion-meta {
+  margin: 0.16rem 0 0;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.ai-suggestion-warning {
+  color: var(--danger);
+}
+
+.ai-suggestion-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
 }
 
 .sql-editor,

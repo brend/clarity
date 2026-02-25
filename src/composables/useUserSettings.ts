@@ -6,6 +6,9 @@ const THEME_ATTRIBUTE_NAME = "data-theme";
 const DEFAULT_USER_SETTINGS: UserSettings = {
   theme: "light",
   oracleClientLibDir: "",
+  aiSuggestionsEnabled: false,
+  aiModel: "gpt-4o-mini",
+  aiEndpoint: "https://api.openai.com/v1/chat/completions",
 };
 
 function isThemeSetting(value: unknown): value is ThemeSetting {
@@ -20,9 +23,17 @@ function normalizeUserSettings(value: unknown): UserSettings {
   const raw = value as Partial<UserSettings>;
   const normalizedOracleClientLibDir =
     typeof raw.oracleClientLibDir === "string" ? raw.oracleClientLibDir.trim() : "";
+  const normalizedAiModel = typeof raw.aiModel === "string" ? raw.aiModel.trim() : "";
+  const normalizedAiEndpoint = typeof raw.aiEndpoint === "string" ? raw.aiEndpoint.trim() : "";
   return {
     theme: isThemeSetting(raw.theme) ? raw.theme : DEFAULT_USER_SETTINGS.theme,
     oracleClientLibDir: normalizedOracleClientLibDir,
+    aiSuggestionsEnabled:
+      typeof raw.aiSuggestionsEnabled === "boolean"
+        ? raw.aiSuggestionsEnabled
+        : DEFAULT_USER_SETTINGS.aiSuggestionsEnabled,
+    aiModel: normalizedAiModel.length > 0 ? normalizedAiModel : DEFAULT_USER_SETTINGS.aiModel,
+    aiEndpoint: normalizedAiEndpoint.length > 0 ? normalizedAiEndpoint : DEFAULT_USER_SETTINGS.aiEndpoint,
   };
 }
 
@@ -105,10 +116,50 @@ export function useUserSettings() {
     };
   }
 
+  function updateAiSuggestionsEnabled(value: boolean): void {
+    if (settings.value.aiSuggestionsEnabled === value) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      aiSuggestionsEnabled: value,
+    };
+  }
+
+  function updateAiModel(value: string): void {
+    const normalized = value.trim();
+    const nextValue = normalized.length > 0 ? normalized : DEFAULT_USER_SETTINGS.aiModel;
+    if (settings.value.aiModel === nextValue) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      aiModel: nextValue,
+    };
+  }
+
+  function updateAiEndpoint(value: string): void {
+    const normalized = value.trim();
+    const nextValue = normalized.length > 0 ? normalized : DEFAULT_USER_SETTINGS.aiEndpoint;
+    if (settings.value.aiEndpoint === nextValue) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      aiEndpoint: nextValue,
+    };
+  }
+
   return {
     settings,
     theme,
     updateTheme,
     updateOracleClientLibDir,
+    updateAiSuggestionsEnabled,
+    updateAiModel,
+    updateAiEndpoint,
   };
 }

@@ -8,10 +8,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 
 const PROFILE_STORE_FILE: &str = "connection_profiles.json";
 const KEYRING_SERVICE: &str = "com.waldencorp.clarity";
+const KEYRING_AI_API_KEY_ACCOUNT: &str = "ai:openai:api_key";
 const MENU_ID_TOOLS_SETTINGS: &str = "tools.settings";
 const MENU_ID_TOOLS_FIND_IN_SCHEMA: &str = "tools.find_in_schema";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
@@ -188,6 +190,61 @@ struct DbSchemaExportResult {
     message: String,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DbAiSchemaContextObject {
+    schema: String,
+    object_name: String,
+    columns: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DbAiSuggestQueryRequest {
+    current_sql: String,
+    connected_schema: String,
+    endpoint: String,
+    model: String,
+    schema_context: Vec<DbAiSchemaContextObject>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DbAiSuggestQueryResult {
+    suggestion_text: String,
+    #[serde(default = "default_ai_confidence")]
+    confidence: f32,
+    #[serde(default)]
+    reasoning_short: String,
+    #[serde(default)]
+    is_potentially_mutating: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DbAiApiKeyPresence {
+    configured: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChatCompletionResponse {
+    choices: Vec<OpenAiChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiChoice {
+    message: OpenAiMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiMessage {
+    content: String,
+}
+
+fn default_ai_confidence() -> f32 {
+    0.5
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DbSchemaExportProgress {
@@ -349,9 +406,117 @@ fn db_search_schema_text(
 }
 
 #[tauri::command]
+fn db_has_ai_api_key() -> Result<DbAiApiKeyPresence, String> {
+    let configured = read_ai_api_key()?.is_some();
+    Ok(DbAiApiKeyPresence { configured })
+}
+
+#[tauri::command]
+fn db_set_ai_api_key(api_key: String) -> Result<(), String> {
+    let normalized = api_key.trim();
+    if normalized.is_empty() {
+        return Err("API key is required.".to_string());
+    }
+
+    write_ai_api_key(normalized)
+}
+
+#[tauri::command]
+fn db_clear_ai_api_key() -> Result<(), String> {
+    clear_ai_api_key()
+}
+
+#[tauri::command]
+async fn db_ai_suggest_query(
+    request: DbAiSuggestQueryRequest,
+) -> Result<DbAiSuggestQueryResult, String> {
+    validate_ai_suggest_request(&request)?;
+    let api_key = read_ai_api_key()?
+        .ok_or_else(|| "AI API key is not configured. Add it in Settings -> AI.".to_string())?;
+
+    let endpoint = normalize_ai_endpoint(request.endpoint.as_str());
+    let schema_context_prompt = build_ai_schema_context_prompt(&request.schema_context);
+    let user_message = format!(
+        "Connected schema: {}\nCurrent SQL:\n{}\n\nSchema context (sample):\n{}\n\nReturn JSON only.",
+        request.connected_schema.trim(),
+        request.current_sql,
+        schema_context_prompt
+    );
+
+    let payload = serde_json::json!({
+        "model": request.model.trim(),
+        "temperature": 0.2,
+        "response_format": { "type": "json_object" },
+        "messages": [
+            {
+                "role": "system",
+                "content": "You assist with Oracle SQL query suggestions. Prefer read-only SQL. Return valid JSON with keys suggestionText, confidence, reasoningShort, isPotentiallyMutating."
+            },
+            {
+                "role": "user",
+                "content": user_message
+            }
+        ]
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| format!("Failed to initialize AI HTTP client: {error}"))?;
+    let response = client
+        .post(endpoint)
+        .bearer_auth(api_key)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| format!("AI request failed: {error}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_else(|_| String::new());
+        let trimmed = body.trim();
+        let detail = if trimmed.is_empty() {
+            "No response body provided.".to_string()
+        } else {
+            trimmed.chars().take(350).collect()
+        };
+        return Err(format!("AI request failed with status {status}: {detail}"));
+    }
+
+    let parsed = response
+        .json::<OpenAiChatCompletionResponse>()
+        .await
+        .map_err(|error| format!("Failed to parse AI response envelope: {error}"))?;
+    let content = parsed
+        .choices
+        .first()
+        .map(|choice| choice.message.content.trim())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "AI response did not include a suggestion.".to_string())?;
+
+    let mut result = serde_json::from_str::<DbAiSuggestQueryResult>(content)
+        .map_err(|error| format!("Failed to parse AI suggestion payload: {error}"))?;
+    result.suggestion_text = result.suggestion_text.trim().to_string();
+    result.reasoning_short = result.reasoning_short.trim().to_string();
+    result.confidence = result.confidence.clamp(0.0, 1.0);
+    result.is_potentially_mutating = result.is_potentially_mutating
+        || is_potentially_mutating_sql(result.suggestion_text.as_str());
+
+    if result.suggestion_text.is_empty() {
+        return Err("AI response did not include suggestion text.".to_string());
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
 fn db_list_connection_profiles(app: tauri::AppHandle) -> Result<Vec<ConnectionProfile>, String> {
     let stored_profiles = read_profiles(&app)?;
-    Ok(stored_profiles.into_iter().map(to_connection_profile).collect())
+    Ok(stored_profiles
+        .into_iter()
+        .map(to_connection_profile)
+        .collect())
 }
 
 #[tauri::command]
@@ -369,10 +534,15 @@ fn db_save_connection_profile(
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| {
-            let mut candidate =
-                format!("profile-{}", state.next_profile_id.fetch_add(1, Ordering::Relaxed));
+            let mut candidate = format!(
+                "profile-{}",
+                state.next_profile_id.fetch_add(1, Ordering::Relaxed)
+            );
             while profiles.iter().any(|profile| profile.id == candidate) {
-                candidate = format!("profile-{}", state.next_profile_id.fetch_add(1, Ordering::Relaxed));
+                candidate = format!(
+                    "profile-{}",
+                    state.next_profile_id.fetch_add(1, Ordering::Relaxed)
+                );
             }
             candidate
         });
@@ -433,7 +603,9 @@ fn db_delete_connection_profile(
 }
 
 #[tauri::command]
-fn db_get_connection_profile_secret(request: ConnectionProfileRef) -> Result<Option<String>, String> {
+fn db_get_connection_profile_secret(
+    request: ConnectionProfileRef,
+) -> Result<Option<String>, String> {
     let profile_id = request.profile_id.trim();
     if profile_id.is_empty() {
         return Err("Profile id is required".to_string());
@@ -507,16 +679,10 @@ fn db_export_schema_blocking(
             object_type: object.object_type.clone(),
             object_name: object.object_name.clone(),
         };
-        let ddl = match ProviderRegistry::get_object_ddl(
-            session,
-            &object_ref,
-        ) {
+        let ddl = match ProviderRegistry::get_object_ddl(session, &object_ref) {
             Ok(ddl) => ddl,
             Err(error) => {
-                warnings.push(format!(
-                    "{}: {}",
-                    object_label, error
-                ));
+                warnings.push(format!("{}: {}", object_label, error));
                 processed_objects += 1;
                 let skipped_count = processed_objects.saturating_sub(file_count);
                 let _ = app.emit(
@@ -788,7 +954,11 @@ end try"#;
         .output()
         .map_err(|error| format!("Failed to open directory picker: {error}"))?;
 
-    parse_directory_picker_output(output, &[], "Directory picker returned a non-zero exit code.")
+    parse_directory_picker_output(
+        output,
+        &[],
+        "Directory picker returned a non-zero exit code.",
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -816,7 +986,11 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
         .output()
         .map_err(|error| format!("Failed to open directory picker: {error}"))?;
 
-    parse_directory_picker_output(output, &[], "Directory picker returned a non-zero exit code.")
+    parse_directory_picker_output(
+        output,
+        &[],
+        "Directory picker returned a non-zero exit code.",
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -827,7 +1001,9 @@ fn pick_directory_os() -> Result<Option<String>, String> {
         .arg("--title=Select Export Directory")
         .output()
     {
-        Ok(output) => return parse_directory_picker_output(output, &[1], "Directory picker failed"),
+        Ok(output) => {
+            return parse_directory_picker_output(output, &[1], "Directory picker failed")
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("Failed to open directory picker: {error}")),
     }
@@ -912,6 +1088,84 @@ fn validate_profile_request(request: &SaveConnectionProfileRequest) -> Result<()
     Ok(())
 }
 
+fn validate_ai_suggest_request(request: &DbAiSuggestQueryRequest) -> Result<(), String> {
+    if request.current_sql.trim().is_empty() {
+        return Err("Current SQL is required.".to_string());
+    }
+
+    if request.model.trim().is_empty() {
+        return Err("AI model is required.".to_string());
+    }
+
+    if request.endpoint.trim().is_empty() {
+        return Err("AI endpoint is required.".to_string());
+    }
+
+    if request.schema_context.len() > 250 {
+        return Err("Schema context is too large.".to_string());
+    }
+
+    Ok(())
+}
+
+fn normalize_ai_endpoint(endpoint: &str) -> String {
+    let trimmed = endpoint.trim().trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        return trimmed.to_string();
+    }
+    if trimmed.ends_with("/v1") {
+        return format!("{trimmed}/chat/completions");
+    }
+
+    format!("{trimmed}/v1/chat/completions")
+}
+
+fn build_ai_schema_context_prompt(schema_context: &[DbAiSchemaContextObject]) -> String {
+    if schema_context.is_empty() {
+        return "No schema context available.".to_string();
+    }
+
+    schema_context
+        .iter()
+        .take(90)
+        .map(|entry| {
+            let schema = entry.schema.trim();
+            let object_name = entry.object_name.trim();
+            let columns = entry
+                .columns
+                .iter()
+                .filter_map(|value| {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    }
+                })
+                .take(24)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            if columns.is_empty() {
+                format!("{schema}.{object_name}")
+            } else {
+                format!("{schema}.{object_name} ({columns})")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn is_potentially_mutating_sql(sql: &str) -> bool {
+    let normalized = sql.to_ascii_uppercase();
+    let keywords = [
+        "INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE", "DROP", "ALTER", "CREATE", "RENAME",
+        "GRANT", "REVOKE", "COMMENT", "BEGIN", "DECLARE", "CALL", "EXECUTE",
+    ];
+
+    keywords.iter().any(|keyword| normalized.contains(keyword))
+}
+
 fn profiles_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let mut app_dir = app
         .path()
@@ -929,8 +1183,8 @@ fn read_profiles(app: &tauri::AppHandle) -> Result<Vec<StoredConnectionProfile>,
         return Ok(Vec::new());
     }
 
-    let content =
-        fs::read_to_string(&path).map_err(|error| format!("Failed to read profiles file: {error}"))?;
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("Failed to read profiles file: {error}"))?;
     if content.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -939,7 +1193,10 @@ fn read_profiles(app: &tauri::AppHandle) -> Result<Vec<StoredConnectionProfile>,
         .map_err(|error| format!("Failed to parse profiles file: {error}"))
 }
 
-fn write_profiles(app: &tauri::AppHandle, profiles: &[StoredConnectionProfile]) -> Result<(), String> {
+fn write_profiles(
+    app: &tauri::AppHandle,
+    profiles: &[StoredConnectionProfile],
+) -> Result<(), String> {
     let path = profiles_file_path(app)?;
     let payload = serde_json::to_string_pretty(profiles)
         .map_err(|error| format!("Failed to serialize profiles: {error}"))?;
@@ -948,7 +1205,10 @@ fn write_profiles(app: &tauri::AppHandle, profiles: &[StoredConnectionProfile]) 
 
 fn to_connection_profile(profile: StoredConnectionProfile) -> ConnectionProfile {
     // Listing profiles should still work even if keychain lookup is unavailable.
-    let has_password = read_profile_secret(profile.id.as_str()).ok().flatten().is_some();
+    let has_password = read_profile_secret(profile.id.as_str())
+        .ok()
+        .flatten()
+        .is_some();
     ConnectionProfile {
         id: profile.id,
         name: profile.name,
@@ -965,6 +1225,11 @@ fn to_connection_profile(profile: StoredConnectionProfile) -> ConnectionProfile 
 fn keyring_entry(profile_id: &str) -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, &format!("profile:{profile_id}:password"))
         .map_err(|error| format!("Failed to initialize keyring entry: {error}"))
+}
+
+fn ai_keyring_entry() -> Result<Entry, String> {
+    Entry::new(KEYRING_SERVICE, KEYRING_AI_API_KEY_ACCOUNT)
+        .map_err(|error| format!("Failed to initialize AI keyring entry: {error}"))
 }
 
 fn read_profile_secret(profile_id: &str) -> Result<Option<String>, String> {
@@ -985,6 +1250,27 @@ fn clear_profile_secret(profile_id: &str) -> Result<(), String> {
     match keyring_entry(profile_id)?.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
         Err(error) => Err(format!("Failed to clear keychain secret: {error}")),
+    }
+}
+
+fn read_ai_api_key() -> Result<Option<String>, String> {
+    match ai_keyring_entry()?.get_password() {
+        Ok(value) => Ok(Some(value)),
+        Err(KeyringError::NoEntry) => Ok(None),
+        Err(error) => Err(format!("Failed to read AI API key from keychain: {error}")),
+    }
+}
+
+fn write_ai_api_key(api_key: &str) -> Result<(), String> {
+    ai_keyring_entry()?
+        .set_password(api_key)
+        .map_err(|error| format!("Failed to write AI API key to keychain: {error}"))
+}
+
+fn clear_ai_api_key() -> Result<(), String> {
+    match ai_keyring_entry()?.delete_credential() {
+        Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+        Err(error) => Err(format!("Failed to clear AI API key from keychain: {error}")),
     }
 }
 
@@ -1013,13 +1299,12 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let tools_menu =
-                tauri::menu::Submenu::with_items(
-                    app,
-                    "Tools",
-                    true,
-                    &[&settings, &find_in_schema, &export_database],
-                )?;
+            let tools_menu = tauri::menu::Submenu::with_items(
+                app,
+                "Tools",
+                true,
+                &[&settings, &find_in_schema, &export_database],
+            )?;
             let menu = tauri::menu::Menu::default(app)?;
             let existing_items = menu.items()?;
             let help_position = existing_items
@@ -1059,6 +1344,10 @@ pub fn run() {
             db_save_connection_profile,
             db_delete_connection_profile,
             db_get_connection_profile_secret,
+            db_has_ai_api_key,
+            db_set_ai_api_key,
+            db_clear_ai_api_key,
+            db_ai_suggest_query,
             db_pick_directory,
             db_export_schema
         ])

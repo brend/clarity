@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import ExplorerSidebar from "./components/ExplorerSidebar.vue";
 import QueryResultsPane from "./components/QueryResultsPane.vue";
@@ -7,7 +8,12 @@ import WorkspaceSheet from "./components/WorkspaceSheet.vue";
 import { useClarityWorkspace } from "./composables/useClarityWorkspace";
 import { usePaneLayout } from "./composables/usePaneLayout";
 import { useUserSettings } from "./composables/useUserSettings";
-import type { SqlCompletionSchema } from "./types/clarity";
+import type {
+  AiQuerySuggestionRequest,
+  AiQuerySuggestionResponse,
+  AiSchemaContextObject,
+  SqlCompletionSchema,
+} from "./types/clarity";
 import type { ThemeSetting } from "./types/settings";
 
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG = "clarity://open-export-database-dialog";
@@ -16,6 +22,10 @@ const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
 const SQL_COMPLETION_OBJECT_TYPES = new Set(["TABLE", "VIEW", "MATERIALIZED VIEW", "SYNONYM", "SEQUENCE"]);
 const SQL_COMPLETION_COLUMN_OBJECT_TYPES = new Set(["TABLE", "VIEW", "MATERIALIZED VIEW"]);
+const AI_AUTO_SUGGEST_DEBOUNCE_MS = 700;
+const AI_MIN_QUERY_LENGTH = 8;
+const AI_MAX_SCHEMA_OBJECTS = 90;
+const AI_MAX_OBJECT_COLUMNS = 24;
 
 const desktopShellEl = ref<HTMLElement | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
@@ -111,9 +121,28 @@ const exportProgressUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressProcessed = ref(0);
 const exportProgressTotal = ref(0);
 const exportProgressCurrentObject = ref("");
-const { settings, theme, updateTheme, updateOracleClientLibDir } = useUserSettings();
+const {
+  settings,
+  theme,
+  updateTheme,
+  updateOracleClientLibDir,
+  updateAiSuggestionsEnabled,
+  updateAiModel,
+  updateAiEndpoint,
+} = useUserSettings();
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
 const settingsDialogOracleClientLibDir = ref(settings.value.oracleClientLibDir);
+const settingsDialogAiSuggestionsEnabled = ref(settings.value.aiSuggestionsEnabled);
+const settingsDialogAiModel = ref(settings.value.aiModel);
+const settingsDialogAiEndpoint = ref(settings.value.aiEndpoint);
+const settingsDialogAiApiKey = ref("");
+const settingsDialogAiApiKeyDirty = ref(false);
+const hasAiApiKey = ref(false);
+const aiSuggestion = ref<AiQuerySuggestionResponse | null>(null);
+const aiSuggestionError = ref("");
+const aiSuggestionLoading = ref(false);
+let aiSuggestionDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+let aiSuggestionRequestToken = 0;
 const canRunSchemaExport = computed<boolean>(() => {
   return (
     Number.isFinite(selectedExportSessionId.value) &&
@@ -190,6 +219,13 @@ const sqlCompletionSchema = computed<SqlCompletionSchema>(() => {
   return schema;
 });
 const sqlCompletionDefaultSchema = computed<string>(() => connectedSchema.value.trim().toUpperCase());
+const canUseAiSuggestions = computed<boolean>(
+  () => settings.value.aiSuggestionsEnabled && isConnected.value && hasAiApiKey.value,
+);
+
+interface AiApiKeyPresence {
+  configured: boolean;
+}
 
 interface SchemaExportProgressPayload {
   processedObjects: number;
@@ -197,6 +233,156 @@ interface SchemaExportProgressPayload {
   exportedFiles: number;
   skippedCount: number;
   currentObject: string;
+}
+
+function buildAiSchemaContext(schema: SqlCompletionSchema): AiSchemaContextObject[] {
+  const entries: AiSchemaContextObject[] = [];
+  const schemaNames = Object.keys(schema).sort((left, right) => left.localeCompare(right));
+
+  for (const schemaName of schemaNames) {
+    const objects = schema[schemaName];
+    const objectNames = Object.keys(objects).sort((left, right) => left.localeCompare(right));
+    for (const objectName of objectNames) {
+      entries.push({
+        schema: schemaName,
+        objectName,
+        columns: objects[objectName].slice(0, AI_MAX_OBJECT_COLUMNS),
+      });
+
+      if (entries.length >= AI_MAX_SCHEMA_OBJECTS) {
+        return entries;
+      }
+    }
+  }
+
+  return entries;
+}
+
+function clearAiSuggestionState(clearError = true): void {
+  aiSuggestion.value = null;
+  if (clearError) {
+    aiSuggestionError.value = "";
+  }
+}
+
+function cancelAiSuggestionDebounce(): void {
+  if (!aiSuggestionDebounceHandle) {
+    return;
+  }
+
+  window.clearTimeout(aiSuggestionDebounceHandle);
+  aiSuggestionDebounceHandle = null;
+}
+
+async function refreshAiKeyPresence(): Promise<void> {
+  try {
+    const result = await invoke<AiApiKeyPresence>("db_has_ai_api_key");
+    hasAiApiKey.value = result.configured;
+  } catch {
+    hasAiApiKey.value = false;
+  }
+}
+
+async function requestAiSuggestion(isManual = false): Promise<void> {
+  if (!isQueryTabActive.value || !activeQueryTab.value) {
+    return;
+  }
+
+  const currentSql = activeQueryText.value.trim();
+  if (currentSql.length < AI_MIN_QUERY_LENGTH) {
+    if (isManual) {
+      aiSuggestionError.value = "Write more SQL context before requesting a suggestion.";
+    }
+    return;
+  }
+
+  if (!hasAiApiKey.value) {
+    aiSuggestionError.value = "AI API key is not configured. Add it in Settings -> AI.";
+    return;
+  }
+
+  const model = settings.value.aiModel.trim();
+  const endpoint = settings.value.aiEndpoint.trim();
+  if (!model || !endpoint) {
+    aiSuggestionError.value = "Configure AI model and endpoint in Settings -> AI.";
+    return;
+  }
+
+  aiSuggestionError.value = "";
+  aiSuggestionLoading.value = true;
+  const requestToken = aiSuggestionRequestToken + 1;
+  aiSuggestionRequestToken = requestToken;
+
+  try {
+    const payload: AiQuerySuggestionRequest = {
+      currentSql: activeQueryText.value,
+      connectedSchema: connectedSchema.value,
+      endpoint,
+      model,
+      schemaContext: buildAiSchemaContext(sqlCompletionSchema.value),
+    };
+
+    const result = await invoke<AiQuerySuggestionResponse>("db_ai_suggest_query", {
+      request: payload,
+    });
+
+    if (requestToken !== aiSuggestionRequestToken) {
+      return;
+    }
+
+    aiSuggestion.value = result;
+    aiSuggestionError.value = "";
+  } catch (error) {
+    if (requestToken !== aiSuggestionRequestToken) {
+      return;
+    }
+
+    const message = typeof error === "string" ? error : error instanceof Error ? error.message : "AI request failed.";
+    aiSuggestion.value = null;
+    aiSuggestionError.value = message;
+  } finally {
+    if (requestToken === aiSuggestionRequestToken) {
+      aiSuggestionLoading.value = false;
+    }
+  }
+}
+
+function queueAutoAiSuggestion(): void {
+  cancelAiSuggestionDebounce();
+  if (!canUseAiSuggestions.value || !isQueryTabActive.value || aiSuggestionLoading.value) {
+    return;
+  }
+
+  if (activeQueryText.value.trim().length < AI_MIN_QUERY_LENGTH) {
+    return;
+  }
+
+  aiSuggestionDebounceHandle = window.setTimeout(() => {
+    aiSuggestionDebounceHandle = null;
+    void requestAiSuggestion(false);
+  }, AI_AUTO_SUGGEST_DEBOUNCE_MS);
+}
+
+function onRequestAiSuggestion(): void {
+  cancelAiSuggestionDebounce();
+  void requestAiSuggestion(true);
+}
+
+function onApplyAiSuggestion(): void {
+  const suggestionText = aiSuggestion.value?.suggestionText?.trim();
+  if (!suggestionText || !isQueryTabActive.value) {
+    return;
+  }
+
+  const existing = activeQueryText.value;
+  const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
+  activeQueryText.value = `${existing}${separator}${suggestionText}`;
+  clearAiSuggestionState();
+}
+
+function onDismissAiSuggestion(): void {
+  cancelAiSuggestionDebounce();
+  clearAiSuggestionState();
 }
 
 function openExportDialogFromMenu(): void {
@@ -214,6 +400,11 @@ function openExportDialogFromMenu(): void {
 function openSettingsDialog(): void {
   settingsDialogTheme.value = theme.value;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
+  settingsDialogAiSuggestionsEnabled.value = settings.value.aiSuggestionsEnabled;
+  settingsDialogAiModel.value = settings.value.aiModel;
+  settingsDialogAiEndpoint.value = settings.value.aiEndpoint;
+  settingsDialogAiApiKey.value = "";
+  settingsDialogAiApiKeyDirty.value = false;
   showSettingsDialog.value = true;
 }
 
@@ -221,10 +412,26 @@ function closeSettingsDialog(): void {
   showSettingsDialog.value = false;
 }
 
-function saveSettingsDialog(): void {
+async function saveSettingsDialog(): Promise<void> {
   updateTheme(settingsDialogTheme.value);
   updateOracleClientLibDir(settingsDialogOracleClientLibDir.value);
-  showSettingsDialog.value = false;
+  updateAiSuggestionsEnabled(settingsDialogAiSuggestionsEnabled.value);
+  updateAiModel(settingsDialogAiModel.value);
+  updateAiEndpoint(settingsDialogAiEndpoint.value);
+  try {
+    if (settingsDialogAiApiKeyDirty.value) {
+      const normalizedKey = settingsDialogAiApiKey.value.trim();
+      if (normalizedKey.length > 0) {
+        await invoke("db_set_ai_api_key", { apiKey: normalizedKey });
+      } else {
+        await invoke("db_clear_ai_api_key");
+      }
+      await refreshAiKeyPresence();
+    }
+    showSettingsDialog.value = false;
+  } catch (error) {
+    errorMessage.value = typeof error === "string" ? error : "Failed to save AI settings.";
+  }
 }
 
 function closeExportDialog(): void {
@@ -255,8 +462,24 @@ async function runSchemaExport(): Promise<void> {
   exportSummaryMessage.value = result.message;
 }
 
+watch(
+  () => [activeWorkspaceTabId.value, settings.value.aiSuggestionsEnabled, settings.value.aiModel, settings.value.aiEndpoint],
+  () => {
+    onDismissAiSuggestion();
+  },
+);
+
+watch(
+  () => [activeQueryText.value, isQueryTabActive.value, canUseAiSuggestions.value],
+  () => {
+    clearAiSuggestionState();
+    queueAutoAiSuggestion();
+  },
+);
+
 onMounted(() => {
   void loadConnectionProfiles();
+  void refreshAiKeyPresence();
   void listen(EVENT_OPEN_EXPORT_DATABASE_DIALOG, () => {
     openExportDialogFromMenu();
   }).then((unlisten) => {
@@ -283,6 +506,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  cancelAiSuggestionDebounce();
+  aiSuggestionRequestToken += 1;
   if (exportMenuUnlisten.value) {
     exportMenuUnlisten.value();
     exportMenuUnlisten.value = null;
@@ -367,6 +592,13 @@ onBeforeUnmount(() => {
         :is-query-tab-active="isQueryTabActive"
         :schema-search-results="schemaSearchResults"
         :schema-search-performed="schemaSearchPerformed"
+        :ai-suggestion-text="aiSuggestion?.suggestionText ?? ''"
+        :ai-suggestion-rationale="aiSuggestion?.reasoningShort ?? ''"
+        :ai-suggestion-error="aiSuggestionError"
+        :ai-suggestion-confidence="aiSuggestion ? aiSuggestion.confidence : null"
+        :ai-suggestion-mutating="aiSuggestion?.isPotentiallyMutating ?? false"
+        :ai-suggestion-loading="aiSuggestionLoading"
+        :can-use-ai-suggestions="canUseAiSuggestions"
         :sql-completion-schema="sqlCompletionSchema"
         :sql-completion-default-schema="sqlCompletionDefaultSchema"
         :theme="theme"
@@ -384,6 +616,9 @@ onBeforeUnmount(() => {
         :on-activate-object-detail-tab="activateObjectDetailTab"
         :on-run-schema-search="runSchemaSearch"
         :on-open-schema-search-result="openSchemaSearchResult"
+        :on-request-ai-suggestion="onRequestAiSuggestion"
+        :on-apply-ai-suggestion="onApplyAiSuggestion"
+        :on-dismiss-ai-suggestion="onDismissAiSuggestion"
         :is-likely-numeric="isLikelyNumeric"
       />
 
@@ -439,6 +674,55 @@ onBeforeUnmount(() => {
           </label>
           <p class="muted settings-hint">
             Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new Oracle connections in this app.
+          </p>
+        </fieldset>
+        <fieldset class="settings-group">
+          <legend>AI</legend>
+          <label class="settings-option">
+            <input v-model="settingsDialogAiSuggestionsEnabled" type="checkbox" />
+            <span>Enable AI query suggestions while typing</span>
+          </label>
+          <label class="settings-field">
+            <span>Model</span>
+            <input
+              v-model.trim="settingsDialogAiModel"
+              placeholder="gpt-4o-mini"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+          <label class="settings-field">
+            <span>Endpoint</span>
+            <input
+              v-model.trim="settingsDialogAiEndpoint"
+              placeholder="https://api.openai.com/v1/chat/completions"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+          <label class="settings-field">
+            <span>API Key</span>
+            <input
+              v-model.trim="settingsDialogAiApiKey"
+              type="password"
+              placeholder="sk-..."
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+              @input="settingsDialogAiApiKeyDirty = true"
+            />
+          </label>
+          <p class="muted settings-hint">
+            Stored in the OS keychain. Current key status: {{ hasAiApiKey ? "Configured" : "Missing" }}.
+            Leave API key blank and save to clear the stored key.
           </p>
         </fieldset>
       </div>

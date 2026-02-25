@@ -326,7 +326,10 @@ fn search_ddl_text(
 
     let rows = session
         .connection
-        .query(object_sql, &[&session.target_schema, &MAX_DDL_SEARCH_OBJECTS])
+        .query(
+            object_sql,
+            &[&session.target_schema, &MAX_DDL_SEARCH_OBJECTS],
+        )
         .map_err(map_oracle_error)?;
 
     let needle_upper = search_term.to_ascii_uppercase();
@@ -351,7 +354,8 @@ fn search_ddl_text(
             continue;
         };
 
-        if let Some((line, snippet)) = find_matching_line(ddl_text.as_str(), needle_upper.as_str()) {
+        if let Some((line, snippet)) = find_matching_line(ddl_text.as_str(), needle_upper.as_str())
+        {
             matches.push(DbSchemaSearchResult {
                 schema,
                 object_type,
@@ -591,7 +595,9 @@ fn fetch_object_ddl_for_search(
     object_name: &str,
 ) -> Result<Option<String>, OracleError> {
     let source_type = normalize_source_type(object_type);
-    if let Some(source_ddl) = fetch_source_ddl(connection, schema, source_type.as_str(), object_name)? {
+    if let Some(source_ddl) =
+        fetch_source_ddl(connection, schema, source_type.as_str(), object_name)?
+    {
         return Ok(Some(source_ddl));
     }
 
@@ -649,7 +655,9 @@ fn normalize_ddl_for_execute(ddl: String) -> String {
     lines.join("\n")
 }
 
-fn ensure_oracle_client_initialized(oracle_client_lib_dir_override: Option<&str>) -> Result<(), String> {
+fn ensure_oracle_client_initialized(
+    oracle_client_lib_dir_override: Option<&str>,
+) -> Result<(), String> {
     let normalized_override = oracle_client_lib_dir_override
         .map(str::trim)
         .filter(|path| !path.is_empty())

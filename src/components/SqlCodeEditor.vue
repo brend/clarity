@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { EditorView, placeholder as cmPlaceholder, type ViewUpdate } from "@codemirror/view";
+import { EditorView, keymap, placeholder as cmPlaceholder, type ViewUpdate } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { basicSetup } from "codemirror";
 import { sql } from "@codemirror/lang-sql";
@@ -19,6 +19,7 @@ const props = withDefaults(
     completionSchema?: SqlCompletionSchema | null;
     completionDefaultSchema?: string;
     theme?: ThemeSetting;
+    aiSuggestionActive?: boolean;
   }>(),
   {
     placeholder: "",
@@ -28,11 +29,15 @@ const props = withDefaults(
     completionSchema: null,
     completionDefaultSchema: "",
     theme: "light",
+    aiSuggestionActive: false,
   },
 );
 
 const emit = defineEmits<{
   (event: "update:modelValue", value: string): void;
+  (event: "request-ai-suggestion"): void;
+  (event: "accept-ai-suggestion"): void;
+  (event: "dismiss-ai-suggestion"): void;
 }>();
 
 const hostEl = ref<HTMLElement | null>(null);
@@ -125,6 +130,38 @@ function buildLanguageExtension(completionSchema: SqlCompletionSchema | null, co
   });
 }
 
+function buildShortcutExtensions(): Extension {
+  return keymap.of([
+    {
+      key: "Mod-Space",
+      run: () => {
+        emit("request-ai-suggestion");
+        return true;
+      },
+    },
+    {
+      key: "Tab",
+      run: () => {
+        if (!props.aiSuggestionActive) {
+          return false;
+        }
+        emit("accept-ai-suggestion");
+        return true;
+      },
+    },
+    {
+      key: "Escape",
+      run: () => {
+        if (!props.aiSuggestionActive) {
+          return false;
+        }
+        emit("dismiss-ai-suggestion");
+        return true;
+      },
+    },
+  ]);
+}
+
 function updateCompartment(compartment: Compartment, extension: Extension): void {
   if (!editorView) {
     return;
@@ -165,6 +202,7 @@ onMounted(() => {
         themeCompartment.of(buildEditorTheme(props.theme)),
         syntaxCompartment.of(buildHighlightTheme()),
         languageCompartment.of(buildLanguageExtension(props.completionSchema, props.completionDefaultSchema)),
+        buildShortcutExtensions(),
         readOnlyCompartment.of(EditorState.readOnly.of(props.readOnly)),
         placeholderCompartment.of(buildPlaceholderExtension(props.placeholder)),
         EditorView.updateListener.of((update: ViewUpdate) => {
