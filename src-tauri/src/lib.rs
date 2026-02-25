@@ -17,9 +17,13 @@ const KEYRING_AI_API_KEY_ACCOUNT: &str = "ai:openai:api_key";
 const MENU_ID_TOOLS_SETTINGS: &str = "tools.settings";
 const MENU_ID_TOOLS_FIND_IN_SCHEMA: &str = "tools.find_in_schema";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
+const MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET: &str = "tools.save_active_query_sheet";
+const MENU_ID_TOOLS_SAVE_ALL_QUERY_SHEETS: &str = "tools.save_all_query_sheets";
 const EVENT_OPEN_SETTINGS_DIALOG: &str = "clarity://open-settings-dialog";
 const EVENT_OPEN_SCHEMA_SEARCH: &str = "clarity://open-schema-search";
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG: &str = "clarity://open-export-database-dialog";
+const EVENT_SAVE_ACTIVE_QUERY_SHEET: &str = "clarity://save-active-query-sheet";
+const EVENT_SAVE_ALL_QUERY_SHEETS: &str = "clarity://save-all-query-sheets";
 const EVENT_SCHEMA_EXPORT_PROGRESS: &str = "clarity://schema-export-progress";
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +89,26 @@ struct OracleDdlUpdateRequest {
 struct DbExportSchemaRequest {
     session_id: u64,
     destination_directory: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DbSaveQuerySheetRequest {
+    suggested_file_name: String,
+    sql: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DbSaveQuerySheetInput {
+    title: String,
+    sql: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DbSaveQuerySheetsRequest {
+    sheets: Vec<DbSaveQuerySheetInput>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -190,6 +214,13 @@ struct DbSchemaExportResult {
     file_count: usize,
     skipped_count: usize,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DbSaveQuerySheetsResult {
+    directory: String,
+    file_count: usize,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -648,6 +679,63 @@ fn db_pick_directory() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn db_save_query_sheet(request: DbSaveQuerySheetRequest) -> Result<Option<String>, String> {
+    let suggested_name = normalize_suggested_file_name(request.suggested_file_name.as_str());
+    let default_file_name = if suggested_name.to_lowercase().ends_with(".sql") {
+        suggested_name
+    } else {
+        format!("{suggested_name}.sql")
+    };
+
+    let selected_path = pick_save_file_os(default_file_name.as_str())?;
+    let Some(path_string) = selected_path else {
+        return Ok(None);
+    };
+
+    let path = PathBuf::from(path_string.as_str());
+    write_query_sheet_file(path.as_path(), request.sql.as_str())?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn db_save_query_sheets(
+    request: DbSaveQuerySheetsRequest,
+) -> Result<Option<DbSaveQuerySheetsResult>, String> {
+    if request.sheets.is_empty() {
+        return Err("No query sheets were provided.".to_string());
+    }
+
+    let selected_directory = pick_directory_os()?;
+    let Some(directory) = selected_directory else {
+        return Ok(None);
+    };
+
+    let destination = PathBuf::from(directory.as_str());
+    fs::create_dir_all(&destination)
+        .map_err(|error| format!("Failed to create destination directory: {error}"))?;
+
+    let mut file_count = 0usize;
+    for (index, sheet) in request.sheets.iter().enumerate() {
+        let fallback_title = format!("query_{}", index + 1);
+        let normalized_title = if sheet.title.trim().is_empty() {
+            fallback_title
+        } else {
+            sheet.title.trim().to_string()
+        };
+        let file_stem = sanitize_export_file_stem(normalized_title.as_str());
+        let base_path = destination.join(format!("{file_stem}.sql"));
+        let file_path = unique_export_file_path(base_path);
+        write_query_sheet_file(file_path.as_path(), sheet.sql.as_str())?;
+        file_count += 1;
+    }
+
+    Ok(Some(DbSaveQuerySheetsResult {
+        directory,
+        file_count,
+    }))
+}
+
+#[tauri::command]
 async fn db_export_schema(
     request: DbExportSchemaRequest,
     state: tauri::State<'_, AppState>,
@@ -940,6 +1028,16 @@ fn normalize_export_file_content(ddl: &str) -> String {
     }
 }
 
+fn write_query_sheet_file(path: &Path, sql: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create directory '{}': {error}", parent.display()))?;
+    }
+
+    fs::write(path, normalize_export_file_content(sql))
+        .map_err(|error| format!("Failed to write query sheet '{}': {error}", path.display()))
+}
+
 fn parse_directory_picker_output(
     output: std::process::Output,
     cancel_exit_codes: &[i32],
@@ -966,6 +1064,32 @@ fn parse_directory_picker_output(
     } else {
         Ok(Some(selected_path))
     }
+}
+
+fn normalize_suggested_file_name(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return "query.sql".to_string();
+    }
+
+    let sanitized = trimmed
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => ch,
+        })
+        .collect::<String>();
+    let collapsed = sanitized.trim().trim_matches('.');
+    if collapsed.is_empty() {
+        "query.sql".to_string()
+    } else {
+        collapsed.to_string()
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn escape_applescript_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(target_os = "macos")]
@@ -1054,6 +1178,98 @@ fn pick_directory_os() -> Result<Option<String>, String> {
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn pick_directory_os() -> Result<Option<String>, String> {
     Err("Directory picker is not currently supported on this operating system.".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn pick_save_file_os(suggested_file_name: &str) -> Result<Option<String>, String> {
+    let suggested = escape_applescript_string(normalize_suggested_file_name(suggested_file_name).as_str());
+    let script = format!(
+        r#"try
+POSIX path of (choose file name with prompt "Save Query Sheet As" default name "{suggested}")
+on error number -128
+return ""
+end try"#
+    );
+
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|error| format!("Failed to open save dialog: {error}"))?;
+
+    parse_directory_picker_output(output, &[], "Save dialog returned a non-zero exit code.")
+}
+
+#[cfg(target_os = "windows")]
+fn pick_save_file_os(suggested_file_name: &str) -> Result<Option<String>, String> {
+    let suggested = normalize_suggested_file_name(suggested_file_name);
+    let script = r#"
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.SaveFileDialog
+$dialog.Title = "Save Query Sheet"
+$dialog.Filter = "SQL files (*.sql)|*.sql|All files (*.*)|*.*"
+$dialog.FileName = $env:CLARITY_SUGGESTED_FILE_NAME
+$result = $dialog.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+  [Console]::Out.Write($dialog.FileName)
+} elseif ($result -eq [System.Windows.Forms.DialogResult]::Cancel) {
+  [Console]::Out.Write("")
+} else {
+  [Console]::Error.Write("Save dialog returned unexpected result: $result")
+  exit 1
+}
+"#;
+
+    let output = std::process::Command::new("powershell")
+        .arg("-NoProfile")
+        .arg("-STA")
+        .arg("-Command")
+        .arg(script)
+        .env("CLARITY_SUGGESTED_FILE_NAME", suggested)
+        .output()
+        .map_err(|error| format!("Failed to open save dialog: {error}"))?;
+
+    parse_directory_picker_output(output, &[], "Save dialog returned a non-zero exit code.")
+}
+
+#[cfg(target_os = "linux")]
+fn pick_save_file_os(suggested_file_name: &str) -> Result<Option<String>, String> {
+    let suggested = normalize_suggested_file_name(suggested_file_name);
+    let zenity_default = format!("./{suggested}");
+    match std::process::Command::new("zenity")
+        .arg("--file-selection")
+        .arg("--save")
+        .arg("--confirm-overwrite")
+        .arg("--title=Save Query Sheet")
+        .arg("--filename")
+        .arg(zenity_default.as_str())
+        .output()
+    {
+        Ok(output) => return parse_directory_picker_output(output, &[1], "Save dialog failed"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("Failed to open save dialog: {error}")),
+    }
+
+    let kdialog_default = format!("./{suggested}");
+    match std::process::Command::new("kdialog")
+        .arg("--getsavefilename")
+        .arg(kdialog_default.as_str())
+        .arg("*.sql | SQL files")
+        .arg("--title")
+        .arg("Save Query Sheet")
+        .output()
+    {
+        Ok(output) => parse_directory_picker_output(output, &[1], "Save dialog failed"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Err(
+            "Failed to open save dialog: neither 'zenity' nor 'kdialog' is installed.".to_string(),
+        ),
+        Err(error) => Err(format!("Failed to open save dialog: {error}")),
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn pick_save_file_os(_suggested_file_name: &str) -> Result<Option<String>, String> {
+    Err("Save dialog is not currently supported on this operating system.".to_string())
 }
 
 fn validate_connect_request(request: &DbConnectRequest) -> Result<(), String> {
@@ -1601,6 +1817,20 @@ fn clear_ai_api_key() -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .menu(|app| {
+            let save_active_query_sheet = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET,
+                "Save active query sheet...",
+                true,
+                Some("CmdOrCtrl+S"),
+            )?;
+            let save_all_query_sheets = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_SAVE_ALL_QUERY_SHEETS,
+                "Save all query sheets...",
+                true,
+                Some("CmdOrCtrl+Shift+S"),
+            )?;
             let settings = tauri::menu::MenuItem::with_id(
                 app,
                 MENU_ID_TOOLS_SETTINGS,
@@ -1626,7 +1856,13 @@ pub fn run() {
                 app,
                 "Tools",
                 true,
-                &[&settings, &find_in_schema, &export_database],
+                &[
+                    &save_active_query_sheet,
+                    &save_all_query_sheets,
+                    &find_in_schema,
+                    &export_database,
+                    &settings,
+                ],
             )?;
             let menu = tauri::menu::Menu::default(app)?;
             let existing_items = menu.items()?;
@@ -1641,6 +1877,14 @@ pub fn run() {
             if event.id() == MENU_ID_TOOLS_SETTINGS {
                 if let Err(error) = app.emit(EVENT_OPEN_SETTINGS_DIALOG, ()) {
                     eprintln!("failed to emit open settings event: {error}");
+                }
+            } else if event.id() == MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET {
+                if let Err(error) = app.emit(EVENT_SAVE_ACTIVE_QUERY_SHEET, ()) {
+                    eprintln!("failed to emit save active query sheet event: {error}");
+                }
+            } else if event.id() == MENU_ID_TOOLS_SAVE_ALL_QUERY_SHEETS {
+                if let Err(error) = app.emit(EVENT_SAVE_ALL_QUERY_SHEETS, ()) {
+                    eprintln!("failed to emit save all query sheets event: {error}");
                 }
             } else if event.id() == MENU_ID_TOOLS_FIND_IN_SCHEMA {
                 if let Err(error) = app.emit(EVENT_OPEN_SCHEMA_SEARCH, ()) {
@@ -1672,6 +1916,8 @@ pub fn run() {
             db_clear_ai_api_key,
             db_ai_suggest_query,
             db_pick_directory,
+            db_save_query_sheet,
+            db_save_query_sheets,
             db_export_schema
         ])
         .run(tauri::generate_context!())

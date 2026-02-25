@@ -21,6 +21,8 @@ const EVENT_OPEN_EXPORT_DATABASE_DIALOG =
   "clarity://open-export-database-dialog";
 const EVENT_OPEN_SETTINGS_DIALOG = "clarity://open-settings-dialog";
 const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
+const EVENT_SAVE_ACTIVE_QUERY_SHEET = "clarity://save-active-query-sheet";
+const EVENT_SAVE_ALL_QUERY_SHEETS = "clarity://save-all-query-sheets";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
 const SQL_COMPLETION_OBJECT_TYPES = new Set([
   "TABLE",
@@ -184,6 +186,8 @@ const {
   connectOracle,
   disconnectOracle,
   refreshObjects,
+  saveActiveQuerySheetToDisk,
+  saveAllQuerySheetsToDisk,
   saveDdl,
   runQuery,
   runSchemaSearch,
@@ -197,6 +201,8 @@ const exportSummaryMessage = ref("");
 const exportMenuUnlisten = ref<UnlistenFn | null>(null);
 const settingsMenuUnlisten = ref<UnlistenFn | null>(null);
 const searchMenuUnlisten = ref<UnlistenFn | null>(null);
+const saveActiveSheetMenuUnlisten = ref<UnlistenFn | null>(null);
+const saveAllSheetsMenuUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressProcessed = ref(0);
 const exportProgressTotal = ref(0);
@@ -758,6 +764,16 @@ onMounted(() => {
   }).then((unlisten) => {
     searchMenuUnlisten.value = unlisten;
   });
+  void listen(EVENT_SAVE_ACTIVE_QUERY_SHEET, () => {
+    void saveActiveQuerySheetToDisk();
+  }).then((unlisten) => {
+    saveActiveSheetMenuUnlisten.value = unlisten;
+  });
+  void listen(EVENT_SAVE_ALL_QUERY_SHEETS, () => {
+    void saveAllQuerySheetsToDisk();
+  }).then((unlisten) => {
+    saveAllSheetsMenuUnlisten.value = unlisten;
+  });
   void listen<SchemaExportProgressPayload>(
     EVENT_SCHEMA_EXPORT_PROGRESS,
     (event) => {
@@ -789,6 +805,14 @@ onBeforeUnmount(() => {
   if (searchMenuUnlisten.value) {
     searchMenuUnlisten.value();
     searchMenuUnlisten.value = null;
+  }
+  if (saveActiveSheetMenuUnlisten.value) {
+    saveActiveSheetMenuUnlisten.value();
+    saveActiveSheetMenuUnlisten.value = null;
+  }
+  if (saveAllSheetsMenuUnlisten.value) {
+    saveAllSheetsMenuUnlisten.value();
+    saveAllSheetsMenuUnlisten.value = null;
   }
 });
 </script>

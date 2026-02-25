@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BusyState,
@@ -21,6 +21,7 @@ import type {
 const QUERY_TAB_PREFIX = "query:";
 const FIRST_QUERY_TAB_ID = `${QUERY_TAB_PREFIX}1`;
 const SEARCH_TAB_ID = "search:code";
+const QUERY_SHEETS_STORAGE_KEY = "clarity.query-sheets.v1";
 const OBJECT_DATA_PREVIEW_LIMIT = 500;
 const OBJECT_DATA_ROW_ID_COLUMN = "__CLARITY_ROWID__";
 const DEFAULT_QUERY_ROW_LIMIT = 1000;
@@ -37,6 +38,18 @@ const NON_STANDALONE_SQL_KEYWORDS = new Set([
 ]);
 const MUTATING_SQL_KEYWORD_PATTERN =
   /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|RENAME|GRANT|REVOKE|COMMENT|BEGIN|DECLARE|CALL|EXECUTE)\b/g;
+
+interface PersistedQuerySheet {
+  id: string;
+  title: string;
+  queryText: string;
+}
+
+interface PersistedQuerySheetState {
+  queryTabs: PersistedQuerySheet[];
+  activeWorkspaceTabId: string;
+  queryTabNumber: number;
+}
 
 function readDebugConnectionString(value: string | undefined, fallback: string): string {
   if (!import.meta.env.DEV) {
@@ -352,6 +365,141 @@ function createQueryTab(tabNumber: number, schema: string): WorkspaceQueryTab {
   };
 }
 
+function createQueryTabFromPersisted(state: PersistedQuerySheet): WorkspaceQueryTab {
+  const firstResultPane = createQueryResultPane(state.id, 1);
+  return {
+    id: state.id,
+    title: state.title,
+    queryText: state.queryText,
+    resultPanes: [firstResultPane],
+    activeResultPaneId: firstResultPane.id,
+    nextResultPaneNumber: 2,
+  };
+}
+
+function parseQueryTabNumber(tabId: string): number | null {
+  const match = /^query:(\d+)$/.exec(tabId.trim());
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
+}
+
+function createDefaultPersistedQuerySheetState(schema: string): PersistedQuerySheetState {
+  const firstTab = createQueryTab(1, schema);
+  return {
+    queryTabs: [
+      {
+        id: firstTab.id,
+        title: firstTab.title,
+        queryText: firstTab.queryText,
+      },
+    ],
+    activeWorkspaceTabId: firstTab.id,
+    queryTabNumber: 2,
+  };
+}
+
+function normalizePersistedQuerySheetState(
+  value: unknown,
+  schema: string,
+): PersistedQuerySheetState {
+  const fallback = createDefaultPersistedQuerySheetState(schema);
+  if (typeof value !== "object" || value === null) {
+    return fallback;
+  }
+
+  const raw = value as Partial<PersistedQuerySheetState> & {
+    queryTabs?: unknown;
+  };
+  if (!Array.isArray(raw.queryTabs)) {
+    return fallback;
+  }
+
+  const queryTabs: PersistedQuerySheet[] = [];
+  const seenIds = new Set<string>();
+  let maxTabNumber = 0;
+
+  for (const entry of raw.queryTabs) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+
+    const rawTab = entry as Partial<PersistedQuerySheet>;
+    const id = typeof rawTab.id === "string" ? rawTab.id.trim() : "";
+    const tabNumber = parseQueryTabNumber(id);
+    if (!id || tabNumber === null || seenIds.has(id)) {
+      continue;
+    }
+
+    seenIds.add(id);
+    maxTabNumber = Math.max(maxTabNumber, tabNumber);
+    queryTabs.push({
+      id,
+      title:
+        typeof rawTab.title === "string" && rawTab.title.trim().length > 0
+          ? rawTab.title.trim()
+          : `Query ${tabNumber}`,
+      queryText: typeof rawTab.queryText === "string" ? rawTab.queryText : "",
+    });
+  }
+
+  if (!queryTabs.length) {
+    return fallback;
+  }
+
+  const requestedActiveId =
+    typeof raw.activeWorkspaceTabId === "string"
+      ? raw.activeWorkspaceTabId.trim()
+      : "";
+  const activeWorkspaceTabId = queryTabs.some((tab) => tab.id === requestedActiveId)
+    ? requestedActiveId
+    : queryTabs[0].id;
+  const requestedNextTabNumber =
+    typeof raw.queryTabNumber === "number" ? Math.trunc(raw.queryTabNumber) : 0;
+  const queryTabNumber =
+    Number.isFinite(requestedNextTabNumber) && requestedNextTabNumber > maxTabNumber
+      ? requestedNextTabNumber
+      : maxTabNumber + 1;
+
+  return {
+    queryTabs,
+    activeWorkspaceTabId,
+    queryTabNumber,
+  };
+}
+
+function readStoredQuerySheetState(schema: string): PersistedQuerySheetState {
+  if (typeof window === "undefined") {
+    return createDefaultPersistedQuerySheetState(schema);
+  }
+
+  try {
+    const serialized = window.localStorage.getItem(QUERY_SHEETS_STORAGE_KEY);
+    if (!serialized) {
+      return createDefaultPersistedQuerySheetState(schema);
+    }
+
+    return normalizePersistedQuerySheetState(JSON.parse(serialized), schema);
+  } catch {
+    return createDefaultPersistedQuerySheetState(schema);
+  }
+}
+
+function writeStoredQuerySheetState(state: PersistedQuerySheetState): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(QUERY_SHEETS_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // Ignore persistence errors; query tabs remain active for this session.
+  }
+}
+
 export function useClarityWorkspace() {
   const connection = reactive<OracleConnectRequest>({
     provider: "oracle",
@@ -365,6 +513,7 @@ export function useClarityWorkspace() {
   const profileName = ref("");
   const selectedProfileId = ref("");
   const saveProfilePassword = ref(true);
+  const initialQuerySheetState = readStoredQuerySheetState(connection.schema);
 
   const session = ref<OracleSessionSummary | null>(null);
   const connectionProfiles = ref<ConnectionProfile[]>([]);
@@ -372,8 +521,10 @@ export function useClarityWorkspace() {
   const objectColumns = ref<OracleObjectColumnEntry[]>([]);
   const selectedObject = ref<OracleObjectEntry | null>(null);
   const ddlTabs = ref<WorkspaceDdlTab[]>([]);
-  const queryTabs = ref<WorkspaceQueryTab[]>([createQueryTab(1, connection.schema)]);
-  const queryTabNumber = ref(2);
+  const queryTabs = ref<WorkspaceQueryTab[]>(
+    initialQuerySheetState.queryTabs.map((tab) => createQueryTabFromPersisted(tab)),
+  );
+  const queryTabNumber = ref(initialQuerySheetState.queryTabNumber);
   const schemaSearchText = ref("");
   const schemaSearchIncludeObjectNames = ref(true);
   const schemaSearchIncludeSource = ref(true);
@@ -388,7 +539,7 @@ export function useClarityWorkspace() {
   const schemaSearchPerformed = ref(false);
   const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
   const errorMessage = ref("");
-  const activeWorkspaceTabId = ref(FIRST_QUERY_TAB_ID);
+  const activeWorkspaceTabId = ref(initialQuerySheetState.activeWorkspaceTabId);
   const expandedObjectTypes = ref<Record<string, boolean>>({});
 
   const busy = reactive<BusyState>({
@@ -1224,9 +1375,14 @@ export function useClarityWorkspace() {
 
       session.value = summary;
       selectedExportSessionId.value = summary.sessionId;
-      const targetQueryTab = activeQueryTab.value ?? queryTabs.value[0];
-      if (targetQueryTab) {
-        targetQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
+      const firstQueryTab = queryTabs.value[0];
+      if (
+        firstQueryTab &&
+        queryTabs.value.length === 1 &&
+        firstQueryTab.id === FIRST_QUERY_TAB_ID &&
+        firstQueryTab.queryText.trim() === buildDefaultSchemaQuery(connection.schema).trim()
+      ) {
+        firstQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
       }
       statusMessage.value = `Connected: ${summary.displayName}`;
       await refreshObjects();
@@ -1256,12 +1412,8 @@ export function useClarityWorkspace() {
       objects.value = [];
       objectColumns.value = [];
       expandedObjectTypes.value = {};
-      queryTabs.value = [
-        createQueryTab(1, connection.schema),
-      ];
-      queryTabNumber.value = 2;
       ddlTabs.value = [];
-      activeWorkspaceTabId.value = FIRST_QUERY_TAB_ID;
+      activeWorkspaceTabId.value = queryTabs.value[0]?.id ?? FIRST_QUERY_TAB_ID;
       selectedObject.value = null;
       schemaSearchText.value = "";
       exportDestinationDirectory.value = "";
@@ -1270,6 +1422,66 @@ export function useClarityWorkspace() {
       schemaSearchPerformed.value = false;
       schemaSearchFocusToken.value = 0;
       statusMessage.value = "Disconnected.";
+    }
+  }
+
+  async function saveActiveQuerySheetToDisk(): Promise<void> {
+    const queryTab = activeQueryTab.value;
+    if (!queryTab) {
+      errorMessage.value = "Select a query sheet to save.";
+      return;
+    }
+
+    errorMessage.value = "";
+
+    try {
+      const savedPath = await invoke<string | null>("db_save_query_sheet", {
+        request: {
+          suggestedFileName: `${queryTab.title || "query"}.sql`,
+          sql: queryTab.queryText,
+        },
+      });
+
+      if (!savedPath) {
+        statusMessage.value = "Save cancelled.";
+        return;
+      }
+
+      statusMessage.value = `Saved query sheet: ${savedPath}`;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+    }
+  }
+
+  async function saveAllQuerySheetsToDisk(): Promise<void> {
+    if (!queryTabs.value.length) {
+      errorMessage.value = "No query sheets are open.";
+      return;
+    }
+
+    errorMessage.value = "";
+
+    try {
+      const result = await invoke<{ directory: string; fileCount: number } | null>(
+        "db_save_query_sheets",
+        {
+          request: {
+            sheets: queryTabs.value.map((tab) => ({
+              title: tab.title,
+              sql: tab.queryText,
+            })),
+          },
+        },
+      );
+
+      if (!result) {
+        statusMessage.value = "Save cancelled.";
+        return;
+      }
+
+      statusMessage.value = `Saved ${result.fileCount} query sheet(s) to ${result.directory}`;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
     }
   }
 
@@ -1487,6 +1699,39 @@ export function useClarityWorkspace() {
     );
   }
 
+  watch(
+    () => ({
+      queryTabs: queryTabs.value.map((tab) => ({
+        id: tab.id,
+        title: tab.title,
+        queryText: tab.queryText,
+      })),
+      activeWorkspaceTabId: activeWorkspaceTabId.value,
+      queryTabNumber: queryTabNumber.value,
+    }),
+    (nextState) => {
+      const firstTabId = nextState.queryTabs[0]?.id ?? FIRST_QUERY_TAB_ID;
+      const normalizedState: PersistedQuerySheetState = {
+        queryTabs: nextState.queryTabs,
+        activeWorkspaceTabId: nextState.queryTabs.some(
+          (tab) => tab.id === nextState.activeWorkspaceTabId,
+        )
+          ? nextState.activeWorkspaceTabId
+          : firstTabId,
+        queryTabNumber: Math.max(
+          nextState.queryTabNumber,
+          nextState.queryTabs.reduce(
+            (maxNumber, tab) =>
+              Math.max(maxNumber, parseQueryTabNumber(tab.id) ?? 0),
+            0,
+          ) + 1,
+        ),
+      };
+      writeStoredQuerySheetState(normalizedState);
+    },
+    { deep: true, immediate: true },
+  );
+
   return {
     connection,
     profileName,
@@ -1557,6 +1802,8 @@ export function useClarityWorkspace() {
     connectOracle,
     disconnectOracle,
     refreshObjects,
+    saveActiveQuerySheetToDisk,
+    saveAllQuerySheetsToDisk,
     saveDdl,
     runQuery,
     runSchemaSearch,
