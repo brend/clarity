@@ -94,7 +94,7 @@ pub(crate) fn list_object_columns(
     session: &OracleSession,
 ) -> Result<Vec<OracleObjectColumnEntry>, String> {
     let sql = r#"
-        SELECT OWNER, TABLE_NAME, COLUMN_NAME
+        SELECT OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE, NULLABLE
         FROM ALL_TAB_COLUMNS
         WHERE OWNER = :1
         ORDER BY TABLE_NAME, COLUMN_ID
@@ -112,6 +112,8 @@ pub(crate) fn list_object_columns(
             schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
             object_name: row.get::<usize, String>(1).map_err(map_oracle_error)?,
             column_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
+            data_type: row.get::<usize, String>(3).map_err(map_oracle_error)?,
+            nullable: row.get::<usize, String>(4).map_err(map_oracle_error)?,
         });
     }
 

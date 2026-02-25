@@ -12,25 +12,43 @@ import type {
   AiQuerySuggestionRequest,
   AiQuerySuggestionResponse,
   AiSchemaContextObject,
+  OracleObjectColumnEntry,
   SqlCompletionSchema,
 } from "./types/clarity";
 import type { ThemeSetting } from "./types/settings";
 
-const EVENT_OPEN_EXPORT_DATABASE_DIALOG = "clarity://open-export-database-dialog";
+const EVENT_OPEN_EXPORT_DATABASE_DIALOG =
+  "clarity://open-export-database-dialog";
 const EVENT_OPEN_SETTINGS_DIALOG = "clarity://open-settings-dialog";
 const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
-const SQL_COMPLETION_OBJECT_TYPES = new Set(["TABLE", "VIEW", "MATERIALIZED VIEW", "SYNONYM", "SEQUENCE"]);
-const SQL_COMPLETION_COLUMN_OBJECT_TYPES = new Set(["TABLE", "VIEW", "MATERIALIZED VIEW"]);
+const SQL_COMPLETION_OBJECT_TYPES = new Set([
+  "TABLE",
+  "VIEW",
+  "MATERIALIZED VIEW",
+  "SYNONYM",
+  "SEQUENCE",
+]);
+const SQL_COMPLETION_COLUMN_OBJECT_TYPES = new Set([
+  "TABLE",
+  "VIEW",
+  "MATERIALIZED VIEW",
+]);
 const AI_AUTO_SUGGEST_DEBOUNCE_MS = 700;
 const AI_MIN_QUERY_LENGTH = 8;
-const AI_MAX_SCHEMA_OBJECTS = 90;
-const AI_MAX_OBJECT_COLUMNS = 24;
+const AI_MAX_SCHEMA_OBJECTS = 120;
+const AI_MAX_REFERENCED_COLUMNS = 60;
+const AI_MAX_OTHER_COLUMNS = 20;
 
 const desktopShellEl = ref<HTMLElement | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
 
-const { desktopShellStyle, workspaceStyle, beginSidebarResize, beginResultsResize } = usePaneLayout({
+const {
+  desktopShellStyle,
+  workspaceStyle,
+  beginSidebarResize,
+  beginResultsResize,
+} = usePaneLayout({
   desktopShellEl,
   workspaceEl,
 });
@@ -132,11 +150,14 @@ const {
 } = useUserSettings();
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
 const settingsDialogOracleClientLibDir = ref(settings.value.oracleClientLibDir);
-const settingsDialogAiSuggestionsEnabled = ref(settings.value.aiSuggestionsEnabled);
+const settingsDialogAiSuggestionsEnabled = ref(
+  settings.value.aiSuggestionsEnabled,
+);
 const settingsDialogAiModel = ref(settings.value.aiModel);
 const settingsDialogAiEndpoint = ref(settings.value.aiEndpoint);
 const settingsDialogAiApiKey = ref("");
 const settingsDialogAiApiKeyDirty = ref(false);
+const settingsDialogError = ref("");
 const hasAiApiKey = ref(false);
 const aiSuggestion = ref<AiQuerySuggestionResponse | null>(null);
 const aiSuggestionError = ref("");
@@ -150,9 +171,13 @@ const canRunSchemaExport = computed<boolean>(() => {
     !busy.exportingSchema
   );
 });
-const hasDeterminateExportProgress = computed<boolean>(() => exportProgressTotal.value > 0);
+const hasDeterminateExportProgress = computed<boolean>(
+  () => exportProgressTotal.value > 0,
+);
 const queryResultsEmptyStateMessage = computed<string>(() =>
-  isQueryTabActive.value ? "Run a query to see results." : "Select a query sheet to see results.",
+  isQueryTabActive.value
+    ? "Run a query to see results."
+    : "Select a query sheet to see results.",
 );
 const exportProgressPercent = computed<number>(() => {
   if (exportProgressTotal.value <= 0) {
@@ -161,7 +186,12 @@ const exportProgressPercent = computed<number>(() => {
 
   return Math.min(
     100,
-    Math.max(0, Math.round((exportProgressProcessed.value / exportProgressTotal.value) * 100)),
+    Math.max(
+      0,
+      Math.round(
+        (exportProgressProcessed.value / exportProgressTotal.value) * 100,
+      ),
+    ),
   );
 });
 const sqlCompletionSchema = computed<SqlCompletionSchema>(() => {
@@ -218,9 +248,14 @@ const sqlCompletionSchema = computed<SqlCompletionSchema>(() => {
 
   return schema;
 });
-const sqlCompletionDefaultSchema = computed<string>(() => connectedSchema.value.trim().toUpperCase());
+const sqlCompletionDefaultSchema = computed<string>(() =>
+  connectedSchema.value.trim().toUpperCase(),
+);
 const canUseAiSuggestions = computed<boolean>(
-  () => settings.value.aiSuggestionsEnabled && isConnected.value && hasAiApiKey.value,
+  () =>
+    settings.value.aiSuggestionsEnabled &&
+    isConnected.value &&
+    hasAiApiKey.value,
 );
 
 interface AiApiKeyPresence {
@@ -235,27 +270,113 @@ interface SchemaExportProgressPayload {
   currentObject: string;
 }
 
-function buildAiSchemaContext(schema: SqlCompletionSchema): AiSchemaContextObject[] {
-  const entries: AiSchemaContextObject[] = [];
-  const schemaNames = Object.keys(schema).sort((left, right) => left.localeCompare(right));
+function extractReferencedTables(sql: string): Set<string> {
+  const tables = new Set<string>();
+  const pattern =
+    /\b(?:FROM|JOIN|INTO|UPDATE|MERGE\s+INTO)\s+([A-Za-z_][\w$#]*(?:\.[A-Za-z_][\w$#]*)?)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(sql)) !== null) {
+    tables.add(match[1].toUpperCase());
+  }
+  return tables;
+}
+
+function detectClauseContext(sql: string): string | undefined {
+  const trimmed = sql.trimEnd();
+  if (!trimmed) return undefined;
+
+  const upper = trimmed.toUpperCase();
+  if (/\bWHERE\s+[\w.\s,()=<>!]*$/i.test(upper)) return "WHERE";
+  if (/\bSELECT\s+[\w.\s,*()'|]+$/i.test(upper)) return "SELECT";
+  if (/\bORDER\s+BY\s+[\w.\s,]*$/i.test(upper)) return "ORDER BY";
+  if (/\bGROUP\s+BY\s+[\w.\s,]*$/i.test(upper)) return "GROUP BY";
+  if (/\bHAVING\s+[\w.\s,()=<>!]*$/i.test(upper)) return "HAVING";
+  if (/\b(?:INNER|LEFT|RIGHT|FULL|CROSS)?\s*JOIN\s+[\w.\s]*$/i.test(upper))
+    return "JOIN";
+  if (/\bON\s+[\w.\s=]*$/i.test(upper)) return "JOIN ON";
+  if (/\bFROM\s+[\w.\s,]*$/i.test(upper)) return "FROM";
+  if (/\bSET\s+[\w.\s,=]*$/i.test(upper)) return "SET";
+  if (/\bINSERT\s+INTO\s+[\w.\s,()*]*$/i.test(upper)) return "INSERT";
+  if (/\bVALUES\s*\([\w.\s,']*$/i.test(upper)) return "VALUES";
+
+  return undefined;
+}
+
+function buildAiSchemaContext(
+  completionSchema: SqlCompletionSchema,
+  columns: OracleObjectColumnEntry[],
+  currentSql: string,
+): AiSchemaContextObject[] {
+  const referencedNames = extractReferencedTables(currentSql);
+
+  // Build a lookup: schema.objectName -> { colName: "COL_NAME DATA_TYPE [NOT NULL]" }
+  const columnDetailMap = new Map<string, Map<string, string>>();
+  for (const entry of columns) {
+    const schemaName = entry.schema.trim().toUpperCase();
+    const objectName = entry.objectName.trim().toUpperCase();
+    const key = `${schemaName}.${objectName}`;
+    let colMap = columnDetailMap.get(key);
+    if (!colMap) {
+      colMap = new Map<string, string>();
+      columnDetailMap.set(key, colMap);
+    }
+    const colName = entry.columnName.trim();
+    const dataType = entry.dataType?.trim() || "";
+    const nullable = entry.nullable?.trim() === "N" ? " NOT NULL" : "";
+    const detail = dataType ? `${colName} ${dataType}${nullable}` : colName;
+    colMap.set(colName, detail);
+  }
+
+  const referenced: AiSchemaContextObject[] = [];
+  const other: AiSchemaContextObject[] = [];
+
+  const schemaNames = Object.keys(completionSchema).sort((a, b) =>
+    a.localeCompare(b),
+  );
 
   for (const schemaName of schemaNames) {
-    const objects = schema[schemaName];
-    const objectNames = Object.keys(objects).sort((left, right) => left.localeCompare(right));
+    const objects = completionSchema[schemaName];
+    const objectNames = Object.keys(objects).sort((a, b) => a.localeCompare(b));
+
     for (const objectName of objectNames) {
-      entries.push({
-        schema: schemaName,
-        objectName,
-        columns: objects[objectName].slice(0, AI_MAX_OBJECT_COLUMNS),
+      const qualifiedName = `${schemaName}.${objectName}`.toUpperCase();
+      const bareNameUpper = objectName.toUpperCase();
+      const isReferenced =
+        referencedNames.has(qualifiedName) ||
+        referencedNames.has(bareNameUpper);
+
+      // Get column details with types
+      const colDetailMap = columnDetailMap.get(qualifiedName);
+      const rawColumns = objects[objectName];
+      const maxCols = isReferenced
+        ? AI_MAX_REFERENCED_COLUMNS
+        : AI_MAX_OTHER_COLUMNS;
+      const columnsWithTypes = rawColumns.slice(0, maxCols).map((colName) => {
+        const detail = colDetailMap?.get(colName.trim());
+        return detail || colName;
       });
 
-      if (entries.length >= AI_MAX_SCHEMA_OBJECTS) {
-        return entries;
+      const entry: AiSchemaContextObject = {
+        schema: schemaName,
+        objectName,
+        columns: columnsWithTypes,
+        isReferencedInQuery: isReferenced,
+      };
+
+      if (isReferenced) {
+        referenced.push(entry);
+      } else {
+        other.push(entry);
+      }
+
+      if (referenced.length + other.length >= AI_MAX_SCHEMA_OBJECTS) {
+        return [...referenced, ...other];
       }
     }
   }
 
-  return entries;
+  // Referenced tables first so the AI sees them prominently
+  return [...referenced, ...other];
 }
 
 function clearAiSuggestionState(clearError = true): void {
@@ -291,20 +412,23 @@ async function requestAiSuggestion(isManual = false): Promise<void> {
   const currentSql = activeQueryText.value.trim();
   if (currentSql.length < AI_MIN_QUERY_LENGTH) {
     if (isManual) {
-      aiSuggestionError.value = "Write more SQL context before requesting a suggestion.";
+      aiSuggestionError.value =
+        "Write more SQL context before requesting a suggestion.";
     }
     return;
   }
 
   if (!hasAiApiKey.value) {
-    aiSuggestionError.value = "AI API key is not configured. Add it in Settings -> AI.";
+    aiSuggestionError.value =
+      "AI API key is not configured. Add it in Settings -> AI.";
     return;
   }
 
   const model = settings.value.aiModel.trim();
   const endpoint = settings.value.aiEndpoint.trim();
   if (!model || !endpoint) {
-    aiSuggestionError.value = "Configure AI model and endpoint in Settings -> AI.";
+    aiSuggestionError.value =
+      "Configure AI model and endpoint in Settings -> AI.";
     return;
   }
 
@@ -319,12 +443,20 @@ async function requestAiSuggestion(isManual = false): Promise<void> {
       connectedSchema: connectedSchema.value,
       endpoint,
       model,
-      schemaContext: buildAiSchemaContext(sqlCompletionSchema.value),
+      schemaContext: buildAiSchemaContext(
+        sqlCompletionSchema.value,
+        objectColumns.value,
+        activeQueryText.value,
+      ),
+      cursorClause: detectClauseContext(activeQueryText.value),
     };
 
-    const result = await invoke<AiQuerySuggestionResponse>("db_ai_suggest_query", {
-      request: payload,
-    });
+    const result = await invoke<AiQuerySuggestionResponse>(
+      "db_ai_suggest_query",
+      {
+        request: payload,
+      },
+    );
 
     if (requestToken !== aiSuggestionRequestToken) {
       return;
@@ -337,7 +469,12 @@ async function requestAiSuggestion(isManual = false): Promise<void> {
       return;
     }
 
-    const message = typeof error === "string" ? error : error instanceof Error ? error.message : "AI request failed.";
+    const message =
+      typeof error === "string"
+        ? error
+        : error instanceof Error
+          ? error.message
+          : "AI request failed.";
     aiSuggestion.value = null;
     aiSuggestionError.value = message;
   } finally {
@@ -349,7 +486,11 @@ async function requestAiSuggestion(isManual = false): Promise<void> {
 
 function queueAutoAiSuggestion(): void {
   cancelAiSuggestionDebounce();
-  if (!canUseAiSuggestions.value || !isQueryTabActive.value || aiSuggestionLoading.value) {
+  if (
+    !canUseAiSuggestions.value ||
+    !isQueryTabActive.value ||
+    aiSuggestionLoading.value
+  ) {
     return;
   }
 
@@ -397,14 +538,17 @@ function openExportDialogFromMenu(): void {
   showExportDialog.value = true;
 }
 
-function openSettingsDialog(): void {
+async function openSettingsDialog(): Promise<void> {
   settingsDialogTheme.value = theme.value;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
-  settingsDialogAiSuggestionsEnabled.value = settings.value.aiSuggestionsEnabled;
+  settingsDialogAiSuggestionsEnabled.value =
+    settings.value.aiSuggestionsEnabled;
   settingsDialogAiModel.value = settings.value.aiModel;
   settingsDialogAiEndpoint.value = settings.value.aiEndpoint;
   settingsDialogAiApiKey.value = "";
   settingsDialogAiApiKeyDirty.value = false;
+  settingsDialogError.value = "";
+  await refreshAiKeyPresence();
   showSettingsDialog.value = true;
 }
 
@@ -430,7 +574,8 @@ async function saveSettingsDialog(): Promise<void> {
     }
     showSettingsDialog.value = false;
   } catch (error) {
-    errorMessage.value = typeof error === "string" ? error : "Failed to save AI settings.";
+    settingsDialogError.value =
+      typeof error === "string" ? error : "Failed to save AI settings.";
   }
 }
 
@@ -463,14 +608,23 @@ async function runSchemaExport(): Promise<void> {
 }
 
 watch(
-  () => [activeWorkspaceTabId.value, settings.value.aiSuggestionsEnabled, settings.value.aiModel, settings.value.aiEndpoint],
+  () => [
+    activeWorkspaceTabId.value,
+    settings.value.aiSuggestionsEnabled,
+    settings.value.aiModel,
+    settings.value.aiEndpoint,
+  ],
   () => {
     onDismissAiSuggestion();
   },
 );
 
 watch(
-  () => [activeQueryText.value, isQueryTabActive.value, canUseAiSuggestions.value],
+  () => [
+    activeQueryText.value,
+    isQueryTabActive.value,
+    canUseAiSuggestions.value,
+  ],
   () => {
     clearAiSuggestionState();
     queueAutoAiSuggestion();
@@ -495,12 +649,15 @@ onMounted(() => {
   }).then((unlisten) => {
     searchMenuUnlisten.value = unlisten;
   });
-  void listen<SchemaExportProgressPayload>(EVENT_SCHEMA_EXPORT_PROGRESS, (event) => {
-    const payload = event.payload;
-    exportProgressProcessed.value = payload.processedObjects ?? 0;
-    exportProgressTotal.value = payload.totalObjects ?? 0;
-    exportProgressCurrentObject.value = payload.currentObject ?? "";
-  }).then((unlisten) => {
+  void listen<SchemaExportProgressPayload>(
+    EVENT_SCHEMA_EXPORT_PROGRESS,
+    (event) => {
+      const payload = event.payload;
+      exportProgressProcessed.value = payload.processedObjects ?? 0;
+      exportProgressTotal.value = payload.totalObjects ?? 0;
+      exportProgressCurrentObject.value = payload.currentObject ?? "";
+    },
+  ).then((unlisten) => {
     exportProgressUnlisten.value = unlisten;
   });
 });
@@ -568,7 +725,9 @@ onBeforeUnmount(() => {
         v-model:ddl-text="activeDdlText"
         v-model:query-row-limit="queryRowLimit"
         v-model:schema-search-text="schemaSearchText"
-        v-model:schema-search-include-object-names="schemaSearchIncludeObjectNames"
+        v-model:schema-search-include-object-names="
+          schemaSearchIncludeObjectNames
+        "
         v-model:schema-search-include-source="schemaSearchIncludeSource"
         v-model:schema-search-include-ddl="schemaSearchIncludeDdl"
         :status-message="statusMessage"
@@ -595,7 +754,9 @@ onBeforeUnmount(() => {
         :ai-suggestion-text="aiSuggestion?.suggestionText ?? ''"
         :ai-suggestion-rationale="aiSuggestion?.reasoningShort ?? ''"
         :ai-suggestion-error="aiSuggestionError"
-        :ai-suggestion-confidence="aiSuggestion ? aiSuggestion.confidence : null"
+        :ai-suggestion-confidence="
+          aiSuggestion ? aiSuggestion.confidence : null
+        "
         :ai-suggestion-mutating="aiSuggestion?.isPotentiallyMutating ?? false"
         :ai-suggestion-loading="aiSuggestionLoading"
         :can-use-ai-suggestions="canUseAiSuggestions"
@@ -640,8 +801,17 @@ onBeforeUnmount(() => {
     </section>
   </main>
 
-  <div v-if="showSettingsDialog" class="dialog-backdrop" @click.self="closeSettingsDialog">
-    <section class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
+  <div
+    v-if="showSettingsDialog"
+    class="dialog-backdrop"
+    @click.self="closeSettingsDialog"
+  >
+    <section
+      class="dialog settings-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-dialog-title"
+    >
       <header class="dialog-header">
         <h2 id="settings-dialog-title" class="dialog-title">Settings</h2>
       </header>
@@ -673,13 +843,17 @@ onBeforeUnmount(() => {
             />
           </label>
           <p class="muted settings-hint">
-            Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new Oracle connections in this app.
+            Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new Oracle
+            connections in this app.
           </p>
         </fieldset>
         <fieldset class="settings-group">
           <legend>AI</legend>
           <label class="settings-option">
-            <input v-model="settingsDialogAiSuggestionsEnabled" type="checkbox" />
+            <input
+              v-model="settingsDialogAiSuggestionsEnabled"
+              type="checkbox"
+            />
             <span>Enable AI query suggestions while typing</span>
           </label>
           <label class="settings-field">
@@ -711,7 +885,11 @@ onBeforeUnmount(() => {
             <input
               v-model.trim="settingsDialogAiApiKey"
               type="password"
-              placeholder="sk-..."
+              :placeholder="
+                hasAiApiKey && !settingsDialogAiApiKeyDirty
+                  ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (stored in keychain)'
+                  : 'sk-...'
+              "
               spellcheck="false"
               autocomplete="off"
               autocorrect="off"
@@ -721,11 +899,30 @@ onBeforeUnmount(() => {
             />
           </label>
           <p class="muted settings-hint">
-            Stored in the OS keychain. Current key status: {{ hasAiApiKey ? "Configured" : "Missing" }}.
-            Leave API key blank and save to clear the stored key.
+            Stored in the OS keychain.
+            <template v-if="hasAiApiKey && !settingsDialogAiApiKeyDirty">
+              A key is already configured. Leave this field blank to keep the
+              existing key, or enter a new value to replace it.
+            </template>
+            <template
+              v-else-if="
+                hasAiApiKey &&
+                settingsDialogAiApiKeyDirty &&
+                settingsDialogAiApiKey.trim().length === 0
+              "
+            >
+              Saving will remove the stored key.
+            </template>
+            <template v-else-if="!hasAiApiKey">
+              No key configured. Enter your API key above.
+            </template>
           </p>
         </fieldset>
       </div>
+
+      <p v-if="settingsDialogError" class="settings-error">
+        {{ settingsDialogError }}
+      </p>
 
       <footer class="dialog-footer">
         <button class="btn" @click="closeSettingsDialog">Cancel</button>
@@ -734,17 +931,35 @@ onBeforeUnmount(() => {
     </section>
   </div>
 
-  <div v-if="showExportDialog" class="dialog-backdrop" @click.self="closeExportDialog">
-    <section class="dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title">
+  <div
+    v-if="showExportDialog"
+    class="dialog-backdrop"
+    @click.self="closeExportDialog"
+  >
+    <section
+      class="dialog export-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-dialog-title"
+    >
       <header class="dialog-header">
-        <h2 id="export-dialog-title" class="dialog-title">Export Database Schema</h2>
+        <h2 id="export-dialog-title" class="dialog-title">
+          Export Database Schema
+        </h2>
       </header>
 
       <div class="dialog-body">
         <label>
           Database
-          <select v-model.number="selectedExportSessionId" :disabled="busy.exportingSchema || !schemaExportTargets.length">
-            <option v-for="target in schemaExportTargets" :key="target.sessionId" :value="target.sessionId">
+          <select
+            v-model.number="selectedExportSessionId"
+            :disabled="busy.exportingSchema || !schemaExportTargets.length"
+          >
+            <option
+              v-for="target in schemaExportTargets"
+              :key="target.sessionId"
+              :value="target.sessionId"
+            >
               {{ target.label }}
             </option>
           </select>
@@ -762,14 +977,19 @@ onBeforeUnmount(() => {
               autocapitalize="off"
               data-gramm="false"
             />
-            <button class="btn" :disabled="busy.exportingSchema" @click="browseSchemaExportDirectory">
+            <button
+              class="btn"
+              :disabled="busy.exportingSchema"
+              @click="browseSchemaExportDirectory"
+            >
               Browse...
             </button>
           </div>
         </label>
 
         <p class="muted">
-          Exports object DDL into `.sql` files grouped by object type directories. Data rows are not exported.
+          Exports object DDL into `.sql` files grouped by object type
+          directories. Data rows are not exported.
         </p>
         <div v-if="busy.exportingSchema" class="export-progress-wrap">
           <progress
@@ -780,20 +1000,36 @@ onBeforeUnmount(() => {
           ></progress>
           <progress v-else class="export-progress"></progress>
           <p v-if="hasDeterminateExportProgress" class="muted">
-            {{ exportProgressProcessed }} / {{ exportProgressTotal }} objects ({{ exportProgressPercent }}%)
+            {{ exportProgressProcessed }} / {{ exportProgressTotal }} objects
+            ({{ exportProgressPercent }}%)
           </p>
           <p v-else class="muted">Export in progress...</p>
-          <p v-if="exportProgressCurrentObject" class="muted export-progress-object">
+          <p
+            v-if="exportProgressCurrentObject"
+            class="muted export-progress-object"
+          >
             Current: {{ exportProgressCurrentObject }}
           </p>
         </div>
         <p v-if="errorMessage" class="export-error">{{ errorMessage }}</p>
-        <p v-if="exportSummaryMessage" class="export-summary">{{ exportSummaryMessage }}</p>
+        <p v-if="exportSummaryMessage" class="export-summary">
+          {{ exportSummaryMessage }}
+        </p>
       </div>
 
       <footer class="dialog-footer">
-        <button class="btn" :disabled="busy.exportingSchema" @click="closeExportDialog">Close</button>
-        <button class="btn primary" :disabled="!canRunSchemaExport" @click="runSchemaExport">
+        <button
+          class="btn"
+          :disabled="busy.exportingSchema"
+          @click="closeExportDialog"
+        >
+          Close
+        </button>
+        <button
+          class="btn primary"
+          :disabled="!canRunSchemaExport"
+          @click="runSchemaExport"
+        >
           {{ busy.exportingSchema ? "Exporting..." : "Export Schema" }}
         </button>
       </footer>
@@ -979,14 +1215,18 @@ body {
   --splitter-size: 5px;
   height: 100%;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 330px) var(--splitter-size) minmax(0, 1fr);
+  grid-template-columns:
+    var(--sidebar-width, 330px) var(--splitter-size)
+    minmax(0, 1fr);
   background: var(--bg-shell);
   overflow: hidden;
 }
 
 .workspace {
   display: grid;
-  grid-template-rows: var(--pane-header-height) minmax(180px, 1fr) var(--splitter-size) var(--results-height, 42%);
+  grid-template-rows:
+    var(--pane-header-height) minmax(180px, 1fr) var(--splitter-size)
+    var(--results-height, 42%);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1095,8 +1335,9 @@ body {
 }
 
 .settings-hint code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
 }
 
 .dialog-footer {
@@ -1162,6 +1403,12 @@ body {
 
 .export-error {
   margin: 0;
+  font-size: 0.76rem;
+  color: var(--danger);
+}
+
+.settings-error {
+  margin: 0.5rem 1rem 0;
   font-size: 0.76rem;
   color: var(--danger);
 }
@@ -1236,7 +1483,9 @@ body {
   }
 
   .workspace {
-    grid-template-rows: var(--pane-header-height) minmax(150px, 1fr) var(--splitter-size) var(--results-height, 44%);
+    grid-template-rows:
+      var(--pane-header-height) minmax(150px, 1fr) var(--splitter-size)
+      var(--results-height, 44%);
   }
 }
 </style>

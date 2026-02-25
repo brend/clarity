@@ -55,6 +55,8 @@ export interface OracleObjectColumnEntry {
   schema: string;
   objectName: string;
   columnName: string;
+  dataType: string;
+  nullable: string;
 }
 
 export type SqlCompletionSchema = Record<string, Record<string, string[]>>;
@@ -63,6 +65,7 @@ export interface AiSchemaContextObject {
   schema: string;
   objectName: string;
   columns: string[];
+  isReferencedInQuery: boolean;
 }
 
 export interface AiQuerySuggestionRequest {
@@ -71,6 +74,7 @@ export interface AiQuerySuggestionRequest {
   endpoint: string;
   model: string;
   schemaContext: AiSchemaContextObject[];
+  cursorClause?: string;
 }
 
 export interface AiQuerySuggestionResponse {

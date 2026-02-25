@@ -158,6 +158,8 @@ struct OracleObjectColumnEntry {
     schema: String,
     object_name: String,
     column_name: String,
+    data_type: String,
+    nullable: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -196,6 +198,8 @@ struct DbAiSchemaContextObject {
     schema: String,
     object_name: String,
     columns: Vec<String>,
+    #[serde(default)]
+    is_referenced_in_query: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +210,8 @@ struct DbAiSuggestQueryRequest {
     endpoint: String,
     model: String,
     schema_context: Vec<DbAiSchemaContextObject>,
+    #[serde(default)]
+    cursor_clause: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -436,21 +442,46 @@ async fn db_ai_suggest_query(
 
     let endpoint = normalize_ai_endpoint(request.endpoint.as_str());
     let schema_context_prompt = build_ai_schema_context_prompt(&request.schema_context);
+    let clause_hint = request
+        .cursor_clause
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|clause| format!("\nThe user is currently writing the {} clause.", clause))
+        .unwrap_or_default();
     let user_message = format!(
-        "Connected schema: {}\nCurrent SQL:\n{}\n\nSchema context (sample):\n{}\n\nReturn JSON only.",
+        "Connected schema: {}\nCurrent SQL:\n{}\n{}{}",
         request.connected_schema.trim(),
         request.current_sql,
-        schema_context_prompt
+        schema_context_prompt,
+        clause_hint
     );
+
+    let system_prompt = [
+        "You are an expert Oracle SQL assistant that suggests query completions.",
+        "The user is writing an Oracle SQL query and needs a natural continuation.",
+        "",
+        "Rules:",
+        "- Suggest ONLY the text that comes AFTER what the user has already typed.",
+        "- Do NOT repeat any part of the current SQL.",
+        "- Use ONLY columns and tables from the provided schema context.",
+        "- Prefer read-only SQL (SELECT) unless the user's intent clearly requires DML.",
+        "- Use correct Oracle SQL syntax (NVL instead of COALESCE, ROWNUM or FETCH FIRST instead of LIMIT, etc.).",
+        "- When joining tables, use the correct column names from the schema context.",
+        "- Keep suggestions concise and focused — complete the current statement, do not add extra statements.",
+        "- Tables marked with [REFERENCED] are already used in the query — prefer their columns for completions.",
+        "",
+        "Return valid JSON with keys: suggestionText, confidence (0.0-1.0), reasoningShort (one sentence), isPotentiallyMutating (boolean).",
+    ].join("\n");
 
     let payload = serde_json::json!({
         "model": request.model.trim(),
-        "temperature": 0.2,
+        "temperature": 0.15,
+        "max_tokens": 300,
         "response_format": { "type": "json_object" },
         "messages": [
             {
                 "role": "system",
-                "content": "You assist with Oracle SQL query suggestions. Prefer read-only SQL. Return valid JSON with keys suggestionText, confidence, reasoningShort, isPotentiallyMutating."
+                "content": system_prompt
             },
             {
                 "role": "user",
@@ -1101,7 +1132,7 @@ fn validate_ai_suggest_request(request: &DbAiSuggestQueryRequest) -> Result<(), 
         return Err("AI endpoint is required.".to_string());
     }
 
-    if request.schema_context.len() > 250 {
+    if request.schema_context.len() > 300 {
         return Err("Schema context is too large.".to_string());
     }
 
@@ -1122,38 +1153,52 @@ fn normalize_ai_endpoint(endpoint: &str) -> String {
 
 fn build_ai_schema_context_prompt(schema_context: &[DbAiSchemaContextObject]) -> String {
     if schema_context.is_empty() {
-        return "No schema context available.".to_string();
+        return "\nNo schema context available.".to_string();
     }
 
-    schema_context
-        .iter()
-        .take(90)
-        .map(|entry| {
-            let schema = entry.schema.trim();
-            let object_name = entry.object_name.trim();
-            let columns = entry
-                .columns
-                .iter()
-                .filter_map(|value| {
-                    let trimmed = value.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed)
-                    }
-                })
-                .take(24)
-                .collect::<Vec<_>>()
-                .join(", ");
+    let mut referenced = Vec::new();
+    let mut other = Vec::new();
 
-            if columns.is_empty() {
-                format!("{schema}.{object_name}")
-            } else {
-                format!("{schema}.{object_name} ({columns})")
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    for entry in schema_context.iter().take(120) {
+        let schema = entry.schema.trim();
+        let object_name = entry.object_name.trim();
+        let columns = entry
+            .columns
+            .iter()
+            .filter_map(|value| {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let formatted = if columns.is_empty() {
+            format!("{schema}.{object_name}")
+        } else {
+            format!("{schema}.{object_name} ({})", columns.join(", "))
+        };
+
+        if entry.is_referenced_in_query {
+            referenced.push(formatted);
+        } else {
+            other.push(formatted);
+        }
+    }
+
+    let mut result = String::new();
+    if !referenced.is_empty() {
+        result.push_str("\n\nTables referenced in the current query [REFERENCED]:\n");
+        result.push_str(&referenced.join("\n"));
+    }
+    if !other.is_empty() {
+        result.push_str("\n\nOther available tables in schema:\n");
+        result.push_str(&other.join("\n"));
+    }
+
+    result
 }
 
 fn is_potentially_mutating_sql(sql: &str) -> bool {
