@@ -360,6 +360,49 @@ function formatSearchScopeLabel(scope: OracleSchemaSearchResult["matchScope"]): 
   return "Source";
 }
 
+function isModifierEnter(event: KeyboardEvent): boolean {
+  if (event.key !== "Enter") {
+    return false;
+  }
+
+  if (event.altKey || event.shiftKey) {
+    return false;
+  }
+
+  return event.metaKey || event.ctrlKey;
+}
+
+function isPlainEscape(event: KeyboardEvent): boolean {
+  return event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+}
+
+function handleSheetKeydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.isComposing || event.repeat) {
+    return;
+  }
+
+  if (isModifierEnter(event)) {
+    if (props.isQueryTabActive) {
+      event.preventDefault();
+      props.onRunQuery();
+      return;
+    }
+
+    if (showEditableRowActions.value) {
+      event.preventDefault();
+      void commitDataChanges();
+    }
+    return;
+  }
+
+  if (!showEditableRowActions.value || !isPlainEscape(event)) {
+    return;
+  }
+
+  event.preventDefault();
+  revertDataChanges();
+}
+
 watch(
   () => props.schemaSearchFocusToken,
   () => {
@@ -379,7 +422,7 @@ watch(
     </div>
   </header>
 
-  <section class="sheet-pane">
+  <section class="sheet-pane" @keydown.capture="handleSheetKeydown">
     <div class="sheet-tabs">
       <div
         v-for="tab in props.queryTabs"
@@ -439,11 +482,12 @@ watch(
       </label>
       <button
         class="btn primary"
+        title="Execute query (Cmd/Ctrl+Enter)"
         :disabled="!props.isConnected || !props.activeQueryTab || props.busy.runningQuery"
         @click="props.onRunQuery"
       >
         <AppIcon name="play" class="btn-icon" aria-hidden="true" />
-        {{ props.busy.runningQuery ? "Running..." : "Execute" }}
+        {{ props.busy.runningQuery ? "Running..." : "Execute (Cmd/Ctrl+Enter)" }}
       </button>
       <button
         class="btn"
@@ -657,15 +701,21 @@ watch(
                 <div class="muted">Pending row changes: {{ dirtyRowIndexes.length }}</div>
               </div>
               <div class="object-detail-edit-actions">
-                <button class="btn row-action-btn" :disabled="!canRevertDataChanges || committingDataChanges" @click="revertDataChanges">
-                  Revert
+                <button
+                  class="btn row-action-btn"
+                  title="Revert pending changes (Esc)"
+                  :disabled="!canRevertDataChanges || committingDataChanges"
+                  @click="revertDataChanges"
+                >
+                  Revert (Esc)
                 </button>
                 <button
                   class="btn row-action-btn primary"
+                  title="Commit pending changes (Cmd/Ctrl+Enter)"
                   :disabled="!hasPendingDataChanges || committingDataChanges"
                   @click="commitDataChanges"
                 >
-                  {{ committingDataChanges ? "Committing..." : "Commit" }}
+                  {{ committingDataChanges ? "Committing..." : "Commit (Cmd/Ctrl+Enter)" }}
                 </button>
               </div>
             </div>
