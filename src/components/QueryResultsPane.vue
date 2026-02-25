@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { WorkspaceQueryResultPane } from "../types/clarity";
 
 const props = defineProps<{
@@ -20,6 +20,77 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
 
   const currentPane = props.resultPanes.find((pane) => pane.id === props.activeResultPaneId);
   return currentPane ?? props.resultPanes[0];
+});
+
+const MIN_COLUMN_WIDTH = 88;
+const DEFAULT_COLUMN_WIDTH = 180;
+
+type ColumnResizeState = {
+  index: number;
+  startX: number;
+  startWidth: number;
+};
+
+const columnWidths = ref<number[]>([]);
+const resizeState = ref<ColumnResizeState | null>(null);
+const activeColumns = computed<string[]>(() => activePane.value?.queryResult?.columns ?? []);
+
+function resetColumnWidths(): void {
+  columnWidths.value = activeColumns.value.map(() => DEFAULT_COLUMN_WIDTH);
+}
+
+watch(
+  () => [activePane.value?.id ?? "", activeColumns.value.length],
+  () => {
+    resetColumnWidths();
+  },
+  { immediate: true },
+);
+
+function getColumnWidth(index: number): number {
+  return columnWidths.value[index] ?? DEFAULT_COLUMN_WIDTH;
+}
+
+function onColumnResizeMove(event: MouseEvent): void {
+  const state = resizeState.value;
+  if (!state) {
+    return;
+  }
+
+  const nextWidth = Math.max(MIN_COLUMN_WIDTH, state.startWidth + (event.clientX - state.startX));
+  const nextWidths = [...columnWidths.value];
+  nextWidths[state.index] = nextWidth;
+  columnWidths.value = nextWidths;
+}
+
+function stopColumnResize(): void {
+  if (!resizeState.value) {
+    return;
+  }
+
+  resizeState.value = null;
+  window.removeEventListener("mousemove", onColumnResizeMove);
+  window.removeEventListener("mouseup", stopColumnResize);
+}
+
+function startColumnResize(index: number, event: MouseEvent): void {
+  if (event.button !== 0) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  resizeState.value = {
+    index,
+    startX: event.clientX,
+    startWidth: getColumnWidth(index),
+  };
+  window.addEventListener("mousemove", onColumnResizeMove);
+  window.addEventListener("mouseup", stopColumnResize);
+}
+
+onBeforeUnmount(() => {
+  stopColumnResize();
 });
 </script>
 
@@ -51,10 +122,27 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
         Rows affected: {{ activePane.queryResult.rowsAffected }}
       </p>
 
-      <table v-else-if="activePane.queryResult.columns.length" class="results-table">
+      <table v-else-if="activePane.queryResult.columns.length" class="results-table" :class="{ 'is-resizing': !!resizeState }">
         <thead>
           <tr>
-            <th v-for="column in activePane.queryResult.columns" :key="column">{{ column }}</th>
+            <th
+              v-for="(column, columnIndex) in activePane.queryResult.columns"
+              :key="column"
+              :style="{
+                width: `${getColumnWidth(columnIndex)}px`,
+                minWidth: `${getColumnWidth(columnIndex)}px`,
+                maxWidth: `${getColumnWidth(columnIndex)}px`,
+              }"
+            >
+              <span class="results-cell-text" :title="column">{{ column }}</span>
+              <button
+                class="results-col-resize-handle"
+                type="button"
+                tabindex="-1"
+                aria-hidden="true"
+                @mousedown="startColumnResize(columnIndex, $event)"
+              ></button>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -63,8 +151,13 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
               v-for="(value, colIndex) in row"
               :key="`col-${rowIndex}-${colIndex}`"
               :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
+              :style="{
+                width: `${getColumnWidth(colIndex)}px`,
+                minWidth: `${getColumnWidth(colIndex)}px`,
+                maxWidth: `${getColumnWidth(colIndex)}px`,
+              }"
             >
-              {{ value }}
+              <span class="results-cell-text" :title="value">{{ value }}</span>
             </td>
           </tr>
         </tbody>
@@ -142,8 +235,11 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
 }
 
 .results-table {
-  width: 100%;
-  border-collapse: collapse;
+  width: auto;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
   font-size: 0.73rem;
   margin: 0;
 }
@@ -151,9 +247,14 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
 .results-table th,
 .results-table td {
   border: 0;
-  border-bottom: 1px solid var(--table-divider);
+  border-right: 1px solid color-mix(in srgb, var(--table-divider) 65%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
+  color: var(--text-primary);
   text-align: left;
   padding: 0.26rem 0.38rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .results-table th {
@@ -161,6 +262,14 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
   position: sticky;
   top: 0;
   font-weight: 600;
+  z-index: 2;
+  padding-right: 0.5rem;
+  overflow: visible;
+}
+
+.results-table th:last-child,
+.results-table td:last-child {
+  border-right: 0;
 }
 
 .results-table tbody tr:nth-child(even) {
@@ -174,6 +283,46 @@ const activePane = computed<WorkspaceQueryResultPane | null>(() => {
 .results-cell-number {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.results-cell-text {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.results-col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.results-col-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 22%;
+  bottom: 22%;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+}
+
+.results-table th:hover .results-col-resize-handle::after {
+  background: color-mix(in srgb, var(--table-divider) 80%, transparent);
+}
+
+.results-table.is-resizing {
+  user-select: none;
+  cursor: col-resize;
 }
 
 .muted {

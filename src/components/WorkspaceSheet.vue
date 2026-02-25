@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import AppIcon from "./AppIcon.vue";
 import SqlCodeEditor from "./SqlCodeEditor.vue";
 import type {
@@ -80,6 +80,8 @@ const committingDataChanges = ref(false);
 const suppressDraftSync = ref(false);
 const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
 const schemaSearchInputEl = ref<HTMLInputElement | null>(null);
+const MIN_COLUMN_WIDTH = 88;
+const DEFAULT_COLUMN_WIDTH = 180;
 
 const isDataDetailTab = computed<boolean>(() => props.activeObjectDetailTabId === "data");
 const showEditableRowActions = computed<boolean>(() => {
@@ -100,6 +102,18 @@ const displayedDataRows = computed<string[][]>(() => {
 });
 const editableColumnCount = computed<number>(() => props.activeObjectDetailResult?.columns.length ?? 0);
 const hasAiSuggestion = computed<boolean>(() => props.aiSuggestionText.trim().length > 0);
+const objectDetailColumns = computed<string[]>(() => props.activeObjectDetailResult?.columns ?? []);
+const objectDetailColumnWidths = ref<number[]>([]);
+
+type ColumnResizeState = {
+  index: number;
+  startX: number;
+  startWidth: number;
+};
+
+const objectDetailResizeState = ref<ColumnResizeState | null>(null);
+
+const objectDetailColumnKey = computed<string>(() => objectDetailColumns.value.join("\u001f"));
 
 function cloneRows(rows: string[][]): string[][] {
   return rows.map((row) => [...row]);
@@ -267,6 +281,60 @@ watch(
   },
   { immediate: true },
 );
+
+watch(
+  () => [props.activeWorkspaceTabId, props.activeObjectDetailTabId, objectDetailColumnKey.value],
+  () => {
+    objectDetailColumnWidths.value = objectDetailColumns.value.map(() => DEFAULT_COLUMN_WIDTH);
+  },
+  { immediate: true },
+);
+
+function getObjectDetailColumnWidth(index: number): number {
+  return objectDetailColumnWidths.value[index] ?? DEFAULT_COLUMN_WIDTH;
+}
+
+function onObjectDetailColumnResizeMove(event: MouseEvent): void {
+  const state = objectDetailResizeState.value;
+  if (!state) {
+    return;
+  }
+
+  const nextWidth = Math.max(MIN_COLUMN_WIDTH, state.startWidth + (event.clientX - state.startX));
+  const nextWidths = [...objectDetailColumnWidths.value];
+  nextWidths[state.index] = nextWidth;
+  objectDetailColumnWidths.value = nextWidths;
+}
+
+function stopObjectDetailColumnResize(): void {
+  if (!objectDetailResizeState.value) {
+    return;
+  }
+
+  objectDetailResizeState.value = null;
+  window.removeEventListener("mousemove", onObjectDetailColumnResizeMove);
+  window.removeEventListener("mouseup", stopObjectDetailColumnResize);
+}
+
+function startObjectDetailColumnResize(index: number, event: MouseEvent): void {
+  if (event.button !== 0) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  objectDetailResizeState.value = {
+    index,
+    startX: event.clientX,
+    startWidth: getObjectDetailColumnWidth(index),
+  };
+  window.addEventListener("mousemove", onObjectDetailColumnResizeMove);
+  window.addEventListener("mouseup", stopObjectDetailColumnResize);
+}
+
+onBeforeUnmount(() => {
+  stopObjectDetailColumnResize();
+});
 
 function focusSchemaSearchInput(selectText: boolean): void {
   void nextTick(() => {
@@ -517,10 +585,27 @@ watch(
               Data preview is read-only for this object type.
             </p>
             <div ref="objectDetailGridWrapEl" class="object-detail-grid-wrap">
-              <table class="results-table">
+              <table class="results-table" :class="{ 'is-resizing': !!objectDetailResizeState }">
                 <thead>
                   <tr>
-                    <th v-for="column in props.activeObjectDetailResult.columns" :key="column">{{ column }}</th>
+                    <th
+                      v-for="(column, columnIndex) in props.activeObjectDetailResult.columns"
+                      :key="column"
+                      :style="{
+                        width: `${getObjectDetailColumnWidth(columnIndex)}px`,
+                        minWidth: `${getObjectDetailColumnWidth(columnIndex)}px`,
+                        maxWidth: `${getObjectDetailColumnWidth(columnIndex)}px`,
+                      }"
+                    >
+                      <span class="results-cell-text" :title="column">{{ column }}</span>
+                      <button
+                        class="results-col-resize-handle"
+                        type="button"
+                        tabindex="-1"
+                        aria-hidden="true"
+                        @mousedown="startObjectDetailColumnResize(columnIndex, $event)"
+                      ></button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -537,6 +622,11 @@ watch(
                       v-for="(value, colIndex) in row"
                       :key="`obj-col-${rowIndex}-${colIndex}`"
                       :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
+                      :style="{
+                        width: `${getObjectDetailColumnWidth(colIndex)}px`,
+                        minWidth: `${getObjectDetailColumnWidth(colIndex)}px`,
+                        maxWidth: `${getObjectDetailColumnWidth(colIndex)}px`,
+                      }"
                     >
                       <input
                         v-if="showEditableRowActions"
@@ -553,7 +643,9 @@ watch(
                         @keydown.ctrl.enter.prevent="commitDataChanges"
                         @keydown.esc.prevent="revertDataChanges"
                       />
-                      <template v-else>{{ value }}</template>
+                      <template v-else>
+                        <span class="results-cell-text" :title="value">{{ value }}</span>
+                      </template>
                     </td>
                   </tr>
                 </tbody>
@@ -1046,8 +1138,11 @@ button:focus-visible {
 }
 
 .results-table {
-  width: 100%;
-  border-collapse: collapse;
+  width: auto;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
   font-size: 0.74rem;
   margin: 0;
 }
@@ -1055,16 +1150,29 @@ button:focus-visible {
 .results-table th,
 .results-table td {
   border: 0;
-  border-bottom: 1px solid var(--table-divider);
+  border-right: 1px solid color-mix(in srgb, var(--table-divider) 65%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
+  color: var(--text-primary);
   text-align: left;
   padding: 0.28rem 0.4rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .results-table th {
   background: var(--table-header-bg);
   position: sticky;
   top: 0;
+  z-index: 2;
   font-weight: 600;
+  padding-right: 0.5rem;
+  overflow: visible;
+}
+
+.results-table th:last-child,
+.results-table td:last-child {
+  border-right: 0;
 }
 
 .results-table tbody tr:nth-child(even) {
@@ -1088,18 +1196,62 @@ button:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.results-cell-text {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.results-col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.results-col-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 22%;
+  bottom: 22%;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+}
+
+.results-table th:hover .results-col-resize-handle::after {
+  background: color-mix(in srgb, var(--table-divider) 80%, transparent);
+}
+
+.results-table.is-resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+
 .object-detail-hint {
   margin-top: -0.18rem;
 }
 
 .cell-editor {
   width: 100%;
-  min-width: 8rem;
+  min-width: 0;
   padding: 0.2rem 0.28rem;
   font-size: 0.72rem;
   font-family: inherit;
+  color: var(--text-primary);
   border: 0;
   background: transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .row-action-btn {
