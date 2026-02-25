@@ -49,6 +49,8 @@ const {
   activeObjectDetailResult,
   isActiveObjectDataEditable,
   activeObjectDetailLoading,
+  activeQueryResultPanes,
+  activeQueryResultPaneId,
   activeQueryText,
   activeDdlText,
   queryRowLimit,
@@ -59,7 +61,6 @@ const {
   schemaSearchFocusToken,
   schemaSearchResults,
   schemaSearchPerformed,
-  queryResult,
   exportDestinationDirectory,
   selectedExportSessionId,
   statusMessage,
@@ -70,6 +71,7 @@ const {
   addQueryTab,
   openSearchTab,
   activateWorkspaceTab,
+  activateQueryResultPane,
   closeQueryTab,
   closeDdlTab,
   openObjectFromExplorer,
@@ -116,6 +118,9 @@ const canRunSchemaExport = computed<boolean>(() => {
   );
 });
 const hasDeterminateExportProgress = computed<boolean>(() => exportProgressTotal.value > 0);
+const queryResultsEmptyStateMessage = computed<string>(() =>
+  isQueryTabActive.value ? "Run a query to see results." : "Select a query sheet to see results.",
+);
 const exportProgressPercent = computed<number>(() => {
   if (exportProgressTotal.value <= 0) {
     return 0;
@@ -330,8 +335,10 @@ onBeforeUnmount(() => {
       ></div>
 
       <QueryResultsPane
-        :query-result="queryResult"
-        :error-message="errorMessage"
+        :result-panes="activeQueryResultPanes"
+        :active-result-pane-id="activeQueryResultPaneId"
+        :empty-state-message="queryResultsEmptyStateMessage"
+        @activate-pane="activateQueryResultPane"
         :is-likely-numeric="isLikelyNumeric"
       />
     </section>

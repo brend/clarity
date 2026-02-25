@@ -13,6 +13,7 @@ import type {
   SchemaExportResult,
   SchemaExportTarget,
   WorkspaceDdlTab,
+  WorkspaceQueryResultPane,
   WorkspaceQueryTab,
 } from "../types/clarity";
 
@@ -135,6 +136,36 @@ async function yieldUiFrame(): Promise<void> {
   });
 }
 
+function buildQueryTabId(tabNumber: number): string {
+  return `${QUERY_TAB_PREFIX}${tabNumber}`;
+}
+
+function buildQueryResultPaneId(tabId: string, paneNumber: number): string {
+  return `${tabId}:result:${paneNumber}`;
+}
+
+function createQueryResultPane(tabId: string, paneNumber: number): WorkspaceQueryResultPane {
+  return {
+    id: buildQueryResultPaneId(tabId, paneNumber),
+    title: `Result ${paneNumber}`,
+    queryResult: null,
+    errorMessage: "",
+  };
+}
+
+function createQueryTab(tabNumber: number, schema: string): WorkspaceQueryTab {
+  const tabId = buildQueryTabId(tabNumber);
+  const firstResultPane = createQueryResultPane(tabId, 1);
+  return {
+    id: tabId,
+    title: `Query ${tabNumber}`,
+    queryText: buildDefaultSchemaQuery(schema),
+    resultPanes: [firstResultPane],
+    activeResultPaneId: firstResultPane.id,
+    nextResultPaneNumber: 2,
+  };
+}
+
 export function useClarityWorkspace() {
   const connection = reactive<OracleConnectRequest>({
     provider: "oracle",
@@ -154,15 +185,8 @@ export function useClarityWorkspace() {
   const objects = ref<OracleObjectEntry[]>([]);
   const selectedObject = ref<OracleObjectEntry | null>(null);
   const ddlTabs = ref<WorkspaceDdlTab[]>([]);
-  const queryTabs = ref<WorkspaceQueryTab[]>([
-    {
-      id: FIRST_QUERY_TAB_ID,
-      title: "Query 1",
-      queryText: buildDefaultSchemaQuery(connection.schema),
-    },
-  ]);
+  const queryTabs = ref<WorkspaceQueryTab[]>([createQueryTab(1, connection.schema)]);
   const queryTabNumber = ref(2);
-  const queryResult = ref<OracleQueryResult | null>(null);
   const schemaSearchText = ref("");
   const schemaSearchIncludeObjectNames = ref(true);
   const schemaSearchIncludeSource = ref(true);
@@ -227,6 +251,22 @@ export function useClarityWorkspace() {
   const isSearchTabActive = computed(() => activeWorkspaceTabId.value === SEARCH_TAB_ID);
   const activeDdlObject = computed(() => activeDdlTab.value?.object ?? null);
   const isQueryTabActive = computed(() => activeQueryTab.value !== null);
+  const activeQueryResultPanes = computed<WorkspaceQueryResultPane[]>(() => activeQueryTab.value?.resultPanes ?? []);
+  const activeQueryResultPaneId = computed<string | null>(() => {
+    if (!activeQueryTab.value) {
+      return null;
+    }
+
+    return activeQueryTab.value.activeResultPaneId || activeQueryTab.value.resultPanes[0]?.id || null;
+  });
+  const activeQueryResultPane = computed<WorkspaceQueryResultPane | null>(() => {
+    if (!activeQueryTab.value) {
+      return null;
+    }
+
+    const activePane = activeQueryTab.value.resultPanes.find((pane) => pane.id === activeQueryResultPaneId.value);
+    return activePane ?? activeQueryTab.value.resultPanes[0] ?? null;
+  });
   const activeQueryText = computed({
     get: () => activeQueryTab.value?.queryText ?? "",
     set: (value: string) => {
@@ -423,19 +463,33 @@ export function useClarityWorkspace() {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
   }
 
+  function ensureActiveQueryResultPane(tab: WorkspaceQueryTab): WorkspaceQueryResultPane {
+    if (!tab.resultPanes.length) {
+      const paneNumber = tab.nextResultPaneNumber;
+      tab.nextResultPaneNumber += 1;
+      const pane = createQueryResultPane(tab.id, paneNumber);
+      tab.resultPanes.push(pane);
+      tab.activeResultPaneId = pane.id;
+      return pane;
+    }
+
+    const activePane = tab.resultPanes.find((pane) => pane.id === tab.activeResultPaneId);
+    if (activePane) {
+      return activePane;
+    }
+
+    tab.activeResultPaneId = tab.resultPanes[0].id;
+    return tab.resultPanes[0];
+  }
+
   function addQueryTab(): void {
     const tabNumber = queryTabNumber.value;
     queryTabNumber.value += 1;
 
-    const tabId = `${QUERY_TAB_PREFIX}${tabNumber}`;
-    const tab: WorkspaceQueryTab = {
-      id: tabId,
-      title: `Query ${tabNumber}`,
-      queryText: buildDefaultSchemaQuery(session.value?.schema ?? connection.schema),
-    };
+    const tab = createQueryTab(tabNumber, session.value?.schema ?? connection.schema);
 
     queryTabs.value.push(tab);
-    activateWorkspaceTab(tabId);
+    activateWorkspaceTab(tab.id);
   }
 
   function openSearchTab(focusInput = false): void {
@@ -461,6 +515,18 @@ export function useClarityWorkspace() {
       selectedObject.value = tab.object;
       void ensureObjectDetailLoaded(tab, tab.activeDetailTabId);
     }
+  }
+
+  function activateQueryResultPane(paneId: string): void {
+    if (!activeQueryTab.value) {
+      return;
+    }
+
+    if (!activeQueryTab.value.resultPanes.some((pane) => pane.id === paneId)) {
+      return;
+    }
+
+    activeQueryTab.value.activeResultPaneId = paneId;
   }
 
   function closeQueryTab(tabId: string): void {
@@ -1008,17 +1074,12 @@ export function useClarityWorkspace() {
       objects.value = [];
       expandedObjectTypes.value = {};
       queryTabs.value = [
-        {
-          id: FIRST_QUERY_TAB_ID,
-          title: "Query 1",
-          queryText: buildDefaultSchemaQuery(connection.schema),
-        },
+        createQueryTab(1, connection.schema),
       ];
       queryTabNumber.value = 2;
       ddlTabs.value = [];
       activeWorkspaceTabId.value = FIRST_QUERY_TAB_ID;
       selectedObject.value = null;
-      queryResult.value = null;
       schemaSearchText.value = "";
       exportDestinationDirectory.value = "";
       selectedExportSessionId.value = null;
@@ -1123,12 +1184,14 @@ export function useClarityWorkspace() {
       return;
     }
 
+    const queryTab = activeQueryTab.value;
+    const resultPane = ensureActiveQueryResultPane(queryTab);
     const effectiveRowLimit = clampQueryRowLimit(queryRowLimit.value);
     if (effectiveRowLimit !== queryRowLimit.value) {
       queryRowLimit.value = effectiveRowLimit;
     }
 
-    const preflight = shouldConfirmBeforeExecution(activeQueryTab.value.queryText);
+    const preflight = shouldConfirmBeforeExecution(queryTab.queryText);
     let allowDestructive = false;
     if (preflight.shouldConfirm) {
       const shouldContinue = window.confirm(buildMutatingQueryPrompt(preflight.reasons));
@@ -1141,22 +1204,26 @@ export function useClarityWorkspace() {
     }
 
     errorMessage.value = "";
+    resultPane.errorMessage = "";
     busy.runningQuery = true;
 
     try {
       const result = await invoke<OracleQueryResult>("db_run_query", {
         request: {
           sessionId: session.value.sessionId,
-          sql: activeQueryTab.value.queryText,
+          sql: queryTab.queryText,
           rowLimit: effectiveRowLimit,
           allowDestructive,
         },
       });
 
-      queryResult.value = result;
+      resultPane.queryResult = result;
+      resultPane.errorMessage = "";
       statusMessage.value = result.message;
     } catch (error) {
-      errorMessage.value = toErrorMessage(error);
+      const message = toErrorMessage(error);
+      resultPane.errorMessage = message;
+      errorMessage.value = message;
     } finally {
       busy.runningQuery = false;
     }
@@ -1238,6 +1305,9 @@ export function useClarityWorkspace() {
     activeObjectDetailResult,
     isActiveObjectDataEditable,
     activeObjectDetailLoading,
+    activeQueryResultPanes,
+    activeQueryResultPaneId,
+    activeQueryResultPane,
     activeQueryText,
     activeDdlText,
     queryRowLimit,
@@ -1248,7 +1318,6 @@ export function useClarityWorkspace() {
     schemaSearchFocusToken,
     schemaSearchResults,
     schemaSearchPerformed,
-    queryResult,
     exportDestinationDirectory,
     selectedExportSessionId,
     statusMessage,
@@ -1259,6 +1328,7 @@ export function useClarityWorkspace() {
     addQueryTab,
     openSearchTab,
     activateWorkspaceTab,
+    activateQueryResultPane,
     closeQueryTab,
     closeDdlTab,
     openObjectFromExplorer,

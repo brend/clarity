@@ -1,35 +1,64 @@
 <script setup lang="ts">
-import type { OracleQueryResult } from "../types/clarity";
+import { computed } from "vue";
+import type { WorkspaceQueryResultPane } from "../types/clarity";
 
 const props = defineProps<{
-  queryResult: OracleQueryResult | null;
-  errorMessage: string;
+  resultPanes: WorkspaceQueryResultPane[];
+  activeResultPaneId: string | null;
+  emptyStateMessage: string;
   isLikelyNumeric: (value: string) => boolean;
 }>();
+
+const emit = defineEmits<{
+  activatePane: [paneId: string];
+}>();
+
+const activePane = computed<WorkspaceQueryResultPane | null>(() => {
+  if (!props.resultPanes.length) {
+    return null;
+  }
+
+  const currentPane = props.resultPanes.find((pane) => pane.id === props.activeResultPaneId);
+  return currentPane ?? props.resultPanes[0];
+});
 </script>
 
 <template>
   <section class="results-pane">
     <div class="results-header">
-      <div class="results-title">Results</div>
-      <div v-if="props.errorMessage" class="error-inline">{{ props.errorMessage }}</div>
+      <div v-if="props.resultPanes.length" class="results-tabs" role="tablist" aria-label="Result tabs">
+        <button
+          v-for="pane in props.resultPanes"
+          :key="pane.id"
+          type="button"
+          role="tab"
+          class="results-tab"
+          :class="{ active: pane.id === activePane?.id }"
+          :aria-selected="pane.id === activePane?.id"
+          @click="emit('activatePane', pane.id)"
+        >
+          {{ pane.title }}
+        </button>
+      </div>
+      <div v-else class="results-title">Results</div>
+      <div v-if="activePane?.errorMessage" class="error-inline">{{ activePane.errorMessage }}</div>
     </div>
 
     <div class="results-content">
-      <p v-if="!props.queryResult" class="muted">Run a query to see results.</p>
+      <p v-if="!activePane || !activePane.queryResult" class="muted">{{ props.emptyStateMessage }}</p>
 
-      <p v-else-if="props.queryResult.rowsAffected !== null" class="muted">
-        Rows affected: {{ props.queryResult.rowsAffected }}
+      <p v-else-if="activePane.queryResult.rowsAffected !== null" class="muted">
+        Rows affected: {{ activePane.queryResult.rowsAffected }}
       </p>
 
-      <table v-else-if="props.queryResult.columns.length" class="results-table">
+      <table v-else-if="activePane.queryResult.columns.length" class="results-table">
         <thead>
           <tr>
-            <th v-for="column in props.queryResult.columns" :key="column">{{ column }}</th>
+            <th v-for="column in activePane.queryResult.columns" :key="column">{{ column }}</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(row, rowIndex) in props.queryResult.rows" :key="`row-${rowIndex}`">
+          <tr v-for="(row, rowIndex) in activePane.queryResult.rows" :key="`row-${rowIndex}`">
             <td
               v-for="(value, colIndex) in row"
               :key="`col-${rowIndex}-${colIndex}`"
@@ -64,6 +93,34 @@ const props = defineProps<{
 .results-title {
   font-size: 0.73rem;
   font-weight: 500;
+  color: var(--text-primary);
+}
+
+.results-tabs {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  height: 100%;
+}
+
+.results-tab {
+  height: 100%;
+  border: 0;
+  border-right: 1px solid var(--panel-separator);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.69rem;
+  font-weight: 500;
+  padding: 0 0.58rem;
+  cursor: pointer;
+}
+
+.results-tab:hover {
+  background: var(--bg-hover);
+}
+
+.results-tab.active {
+  background: var(--tab-active-bg);
   color: var(--text-primary);
 }
 

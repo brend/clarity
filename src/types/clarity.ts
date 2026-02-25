@@ -93,6 +93,16 @@ export interface WorkspaceQueryTab {
   id: string;
   title: string;
   queryText: string;
+  resultPanes: WorkspaceQueryResultPane[];
+  activeResultPaneId: string;
+  nextResultPaneNumber: number;
+}
+
+export interface WorkspaceQueryResultPane {
+  id: string;
+  title: string;
+  queryResult: OracleQueryResult | null;
+  errorMessage: string;
 }
 
 export interface BusyState {
