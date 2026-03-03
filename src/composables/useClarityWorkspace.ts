@@ -26,7 +26,13 @@ const OBJECT_DATA_PREVIEW_LIMIT = 500;
 const OBJECT_DATA_ROW_ID_COLUMN = "__CLARITY_ROWID__";
 const DEFAULT_QUERY_ROW_LIMIT = 1000;
 const MAX_QUERY_ROW_LIMIT = 10000;
-const SAFE_SQL_LEADING_KEYWORDS = new Set(["SELECT", "WITH", "EXPLAIN", "DESCRIBE", "DESC"]);
+const SAFE_SQL_LEADING_KEYWORDS = new Set([
+  "SELECT",
+  "WITH",
+  "EXPLAIN",
+  "DESCRIBE",
+  "DESC",
+]);
 const NON_STANDALONE_SQL_KEYWORDS = new Set([
   "END",
   "EXCEPTION",
@@ -51,7 +57,10 @@ interface PersistedQuerySheetState {
   queryTabNumber: number;
 }
 
-function readDebugConnectionString(value: string | undefined, fallback: string): string {
+function readDebugConnectionString(
+  value: string | undefined,
+  fallback: string,
+): string {
   if (!import.meta.env.DEV) {
     return fallback;
   }
@@ -60,16 +69,24 @@ function readDebugConnectionString(value: string | undefined, fallback: string):
   return normalized && normalized.length > 0 ? normalized : fallback;
 }
 
-function readDebugConnectionPort(value: string | undefined, fallback: number): number {
+function readDebugConnectionPort(
+  value: string | undefined,
+  fallback: number,
+): number {
   if (!import.meta.env.DEV) {
     return fallback;
   }
 
   const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : fallback;
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535
+    ? parsed
+    : fallback;
 }
 
-function readDebugPositiveInteger(value: string | undefined, fallback: number): number {
+function readDebugPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+): number {
   if (!import.meta.env.DEV) {
     return fallback;
   }
@@ -130,7 +147,10 @@ function extractLeadingSqlKeyword(sql: string): string | null {
   return match ? match[0] : null;
 }
 
-function shouldConfirmBeforeExecution(sql: string): { shouldConfirm: boolean; reasons: string[] } {
+function shouldConfirmBeforeExecution(sql: string): {
+  shouldConfirm: boolean;
+  reasons: string[];
+} {
   const reasons = extractMutatingSqlKeywords(sql);
   if (reasons.length > 0) {
     return { shouldConfirm: true, reasons };
@@ -304,7 +324,10 @@ function splitQueryTextForExecution(sql: string): string[] {
   return candidates;
 }
 
-function collectExecutionPreflight(statements: string[]): { shouldConfirm: boolean; reasons: string[] } {
+function collectExecutionPreflight(statements: string[]): {
+  shouldConfirm: boolean;
+  reasons: string[];
+} {
   const reasons: string[] = [];
   const seen = new Set<string>();
 
@@ -343,7 +366,10 @@ function buildQueryResultPaneId(tabId: string, paneNumber: number): string {
   return `${tabId}:result:${paneNumber}`;
 }
 
-function createQueryResultPane(tabId: string, paneNumber: number): WorkspaceQueryResultPane {
+function createQueryResultPane(
+  tabId: string,
+  paneNumber: number,
+): WorkspaceQueryResultPane {
   return {
     id: buildQueryResultPaneId(tabId, paneNumber),
     title: `Result ${paneNumber}`,
@@ -365,7 +391,9 @@ function createQueryTab(tabNumber: number, schema: string): WorkspaceQueryTab {
   };
 }
 
-function createQueryTabFromPersisted(state: PersistedQuerySheet): WorkspaceQueryTab {
+function createQueryTabFromPersisted(
+  state: PersistedQuerySheet,
+): WorkspaceQueryTab {
   const firstResultPane = createQueryResultPane(state.id, 1);
   return {
     id: state.id,
@@ -387,7 +415,9 @@ function parseQueryTabNumber(tabId: string): number | null {
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : null;
 }
 
-function createDefaultPersistedQuerySheetState(schema: string): PersistedQuerySheetState {
+function createDefaultPersistedQuerySheetState(
+  schema: string,
+): PersistedQuerySheetState {
   const firstTab = createQueryTab(1, schema);
   return {
     queryTabs: [
@@ -454,13 +484,16 @@ function normalizePersistedQuerySheetState(
     typeof raw.activeWorkspaceTabId === "string"
       ? raw.activeWorkspaceTabId.trim()
       : "";
-  const activeWorkspaceTabId = queryTabs.some((tab) => tab.id === requestedActiveId)
+  const activeWorkspaceTabId = queryTabs.some(
+    (tab) => tab.id === requestedActiveId,
+  )
     ? requestedActiveId
     : queryTabs[0].id;
   const requestedNextTabNumber =
     typeof raw.queryTabNumber === "number" ? Math.trunc(raw.queryTabNumber) : 0;
   const queryTabNumber =
-    Number.isFinite(requestedNextTabNumber) && requestedNextTabNumber > maxTabNumber
+    Number.isFinite(requestedNextTabNumber) &&
+    requestedNextTabNumber > maxTabNumber
       ? requestedNextTabNumber
       : maxTabNumber + 1;
 
@@ -494,7 +527,10 @@ function writeStoredQuerySheetState(state: PersistedQuerySheetState): void {
   }
 
   try {
-    window.localStorage.setItem(QUERY_SHEETS_STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(
+      QUERY_SHEETS_STORAGE_KEY,
+      JSON.stringify(state),
+    );
   } catch {
     // Ignore persistence errors; query tabs remain active for this session.
   }
@@ -503,11 +539,22 @@ function writeStoredQuerySheetState(state: PersistedQuerySheetState): void {
 export function useClarityWorkspace() {
   const connection = reactive<OracleConnectRequest>({
     provider: "oracle",
-    host: readDebugConnectionString(import.meta.env.VITE_ORACLE_HOST, "localhost"),
+    host: readDebugConnectionString(
+      import.meta.env.VITE_ORACLE_HOST,
+      "localhost",
+    ),
     port: readDebugConnectionPort(import.meta.env.VITE_ORACLE_PORT, 1521),
-    serviceName: readDebugConnectionString(import.meta.env.VITE_ORACLE_SERVICE_NAME, "XEPDB1"),
-    username: readDebugConnectionString(import.meta.env.VITE_ORACLE_USERNAME, "hr"),
-    password: import.meta.env.DEV ? (import.meta.env.VITE_ORACLE_PASSWORD ?? "") : "",
+    serviceName: readDebugConnectionString(
+      import.meta.env.VITE_ORACLE_SERVICE_NAME,
+      "XEPDB1",
+    ),
+    username: readDebugConnectionString(
+      import.meta.env.VITE_ORACLE_USERNAME,
+      "hr",
+    ),
+    password: import.meta.env.DEV
+      ? (import.meta.env.VITE_ORACLE_PASSWORD ?? "")
+      : "",
     schema: readDebugConnectionString(import.meta.env.VITE_ORACLE_SCHEMA, "HR"),
   });
   const profileName = ref("");
@@ -522,7 +569,9 @@ export function useClarityWorkspace() {
   const selectedObject = ref<OracleObjectEntry | null>(null);
   const ddlTabs = ref<WorkspaceDdlTab[]>([]);
   const queryTabs = ref<WorkspaceQueryTab[]>(
-    initialQuerySheetState.queryTabs.map((tab) => createQueryTabFromPersisted(tab)),
+    initialQuerySheetState.queryTabs.map((tab) =>
+      createQueryTabFromPersisted(tab),
+    ),
   );
   const queryTabNumber = ref(initialQuerySheetState.queryTabNumber);
   const schemaSearchText = ref("");
@@ -533,7 +582,12 @@ export function useClarityWorkspace() {
   const exportDestinationDirectory = ref("");
   const selectedExportSessionId = ref<number | null>(null);
   const queryRowLimit = ref(
-    clampQueryRowLimit(readDebugPositiveInteger(import.meta.env.VITE_QUERY_ROW_LIMIT, DEFAULT_QUERY_ROW_LIMIT)),
+    clampQueryRowLimit(
+      readDebugPositiveInteger(
+        import.meta.env.VITE_QUERY_ROW_LIMIT,
+        DEFAULT_QUERY_ROW_LIMIT,
+      ),
+    ),
   );
   const schemaSearchResults = ref<OracleSchemaSearchResult[]>([]);
   const schemaSearchPerformed = ref(false);
@@ -558,13 +612,18 @@ export function useClarityWorkspace() {
   });
 
   const isConnected = computed(() => session.value !== null);
-  const connectedSchema = computed(() => session.value?.schema ?? connection.schema.toUpperCase());
+  const connectedSchema = computed(
+    () => session.value?.schema ?? connection.schema.toUpperCase(),
+  );
   const selectedProviderLabel = computed(() => {
     const provider = session.value?.provider ?? connection.provider;
     return provider.toUpperCase();
   });
   const selectedProfile = computed(
-    () => connectionProfiles.value.find((profile) => profile.id === selectedProfileId.value) ?? null,
+    () =>
+      connectionProfiles.value.find(
+        (profile) => profile.id === selectedProfileId.value,
+      ) ?? null,
   );
   const schemaExportTargets = computed<SchemaExportTarget[]>(() => {
     if (!session.value) {
@@ -580,31 +639,47 @@ export function useClarityWorkspace() {
       },
     ];
   });
-  const activeQueryTab = computed(() =>
-    queryTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
+  const activeQueryTab = computed(
+    () =>
+      queryTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ??
+      null,
   );
-  const activeDdlTab = computed(() =>
-    ddlTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ?? null,
+  const activeDdlTab = computed(
+    () =>
+      ddlTabs.value.find((tab) => tab.id === activeWorkspaceTabId.value) ??
+      null,
   );
-  const isSearchTabActive = computed(() => activeWorkspaceTabId.value === SEARCH_TAB_ID);
+  const isSearchTabActive = computed(
+    () => activeWorkspaceTabId.value === SEARCH_TAB_ID,
+  );
   const activeDdlObject = computed(() => activeDdlTab.value?.object ?? null);
   const isQueryTabActive = computed(() => activeQueryTab.value !== null);
-  const activeQueryResultPanes = computed<WorkspaceQueryResultPane[]>(() => activeQueryTab.value?.resultPanes ?? []);
+  const activeQueryResultPanes = computed<WorkspaceQueryResultPane[]>(
+    () => activeQueryTab.value?.resultPanes ?? [],
+  );
   const activeQueryResultPaneId = computed<string | null>(() => {
     if (!activeQueryTab.value) {
       return null;
     }
 
-    return activeQueryTab.value.activeResultPaneId || activeQueryTab.value.resultPanes[0]?.id || null;
+    return (
+      activeQueryTab.value.activeResultPaneId ||
+      activeQueryTab.value.resultPanes[0]?.id ||
+      null
+    );
   });
-  const activeQueryResultPane = computed<WorkspaceQueryResultPane | null>(() => {
-    if (!activeQueryTab.value) {
-      return null;
-    }
+  const activeQueryResultPane = computed<WorkspaceQueryResultPane | null>(
+    () => {
+      if (!activeQueryTab.value) {
+        return null;
+      }
 
-    const activePane = activeQueryTab.value.resultPanes.find((pane) => pane.id === activeQueryResultPaneId.value);
-    return activePane ?? activeQueryTab.value.resultPanes[0] ?? null;
-  });
+      const activePane = activeQueryTab.value.resultPanes.find(
+        (pane) => pane.id === activeQueryResultPaneId.value,
+      );
+      return activePane ?? activeQueryTab.value.resultPanes[0] ?? null;
+    },
+  );
   const activeQueryText = computed({
     get: () => activeQueryTab.value?.queryText ?? "",
     set: (value: string) => {
@@ -665,11 +740,17 @@ export function useClarityWorkspace() {
     };
   });
   const isActiveObjectDataEditable = computed<boolean>(() => {
-    if (!activeDdlTab.value || activeDdlTab.value.activeDetailTabId !== "data") {
+    if (
+      !activeDdlTab.value ||
+      activeDdlTab.value.activeDetailTabId !== "data"
+    ) {
       return false;
     }
 
-    if (!isTableObject(activeDdlTab.value.object.objectType) || !activeDdlTab.value.dataResult) {
+    if (
+      !isTableObject(activeDdlTab.value.object.objectType) ||
+      !activeDdlTab.value.dataResult
+    ) {
       return false;
     }
 
@@ -707,7 +788,9 @@ export function useClarityWorkspace() {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([objectType, entries]) => ({
         objectType,
-        entries: [...entries].sort((left, right) => left.objectName.localeCompare(right.objectName)),
+        entries: [...entries].sort((left, right) =>
+          left.objectName.localeCompare(right.objectName),
+        ),
       }));
   });
 
@@ -737,7 +820,9 @@ export function useClarityWorkspace() {
     return normalizeObjectType(objectType) === "TABLE";
   }
 
-  function getObjectDetailTabs(object: OracleObjectEntry): ObjectDetailTabDefinition[] {
+  function getObjectDetailTabs(
+    object: OracleObjectEntry,
+  ): ObjectDetailTabDefinition[] {
     const tabs: ObjectDetailTabDefinition[] = [];
     if (canPreviewObjectData(object.objectType)) {
       tabs.push({ id: "data", label: "Data" });
@@ -747,11 +832,16 @@ export function useClarityWorkspace() {
     return tabs;
   }
 
-  function getDefaultObjectDetailTabId(object: OracleObjectEntry): ObjectDetailTabId {
+  function getDefaultObjectDetailTabId(
+    object: OracleObjectEntry,
+  ): ObjectDetailTabId {
     return canPreviewObjectData(object.objectType) ? "data" : "ddl";
   }
 
-  function isObjectDetailTabSupported(object: OracleObjectEntry, tabId: ObjectDetailTabId): boolean {
+  function isObjectDetailTabSupported(
+    object: OracleObjectEntry,
+    tabId: ObjectDetailTabId,
+  ): boolean {
     return getObjectDetailTabs(object).some((tab) => tab.id === tabId);
   }
 
@@ -772,7 +862,10 @@ export function useClarityWorkspace() {
   }
 
   function hasObjectDataRowIdColumn(result: OracleQueryResult): boolean {
-    const firstColumn = (result.columns[0] ?? "").replace(/"/g, "").trim().toUpperCase();
+    const firstColumn = (result.columns[0] ?? "")
+      .replace(/"/g, "")
+      .trim()
+      .toUpperCase();
     const expected = OBJECT_DATA_ROW_ID_COLUMN.toUpperCase();
     return firstColumn === expected || firstColumn === "ROWID";
   }
@@ -801,9 +894,14 @@ export function useClarityWorkspace() {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
   }
 
-  function prepareQueryResultPanes(tab: WorkspaceQueryTab, statementCount: number): void {
+  function prepareQueryResultPanes(
+    tab: WorkspaceQueryTab,
+    statementCount: number,
+  ): void {
     const paneCount = Math.max(1, statementCount);
-    const panes = Array.from({ length: paneCount }, (_, index) => createQueryResultPane(tab.id, index + 1));
+    const panes = Array.from({ length: paneCount }, (_, index) =>
+      createQueryResultPane(tab.id, index + 1),
+    );
     tab.resultPanes = panes;
     tab.activeResultPaneId = panes[0].id;
     tab.nextResultPaneNumber = paneCount + 1;
@@ -813,7 +911,10 @@ export function useClarityWorkspace() {
     const tabNumber = queryTabNumber.value;
     queryTabNumber.value += 1;
 
-    const tab = createQueryTab(tabNumber, session.value?.schema ?? connection.schema);
+    const tab = createQueryTab(
+      tabNumber,
+      session.value?.schema ?? connection.schema,
+    );
 
     queryTabs.value.push(tab);
     activateWorkspaceTab(tab.id);
@@ -870,7 +971,8 @@ export function useClarityWorkspace() {
     queryTabs.value.splice(index, 1);
 
     if (wasActive) {
-      const fallbackQueryTab = queryTabs.value[Math.max(0, index - 1)] ?? queryTabs.value[0];
+      const fallbackQueryTab =
+        queryTabs.value[Math.max(0, index - 1)] ?? queryTabs.value[0];
       if (fallbackQueryTab) {
         activateWorkspaceTab(fallbackQueryTab.id);
       }
@@ -888,7 +990,9 @@ export function useClarityWorkspace() {
 
     if (wasActive) {
       const fallbackTab = ddlTabs.value[Math.max(0, index - 1)];
-      activateWorkspaceTab(fallbackTab?.id ?? queryTabs.value[0]?.id ?? FIRST_QUERY_TAB_ID);
+      activateWorkspaceTab(
+        fallbackTab?.id ?? queryTabs.value[0]?.id ?? FIRST_QUERY_TAB_ID,
+      );
     }
   }
 
@@ -898,8 +1002,15 @@ export function useClarityWorkspace() {
     const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
     if (existingTab) {
       existingTab.object = object;
-      if (!isObjectDetailTabSupported(existingTab.object, existingTab.activeDetailTabId)) {
-        existingTab.activeDetailTabId = getDefaultObjectDetailTabId(existingTab.object);
+      if (
+        !isObjectDetailTabSupported(
+          existingTab.object,
+          existingTab.activeDetailTabId,
+        )
+      ) {
+        existingTab.activeDetailTabId = getDefaultObjectDetailTabId(
+          existingTab.object,
+        );
       }
       activateWorkspaceTab(existingTab.id);
       return;
@@ -910,7 +1021,11 @@ export function useClarityWorkspace() {
 
   function activateObjectDetailTab(tabId: ObjectDetailTabId): void {
     const tab = activeDdlTab.value;
-    if (!tab || tab.activeDetailTabId === tabId || !isObjectDetailTabSupported(tab.object, tabId)) {
+    if (
+      !tab ||
+      tab.activeDetailTabId === tabId ||
+      !isObjectDetailTabSupported(tab.object, tabId)
+    ) {
       return;
     }
 
@@ -934,7 +1049,10 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function ensureObjectDetailLoaded(tab: WorkspaceDdlTab, detailTabId: ObjectDetailTabId): Promise<void> {
+  async function ensureObjectDetailLoaded(
+    tab: WorkspaceDdlTab,
+    detailTabId: ObjectDetailTabId,
+  ): Promise<void> {
     if (detailTabId === "data") {
       await loadObjectData(tab);
       return;
@@ -945,13 +1063,22 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function loadObjectData(tab: WorkspaceDdlTab, forceReload = false): Promise<void> {
-    if (!session.value || !canPreviewObjectData(tab.object.objectType) || tab.loadingData) {
+  async function loadObjectData(
+    tab: WorkspaceDdlTab,
+    forceReload = false,
+  ): Promise<void> {
+    if (
+      !session.value ||
+      !canPreviewObjectData(tab.object.objectType) ||
+      tab.loadingData
+    ) {
       return;
     }
 
     const cachedDataNeedsRowIdUpgrade =
-      isTableObject(tab.object.objectType) && !!tab.dataResult && !hasObjectDataRowIdColumn(tab.dataResult);
+      isTableObject(tab.object.objectType) &&
+      !!tab.dataResult &&
+      !hasObjectDataRowIdColumn(tab.dataResult);
     if (!forceReload && tab.dataResult && !cachedDataNeedsRowIdUpgrade) {
       return;
     }
@@ -974,7 +1101,10 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function loadObjectMetadata(tab: WorkspaceDdlTab, forceReload = false): Promise<void> {
+  async function loadObjectMetadata(
+    tab: WorkspaceDdlTab,
+    forceReload = false,
+  ): Promise<void> {
     if (!session.value || tab.loadingMetadata) {
       return;
     }
@@ -1001,9 +1131,17 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function updateActiveObjectDataRow(rowIndex: number, values: string[]): Promise<boolean> {
+  async function updateActiveObjectDataRow(
+    rowIndex: number,
+    values: string[],
+  ): Promise<boolean> {
     const tab = activeDdlTab.value;
-    if (!session.value || !tab || tab.activeDetailTabId !== "data" || !isTableObject(tab.object.objectType)) {
+    if (
+      !session.value ||
+      !tab ||
+      tab.activeDetailTabId !== "data" ||
+      !isTableObject(tab.object.objectType)
+    ) {
       return false;
     }
 
@@ -1012,25 +1150,29 @@ export function useClarityWorkspace() {
     }
 
     if (!tab.dataResult) {
-      errorMessage.value = "No table data is loaded. Refresh the Data tab and try again.";
+      errorMessage.value =
+        "No table data is loaded. Refresh the Data tab and try again.";
       return false;
     }
 
     if (!hasObjectDataRowIdColumn(tab.dataResult)) {
-      errorMessage.value = "Row editing is not ready yet. Refresh the Data tab and try again.";
+      errorMessage.value =
+        "Row editing is not ready yet. Refresh the Data tab and try again.";
       return false;
     }
 
     const row = tab.dataResult.rows[rowIndex];
     if (!row) {
-      errorMessage.value = "Unable to save row: row no longer exists in the current result set.";
+      errorMessage.value =
+        "Unable to save row: row no longer exists in the current result set.";
       return false;
     }
 
     const rowId = row[0];
     const editableColumns = tab.dataResult.columns.slice(1);
     if (!rowId || editableColumns.length !== values.length) {
-      errorMessage.value = "Unable to save row: data preview shape changed. Refresh and try again.";
+      errorMessage.value =
+        "Unable to save row: data preview shape changed. Refresh and try again.";
       return false;
     }
 
@@ -1047,7 +1189,10 @@ export function useClarityWorkspace() {
     }
 
     const setClauses = changedIndexes
-      .map((index) => `${toQuotedIdentifier(editableColumns[index])} = ${toSqlDataLiteral(values[index])}`)
+      .map(
+        (index) =>
+          `${toQuotedIdentifier(editableColumns[index])} = ${toSqlDataLiteral(values[index])}`,
+      )
       .join(", ");
     const sql = `update ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} set ${setClauses} where rowid = chartorowid(${toSqlStringLiteral(rowId)})`;
 
@@ -1079,7 +1224,12 @@ export function useClarityWorkspace() {
 
   async function insertActiveObjectDataRow(values: string[]): Promise<boolean> {
     const tab = activeDdlTab.value;
-    if (!session.value || !tab || tab.activeDetailTabId !== "data" || !isTableObject(tab.object.objectType)) {
+    if (
+      !session.value ||
+      !tab ||
+      tab.activeDetailTabId !== "data" ||
+      !isTableObject(tab.object.objectType)
+    ) {
       return false;
     }
 
@@ -1088,18 +1238,21 @@ export function useClarityWorkspace() {
     }
 
     if (!tab.dataResult) {
-      errorMessage.value = "No table data is loaded. Refresh the Data tab and try again.";
+      errorMessage.value =
+        "No table data is loaded. Refresh the Data tab and try again.";
       return false;
     }
 
     if (!hasObjectDataRowIdColumn(tab.dataResult)) {
-      errorMessage.value = "Row editing is not ready yet. Refresh the Data tab and try again.";
+      errorMessage.value =
+        "Row editing is not ready yet. Refresh the Data tab and try again.";
       return false;
     }
 
     const editableColumns = tab.dataResult.columns.slice(1);
     if (editableColumns.length !== values.length) {
-      errorMessage.value = "Unable to insert row: data preview shape changed. Refresh and try again.";
+      errorMessage.value =
+        "Unable to insert row: data preview shape changed. Refresh and try again.";
       return false;
     }
 
@@ -1111,12 +1264,17 @@ export function useClarityWorkspace() {
     }, []);
 
     if (!providedIndexes.length) {
-      errorMessage.value = "Enter at least one column value before committing a new row.";
+      errorMessage.value =
+        "Enter at least one column value before committing a new row.";
       return false;
     }
 
-    const columnsSql = providedIndexes.map((index) => toQuotedIdentifier(editableColumns[index])).join(", ");
-    const valuesSql = providedIndexes.map((index) => toSqlDataLiteral(values[index])).join(", ");
+    const columnsSql = providedIndexes
+      .map((index) => toQuotedIdentifier(editableColumns[index]))
+      .join(", ");
+    const valuesSql = providedIndexes
+      .map((index) => toSqlDataLiteral(values[index]))
+      .join(", ");
     const sql = `insert into ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} (${columnsSql}) values (${valuesSql})`;
 
     errorMessage.value = "";
@@ -1155,7 +1313,9 @@ export function useClarityWorkspace() {
 
   async function chooseSchemaExportDirectory(): Promise<string | null> {
     try {
-      const selectedDirectory = await invoke<string | null>("db_pick_directory");
+      const selectedDirectory = await invoke<string | null>(
+        "db_pick_directory",
+      );
       if (selectedDirectory) {
         exportDestinationDirectory.value = selectedDirectory;
       }
@@ -1178,8 +1338,13 @@ export function useClarityWorkspace() {
       return null;
     }
 
-    const targetSessionId = selectedExportSessionId.value ?? session.value.sessionId;
-    if (!schemaExportTargets.value.some((target) => target.sessionId === targetSessionId)) {
+    const targetSessionId =
+      selectedExportSessionId.value ?? session.value.sessionId;
+    if (
+      !schemaExportTargets.value.some(
+        (target) => target.sessionId === targetSessionId,
+      )
+    ) {
       errorMessage.value = "Selected export target is no longer available.";
       return null;
     }
@@ -1208,10 +1373,14 @@ export function useClarityWorkspace() {
   async function loadConnectionProfiles(): Promise<void> {
     busy.loadingProfiles = true;
     try {
-      connectionProfiles.value = await invoke<ConnectionProfile[]>("db_list_connection_profiles");
+      connectionProfiles.value = await invoke<ConnectionProfile[]>(
+        "db_list_connection_profiles",
+      );
       if (
         selectedProfileId.value &&
-        !connectionProfiles.value.some((profile) => profile.id === selectedProfileId.value)
+        !connectionProfiles.value.some(
+          (profile) => profile.id === selectedProfileId.value,
+        )
       ) {
         selectedProfileId.value = "";
       }
@@ -1255,9 +1424,12 @@ export function useClarityWorkspace() {
 
     busy.loadingProfileSecret = true;
     try {
-      const password = await invoke<string | null>("db_get_connection_profile_secret", {
-        request: { profileId: profile.id },
-      });
+      const password = await invoke<string | null>(
+        "db_get_connection_profile_secret",
+        {
+          request: { profileId: profile.id },
+        },
+      );
       connection.password = password ?? "";
       statusMessage.value = `Loaded profile: ${profile.name}`;
     } catch (error) {
@@ -1278,20 +1450,23 @@ export function useClarityWorkspace() {
     busy.savingProfile = true;
 
     try {
-      const savedProfile = await invoke<ConnectionProfile>("db_save_connection_profile", {
-        request: {
-          id: selectedProfileId.value || null,
-          name: normalizedName,
-          provider: connection.provider,
-          host: connection.host,
-          port: connection.port,
-          serviceName: connection.serviceName,
-          username: connection.username,
-          schema: connection.schema,
-          savePassword: saveProfilePassword.value,
-          password: saveProfilePassword.value ? connection.password : null,
+      const savedProfile = await invoke<ConnectionProfile>(
+        "db_save_connection_profile",
+        {
+          request: {
+            id: selectedProfileId.value || null,
+            name: normalizedName,
+            provider: connection.provider,
+            host: connection.host,
+            port: connection.port,
+            serviceName: connection.serviceName,
+            username: connection.username,
+            schema: connection.schema,
+            savePassword: saveProfilePassword.value,
+            password: saveProfilePassword.value ? connection.password : null,
+          },
         },
-      });
+      );
 
       await loadConnectionProfiles();
       selectedProfileId.value = savedProfile.id;
@@ -1359,7 +1534,9 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function connectOracle(oracleClientLibDirOverride?: string): Promise<void> {
+  async function connectOracle(
+    oracleClientLibDirOverride?: string,
+  ): Promise<void> {
     errorMessage.value = "";
     busy.connecting = true;
 
@@ -1380,7 +1557,8 @@ export function useClarityWorkspace() {
         firstQueryTab &&
         queryTabs.value.length === 1 &&
         firstQueryTab.id === FIRST_QUERY_TAB_ID &&
-        firstQueryTab.queryText.trim() === buildDefaultSchemaQuery(connection.schema).trim()
+        firstQueryTab.queryText.trim() ===
+          buildDefaultSchemaQuery(connection.schema).trim()
       ) {
         firstQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
       }
@@ -1462,17 +1640,17 @@ export function useClarityWorkspace() {
     errorMessage.value = "";
 
     try {
-      const result = await invoke<{ directory: string; fileCount: number } | null>(
-        "db_save_query_sheets",
-        {
-          request: {
-            sheets: queryTabs.value.map((tab) => ({
-              title: tab.title,
-              sql: tab.queryText,
-            })),
-          },
+      const result = await invoke<{
+        directory: string;
+        fileCount: number;
+      } | null>("db_save_query_sheets", {
+        request: {
+          sheets: queryTabs.value.map((tab) => ({
+            title: tab.title,
+            sql: tab.queryText,
+          })),
         },
-      );
+      });
 
       if (!result) {
         statusMessage.value = "Save cancelled.";
@@ -1485,7 +1663,10 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function loadDdl(object: OracleObjectEntry, targetLine: number | null = null): Promise<void> {
+  async function loadDdl(
+    object: OracleObjectEntry,
+    targetLine: number | null = null,
+  ): Promise<void> {
     if (!session.value) {
       return;
     }
@@ -1505,14 +1686,18 @@ export function useClarityWorkspace() {
       });
 
       const tabId = buildDdlTabId(object);
-      const detailTabId = targetLine === null ? getDefaultObjectDetailTabId(object) : "ddl";
+      const detailTabId =
+        targetLine === null ? getDefaultObjectDetailTabId(object) : "ddl";
       const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
       if (existingTab) {
         existingTab.ddlText = ddl;
         existingTab.object = object;
         existingTab.focusLine = targetLine;
         existingTab.focusToken += targetLine === null ? 0 : 1;
-        existingTab.activeDetailTabId = isObjectDetailTabSupported(existingTab.object, existingTab.activeDetailTabId)
+        existingTab.activeDetailTabId = isObjectDetailTabSupported(
+          existingTab.object,
+          existingTab.activeDetailTabId,
+        )
           ? existingTab.activeDetailTabId
           : detailTabId;
         if (targetLine !== null) {
@@ -1574,7 +1759,7 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function runQuery(): Promise<void> {
+  async function runQuery(selectedText?: string): Promise<void> {
     if (!session.value || !activeQueryTab.value) {
       return;
     }
@@ -1585,7 +1770,10 @@ export function useClarityWorkspace() {
       queryRowLimit.value = effectiveRowLimit;
     }
 
-    const statements = splitQueryTextForExecution(queryTab.queryText);
+    const querySource = selectedText?.trim()
+      ? selectedText
+      : queryTab.queryText;
+    const statements = splitQueryTextForExecution(querySource);
     if (!statements.length) {
       errorMessage.value = "Query cannot be empty.";
       return;
@@ -1594,7 +1782,9 @@ export function useClarityWorkspace() {
     const preflight = collectExecutionPreflight(statements);
     let allowDestructive = false;
     if (preflight.shouldConfirm) {
-      const shouldContinue = window.confirm(buildMutatingQueryPrompt(preflight.reasons));
+      const shouldContinue = window.confirm(
+        buildMutatingQueryPrompt(preflight.reasons),
+      );
       if (!shouldContinue) {
         statusMessage.value = "Execution cancelled.";
         return;
@@ -1660,7 +1850,11 @@ export function useClarityWorkspace() {
       errorMessage.value = "Search term is required.";
       return;
     }
-    if (!schemaSearchIncludeObjectNames.value && !schemaSearchIncludeSource.value && !schemaSearchIncludeDdl.value) {
+    if (
+      !schemaSearchIncludeObjectNames.value &&
+      !schemaSearchIncludeSource.value &&
+      !schemaSearchIncludeDdl.value
+    ) {
       errorMessage.value = "Select at least one search scope.";
       return;
     }
@@ -1670,16 +1864,19 @@ export function useClarityWorkspace() {
     schemaSearchPerformed.value = true;
 
     try {
-      schemaSearchResults.value = await invoke<OracleSchemaSearchResult[]>("db_search_schema_text", {
-        request: {
-          sessionId: session.value.sessionId,
-          searchTerm,
-          limit: 500,
-          includeObjectNames: schemaSearchIncludeObjectNames.value,
-          includeSource: schemaSearchIncludeSource.value,
-          includeDdl: schemaSearchIncludeDdl.value,
+      schemaSearchResults.value = await invoke<OracleSchemaSearchResult[]>(
+        "db_search_schema_text",
+        {
+          request: {
+            sessionId: session.value.sessionId,
+            searchTerm,
+            limit: 500,
+            includeObjectNames: schemaSearchIncludeObjectNames.value,
+            includeSource: schemaSearchIncludeSource.value,
+            includeDdl: schemaSearchIncludeDdl.value,
+          },
         },
-      });
+      );
       statusMessage.value = `Search complete. ${schemaSearchResults.value.length} match(es).`;
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
@@ -1688,7 +1885,9 @@ export function useClarityWorkspace() {
     }
   }
 
-  async function openSchemaSearchResult(match: OracleSchemaSearchResult): Promise<void> {
+  async function openSchemaSearchResult(
+    match: OracleSchemaSearchResult,
+  ): Promise<void> {
     await loadDdl(
       {
         schema: match.schema,

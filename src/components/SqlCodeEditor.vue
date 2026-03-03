@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { EditorView, keymap, placeholder as cmPlaceholder, type ViewUpdate } from "@codemirror/view";
+import {
+  EditorView,
+  keymap,
+  placeholder as cmPlaceholder,
+  type ViewUpdate,
+} from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { basicSetup } from "codemirror";
 import { sql } from "@codemirror/lang-sql";
@@ -50,65 +55,102 @@ const themeCompartment = new Compartment();
 const syntaxCompartment = new Compartment();
 
 function buildEditorTheme(theme: ThemeSetting): Extension {
-  return EditorView.theme({
-    "&": {
-      height: "100%",
-      border: "0",
-      background: "var(--editor-surface)",
+  return EditorView.theme(
+    {
+      "&": {
+        height: "100%",
+        border: "0",
+        background: "var(--editor-surface)",
+      },
+      ".cm-scroller": {
+        fontFamily: 'Consolas, "Courier New", monospace',
+        fontSize: "0.8rem",
+        lineHeight: "1.38",
+        color: "var(--editor-text)",
+      },
+      ".cm-content": {
+        padding: "0.44rem 0",
+        caretColor: "var(--editor-caret)",
+      },
+      ".cm-line": {
+        padding: "0 0.5rem",
+        color: "var(--editor-text)",
+      },
+      ".cm-gutters": {
+        borderRight: "1px solid var(--editor-gutter-border)",
+        background: "var(--editor-gutter-bg)",
+        color: "var(--editor-gutter-text)",
+      },
+      ".cm-activeLine": {
+        backgroundColor: "var(--editor-active-line)",
+      },
+      ".cm-activeLineGutter": {
+        backgroundColor: "var(--editor-active-gutter)",
+      },
+      ".cm-selectionBackground": {
+        backgroundColor: "var(--editor-selection)",
+      },
+      "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground":
+        {
+          backgroundColor: "var(--editor-selection-focused)",
+        },
+      ".cm-cursor": {
+        borderLeftColor: "var(--editor-caret)",
+      },
+      ".cm-placeholder": {
+        color: "var(--editor-placeholder)",
+      },
     },
-    ".cm-scroller": {
-      fontFamily: 'Consolas, "Courier New", monospace',
-      fontSize: "0.8rem",
-      lineHeight: "1.38",
-      color: "var(--editor-text)",
-    },
-    ".cm-content": {
-      padding: "0.44rem 0",
-      caretColor: "var(--editor-caret)",
-    },
-    ".cm-line": {
-      padding: "0 0.5rem",
-      color: "var(--editor-text)",
-    },
-    ".cm-gutters": {
-      borderRight: "1px solid var(--editor-gutter-border)",
-      background: "var(--editor-gutter-bg)",
-      color: "var(--editor-gutter-text)",
-    },
-    ".cm-activeLine": {
-      backgroundColor: "var(--editor-active-line)",
-    },
-    ".cm-activeLineGutter": {
-      backgroundColor: "var(--editor-active-gutter)",
-    },
-    ".cm-selectionBackground": {
-      backgroundColor: "var(--editor-selection)",
-    },
-    "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground": {
-      backgroundColor: "var(--editor-selection-focused)",
-    },
-    ".cm-cursor": {
-      borderLeftColor: "var(--editor-caret)",
-    },
-    ".cm-placeholder": {
-      color: "var(--editor-placeholder)",
-    },
-  }, { dark: theme === "dark" });
+    { dark: theme === "dark" },
+  );
 }
 
 function buildHighlightTheme(): Extension {
   return syntaxHighlighting(
     HighlightStyle.define([
-      { tag: [tags.keyword, tags.controlKeyword, tags.modifier], color: "var(--editor-token-keyword)" },
-      { tag: [tags.operator, tags.derefOperator], color: "var(--editor-token-operator)" },
-      { tag: [tags.string, tags.special(tags.string)], color: "var(--editor-token-string)" },
-      { tag: [tags.number, tags.bool, tags.null], color: "var(--editor-token-number)" },
-      { tag: [tags.comment, tags.lineComment, tags.blockComment], color: "var(--editor-token-comment)" },
-      { tag: [tags.typeName, tags.className, tags.namespace], color: "var(--editor-token-type)" },
-      { tag: [tags.variableName, tags.standard(tags.name)], color: "var(--editor-token-variable)" },
-      { tag: [tags.propertyName, tags.attributeName], color: "var(--editor-token-property)" },
-      { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: "var(--editor-token-function)" },
-      { tag: [tags.punctuation, tags.bracket, tags.paren], color: "var(--editor-text)" },
+      {
+        tag: [tags.keyword, tags.controlKeyword, tags.modifier],
+        color: "var(--editor-token-keyword)",
+      },
+      {
+        tag: [tags.operator, tags.derefOperator],
+        color: "var(--editor-token-operator)",
+      },
+      {
+        tag: [tags.string, tags.special(tags.string)],
+        color: "var(--editor-token-string)",
+      },
+      {
+        tag: [tags.number, tags.bool, tags.null],
+        color: "var(--editor-token-number)",
+      },
+      {
+        tag: [tags.comment, tags.lineComment, tags.blockComment],
+        color: "var(--editor-token-comment)",
+      },
+      {
+        tag: [tags.typeName, tags.className, tags.namespace],
+        color: "var(--editor-token-type)",
+      },
+      {
+        tag: [tags.variableName, tags.standard(tags.name)],
+        color: "var(--editor-token-variable)",
+      },
+      {
+        tag: [tags.propertyName, tags.attributeName],
+        color: "var(--editor-token-property)",
+      },
+      {
+        tag: [
+          tags.function(tags.variableName),
+          tags.function(tags.propertyName),
+        ],
+        color: "var(--editor-token-function)",
+      },
+      {
+        tag: [tags.punctuation, tags.bracket, tags.paren],
+        color: "var(--editor-text)",
+      },
     ]),
   );
 }
@@ -117,7 +159,10 @@ function buildPlaceholderExtension(value: string): Extension {
   return value ? cmPlaceholder(value) : [];
 }
 
-function buildLanguageExtension(completionSchema: SqlCompletionSchema | null, completionDefaultSchema: string): Extension {
+function buildLanguageExtension(
+  completionSchema: SqlCompletionSchema | null,
+  completionDefaultSchema: string,
+): Extension {
   const defaultSchema = completionDefaultSchema.trim().toUpperCase();
   if (!completionSchema || Object.keys(completionSchema).length < 1) {
     return sql({ upperCaseKeywords: true });
@@ -162,7 +207,10 @@ function buildShortcutExtensions(): Extension {
   ]);
 }
 
-function updateCompartment(compartment: Compartment, extension: Extension): void {
+function updateCompartment(
+  compartment: Compartment,
+  extension: Extension,
+): void {
   if (!editorView) {
     return;
   }
@@ -201,7 +249,12 @@ onMounted(() => {
         basicSetup,
         themeCompartment.of(buildEditorTheme(props.theme)),
         syntaxCompartment.of(buildHighlightTheme()),
-        languageCompartment.of(buildLanguageExtension(props.completionSchema, props.completionDefaultSchema)),
+        languageCompartment.of(
+          buildLanguageExtension(
+            props.completionSchema,
+            props.completionDefaultSchema,
+          ),
+        ),
         buildShortcutExtensions(),
         readOnlyCompartment.of(EditorState.readOnly.of(props.readOnly)),
         placeholderCompartment.of(buildPlaceholderExtension(props.placeholder)),
@@ -254,7 +307,10 @@ watch(
 watch(
   () => props.placeholder,
   (placeholderValue) => {
-    updateCompartment(placeholderCompartment, buildPlaceholderExtension(placeholderValue));
+    updateCompartment(
+      placeholderCompartment,
+      buildPlaceholderExtension(placeholderValue),
+    );
   },
 );
 
@@ -286,6 +342,19 @@ watch(
     revealLine(props.targetLine);
   },
 );
+
+function getSelectedText(): string {
+  if (!editorView) {
+    return "";
+  }
+
+  return editorView.state.sliceDoc(
+    editorView.state.selection.main.from,
+    editorView.state.selection.main.to,
+  );
+}
+
+defineExpose({ getSelectedText });
 
 onBeforeUnmount(() => {
   editorView?.destroy();
