@@ -47,7 +47,7 @@ const props = defineProps<{
   onRequestCreateObject: (objectType: string) => void;
 }>();
 
-const connectionPanelCollapsed = ref(props.isConnected);
+const showAdvancedConnectionOptions = ref(false);
 const createContextMenu = ref<{
   x: number;
   y: number;
@@ -81,19 +81,6 @@ const createContextMenuOptions = computed<CreateObjectTypeOption[]>(() => {
 
 watch(
   () => props.isConnected,
-  (isConnected, wasConnected) => {
-    if (isConnected && !wasConnected) {
-      connectionPanelCollapsed.value = true;
-      return;
-    }
-
-    if (!isConnected && wasConnected) {
-      connectionPanelCollapsed.value = false;
-    }
-  },
-);
-watch(
-  () => props.isConnected,
   (isConnected) => {
     if (!isConnected) {
       closeCreateContextMenu();
@@ -101,8 +88,12 @@ watch(
   },
 );
 
-function toggleConnectionPanel(): void {
-  connectionPanelCollapsed.value = !connectionPanelCollapsed.value;
+function onSelectedProfileChange(): void {
+  props.onSyncSelectedProfileUi();
+  if (!props.selectedProfile) {
+    return;
+  }
+  void props.onApplySelectedProfile();
 }
 
 function normalizeObjectType(value: string): string {
@@ -204,100 +195,184 @@ onBeforeUnmount(() => {
 
     <section class="connect-box">
       <div class="connect-heading">
-        <div class="connect-title">Database Connection</div>
-        <button
-          class="btn connect-toggle"
-          type="button"
-          :title="connectionPanelCollapsed ? 'Show connection panel' : 'Hide connection panel'"
-          :aria-expanded="!connectionPanelCollapsed"
-          aria-controls="connection-panel-body"
-          @click="toggleConnectionPanel"
-        >
-          <AppIcon
-            name="chevron-right"
-            class="connect-toggle-icon"
-            :class="{ expanded: !connectionPanelCollapsed }"
-            aria-hidden="true"
-          />
-        </button>
+        <div class="connect-title-wrap">
+          <div class="connect-title">Database Connection</div>
+          <div class="session-line">
+            {{ props.session ? props.session.displayName : "No active connection" }}
+          </div>
+        </div>
+        <span class="connect-state-pill" :class="{ connected: props.isConnected }">
+          {{ props.isConnected ? "Connected" : "Offline" }}
+        </span>
       </div>
 
-      <div class="session-line">
-        {{ props.session ? props.session.displayName : "No active connection" }}
-      </div>
+      <div class="connect-body">
+        <div class="connect-actions">
+          <button
+            class="btn primary btn-connect"
+            :disabled="props.busy.connecting"
+            @click="props.isConnected ? props.onDisconnect() : props.onConnect()"
+          >
+            <AppIcon :name="props.isConnected ? 'plug-off' : 'plug'" class="btn-icon" aria-hidden="true" />
+            {{
+              props.busy.connecting
+                ? "Connecting..."
+                : props.isConnected
+                  ? "Disconnect"
+                  : "Connect"
+            }}
+          </button>
+          <button class="btn" :disabled="!props.isConnected || props.busy.loadingObjects" @click="props.onRefreshObjects">
+            <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
+            {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
+          </button>
+        </div>
 
-      <div v-show="!connectionPanelCollapsed" id="connection-panel-body" class="connect-body">
-        <div class="profile-controls">
-          <label>
-            Profiles
-            <select v-model="selectedProfileId" @change="props.onSyncSelectedProfileUi">
+        <div class="connection-core-fields">
+          <div class="field-grid">
+            <label>
+              Host
+              <input
+                v-model.trim="props.connection.host"
+                placeholder="db.example.com"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+
+            <label>
+              Service
+              <input
+                v-model.trim="props.connection.serviceName"
+                placeholder="XEPDB1"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+
+            <label>
+              Username
+              <input
+                v-model.trim="props.connection.username"
+                placeholder="hr"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+
+            <label>
+              Schema
+              <input
+                v-model.trim="props.connection.schema"
+                placeholder="HR"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+
+            <label>
+              Password
+              <input
+                v-model="props.connection.password"
+                type="password"
+                placeholder="********"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div class="profile-inline">
+          <label class="profile-select">
+            Profile
+            <select
+              v-model="selectedProfileId"
+              :disabled="props.busy.loadingProfiles || props.busy.loadingProfileSecret"
+              @change="onSelectedProfileChange"
+            >
               <option value="">(Select profile)</option>
               <option v-for="profile in props.connectionProfiles" :key="profile.id" :value="profile.id">
                 {{ profile.name }}
               </option>
             </select>
           </label>
-          <div class="profile-actions">
-            <button
-              class="btn"
-              :disabled="!props.selectedProfile || props.busy.loadingProfileSecret || props.busy.loadingProfiles"
-              @click="props.onApplySelectedProfile"
-            >
-              {{ props.busy.loadingProfileSecret ? "Loading..." : "Load Profile" }}
-            </button>
-            <button
-              class="btn"
-              :disabled="!props.selectedProfile || props.busy.deletingProfile"
-              @click="props.onDeleteSelectedProfile"
-            >
-              {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
-            </button>
-          </div>
-          <label>
-            Profile Name
-            <input
-              v-model.trim="profileName"
-              placeholder="Local Oracle Dev"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-          <label class="profile-password-toggle">
-            <input v-model="saveProfilePassword" type="checkbox" />
-            Save password in OS keychain
-          </label>
-          <button class="btn" :disabled="props.busy.savingProfile" @click="props.onSaveConnectionProfile">
-            {{ props.busy.savingProfile ? "Saving..." : "Save Profile" }}
-          </button>
+          <details class="profile-details">
+            <summary class="btn profile-manage-toggle">
+              <AppIcon
+                name="chevron-right"
+                class="connect-toggle-icon"
+                aria-hidden="true"
+              />
+              Manage profiles
+            </summary>
+
+            <div class="profile-controls">
+              <label>
+                Profile Name
+                <input
+                  v-model.trim="profileName"
+                  placeholder="Local Oracle Dev"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  data-gramm="false"
+                />
+              </label>
+              <div class="profile-save-row">
+                <label class="profile-password-toggle">
+                  <input v-model="saveProfilePassword" type="checkbox" />
+                  Save password in OS keychain
+                </label>
+                <div class="profile-actions">
+                  <button class="btn" :disabled="props.busy.savingProfile" @click="props.onSaveConnectionProfile">
+                    {{ props.busy.savingProfile ? "Saving..." : "Save" }}
+                  </button>
+                  <button
+                    class="btn"
+                    :disabled="!props.selectedProfile || props.busy.deletingProfile"
+                    @click="props.onDeleteSelectedProfile"
+                  >
+                    {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
 
-        <div class="field-grid">
-          <label>
-            Provider
-            <select v-model="props.connection.provider">
-              <option value="oracle">Oracle</option>
-              <option value="postgres" disabled>PostgreSQL (Soon)</option>
-              <option value="mysql" disabled>MySQL (Soon)</option>
-              <option value="sqlite" disabled>SQLite (Soon)</option>
-            </select>
-          </label>
+        <button
+          class="btn connect-advanced-toggle"
+          type="button"
+          :aria-expanded="showAdvancedConnectionOptions"
+          @click="showAdvancedConnectionOptions = !showAdvancedConnectionOptions"
+        >
+          <AppIcon
+            name="chevron-right"
+            class="connect-toggle-icon"
+            :class="{ expanded: showAdvancedConnectionOptions }"
+            aria-hidden="true"
+          />
+          {{ showAdvancedConnectionOptions ? "Hide advanced options" : "Show advanced options" }}
+        </button>
 
-          <label>
-            Host
-            <input
-              v-model.trim="props.connection.host"
-              placeholder="db.example.com"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
+        <div v-show="showAdvancedConnectionOptions" class="field-grid advanced-grid">
           <label>
             Port
             <input
@@ -313,32 +388,6 @@ onBeforeUnmount(() => {
             />
           </label>
 
-          <label>
-            Service
-            <input
-              v-model.trim="props.connection.serviceName"
-              placeholder="XEPDB1"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label>
-            Username
-            <input
-              v-model.trim="props.connection.username"
-              placeholder="hr"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
           <label v-if="props.connection.provider === 'oracle'">
             Auth Mode
             <select v-model="props.connection.oracleAuthMode">
@@ -346,48 +395,6 @@ onBeforeUnmount(() => {
               <option value="sysdba">SYSDBA</option>
             </select>
           </label>
-
-          <label>
-            Schema
-            <input
-              v-model.trim="props.connection.schema"
-              placeholder="HR"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label>
-            Password
-            <input
-              v-model="props.connection.password"
-              type="password"
-              placeholder="********"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-        </div>
-
-        <div class="connect-actions">
-          <button class="btn primary" :disabled="props.busy.connecting || props.isConnected" @click="props.onConnect">
-            <AppIcon name="plug" class="btn-icon" aria-hidden="true" />
-            {{ props.busy.connecting ? "Connecting..." : "Connect" }}
-          </button>
-          <button class="btn" :disabled="!props.isConnected" @click="props.onDisconnect">
-            <AppIcon name="plug-off" class="btn-icon" aria-hidden="true" />
-            Disconnect
-          </button>
-          <button class="btn" :disabled="!props.isConnected || props.busy.loadingObjects" @click="props.onRefreshObjects">
-            <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
-            {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
-          </button>
         </div>
         <p v-if="props.connectionError" class="connect-error">{{ props.connectionError }}</p>
       </div>
@@ -501,18 +508,33 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
+.connect-title-wrap {
+  min-width: 0;
+}
+
 .connect-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.45rem;
 }
 
-.connect-toggle {
-  padding: 0.2rem;
-  min-width: 1.55rem;
-  min-height: 1.55rem;
-  justify-content: center;
+.connect-state-pill {
+  border-radius: 999px;
+  border: 1px solid var(--control-border);
+  background: var(--bg-surface-muted);
+  color: var(--text-secondary);
+  padding: 0.08rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.connect-state-pill.connected {
+  border-color: var(--success, #3fb980);
+  color: var(--success, #3fb980);
 }
 
 .connect-toggle-icon {
@@ -528,18 +550,71 @@ onBeforeUnmount(() => {
 
 .connect-body {
   margin-top: 0.45rem;
+  display: grid;
+  gap: 0.48rem;
+}
+
+.connection-core-fields {
+  padding: 0.42rem;
+  border-radius: 8px;
+  background: var(--bg-surface-muted);
+  border: 1px solid var(--panel-separator);
+}
+
+.profile-inline {
+  display: grid;
+  gap: 0.34rem;
+}
+
+.profile-select {
+  min-width: 0;
+}
+
+.profile-details {
+  min-width: 0;
+}
+
+.profile-details > summary {
+  list-style: none;
+}
+
+.profile-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.profile-details[open] .connect-toggle-icon {
+  transform: rotate(90deg);
 }
 
 .profile-controls {
   display: grid;
   gap: 0.38rem;
-  margin-bottom: 0.52rem;
-  padding-bottom: 0.52rem;
-  border-bottom: 1px solid var(--panel-separator);
+  padding: 0.42rem;
+  border-radius: 8px;
+  background: var(--bg-surface-muted);
+  border: 1px solid var(--panel-separator);
 }
 
 .profile-actions {
   display: flex;
+  gap: 0.34rem;
+  justify-content: flex-end;
+}
+
+.profile-manage-toggle {
+  width: fit-content;
+  white-space: nowrap;
+  justify-content: flex-start;
+}
+
+.profile-details > .profile-controls {
+  margin-top: 0.34rem;
+}
+
+.profile-save-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
   gap: 0.34rem;
 }
 
@@ -549,6 +624,7 @@ onBeforeUnmount(() => {
   gap: 0.4rem;
   font-size: 0.74rem;
   color: var(--text-secondary);
+  min-width: 0;
 }
 
 .profile-password-toggle input {
@@ -598,13 +674,25 @@ button:focus-visible {
 }
 
 .connect-actions {
-  margin-top: 0.45rem;
   display: flex;
   gap: 0.34rem;
 }
 
+.btn-connect {
+  flex: 1;
+  justify-content: center;
+}
+
+.connect-advanced-toggle {
+  justify-content: flex-start;
+}
+
+.advanced-grid {
+  padding-top: 0.1rem;
+}
+
 .connect-error {
-  margin: 0.4rem 0 0;
+  margin: 0;
   color: var(--danger);
   font-size: 0.69rem;
   line-height: 1.28;
@@ -653,7 +741,7 @@ button:focus-visible {
 }
 
 .session-line {
-  margin-top: 0.24rem;
+  margin-top: 0.12rem;
   font-size: 0.69rem;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -799,6 +887,11 @@ button:focus-visible {
   .explorer-sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--panel-separator);
+  }
+
+  .profile-save-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .field-grid {
