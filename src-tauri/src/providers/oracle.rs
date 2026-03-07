@@ -1,9 +1,9 @@
 use crate::{
     DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
+    OracleAuthMode, OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
     OracleQueryResult,
 };
-use oracle::{Connection, Error as OracleError, InitParams, SqlValue};
+use oracle::{Connection, Connector, Error as OracleError, InitParams, Privilege, SqlValue};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -34,20 +34,53 @@ pub(crate) fn connect(
     let schema = normalize_schema_name(&request.schema)?;
 
     let connect_string = format!("//{}:{}/{}", host, port, service_name);
-    let connection = Connection::connect(username, password, &connect_string)
-        .map_err(|error| map_connect_error(error, host, port, service_name))?;
+    let connection = connect_with_mode(
+        username,
+        password,
+        connect_string.as_str(),
+        request.oracle_auth_mode,
+    )
+    .map_err(|error| map_connect_error(error, host, port, service_name))?;
     let alter_schema_sql = format!("ALTER SESSION SET CURRENT_SCHEMA = {}", schema);
     connection
         .execute(alter_schema_sql.as_str(), &[])
         .map_err(map_oracle_error)?;
 
-    let display_name = format!("{}@{} [{}]", username, connect_string, schema);
+    let display_name = format!(
+        "{}@{} [{}]",
+        format_oracle_user_label(username, request.oracle_auth_mode),
+        connect_string,
+        schema
+    );
     let session = OracleSession {
         connection,
         target_schema: schema.clone(),
     };
 
     Ok((session, display_name, schema))
+}
+
+fn connect_with_mode(
+    username: &str,
+    password: &str,
+    connect_string: &str,
+    auth_mode: OracleAuthMode,
+) -> Result<Connection, OracleError> {
+    match auth_mode {
+        OracleAuthMode::Normal => Connection::connect(username, password, connect_string),
+        OracleAuthMode::Sysdba => {
+            let mut connector = Connector::new(username, password, connect_string);
+            connector.privilege(Privilege::Sysdba);
+            connector.connect()
+        }
+    }
+}
+
+fn format_oracle_user_label(username: &str, auth_mode: OracleAuthMode) -> String {
+    match auth_mode {
+        OracleAuthMode::Normal => username.to_string(),
+        OracleAuthMode::Sysdba => format!("{username} as SYSDBA"),
+    }
 }
 
 pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<OracleObjectEntry>, String> {
@@ -408,6 +441,10 @@ pub(crate) fn run_query(
         return Err("Query cannot be empty".to_string());
     }
 
+    if let Some(show_result) = try_run_show_command(session, request) {
+        return show_result;
+    }
+
     let mut statement = session
         .connection
         .statement(sql)
@@ -489,6 +526,212 @@ pub(crate) fn run_query(
         rows_affected: Some(rows_affected),
         message,
     })
+}
+
+fn try_run_show_command(
+    session: &OracleSession,
+    request: &OracleQueryRequest,
+) -> Option<Result<OracleQueryResult, String>> {
+    let sql = request.sql.trim();
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut parts = trimmed.split_whitespace();
+    let first = parts.next()?;
+    if !first.eq_ignore_ascii_case("SHOW") {
+        return None;
+    }
+
+    let Some(command) = parts.next() else {
+        return Some(Err(
+            "SHOW command requires an option. Supported: SHOW CON_NAME, SHOW USER, SHOW PDBS, SHOW PARAMETER <filter>.".to_string(),
+        ));
+    };
+
+    let row_limit = effective_query_row_limit(request);
+    let remainder = parts.collect::<Vec<_>>().join(" ");
+    let command_upper = command.to_ascii_uppercase();
+    let result = match command_upper.as_str() {
+        "CON_NAME" => {
+            if !remainder.is_empty() {
+                Err("SHOW CON_NAME does not accept extra arguments.".to_string())
+            } else {
+                run_show_con_name(session)
+            }
+        }
+        "USER" => {
+            if !remainder.is_empty() {
+                Err("SHOW USER does not accept extra arguments.".to_string())
+            } else {
+                run_show_user(session)
+            }
+        }
+        "PDBS" => {
+            if !remainder.is_empty() {
+                Err("SHOW PDBS does not accept extra arguments.".to_string())
+            } else {
+                run_show_pdbs(session, row_limit)
+            }
+        }
+        "PARAMETER" | "PARAMETERS" => run_show_parameter(session, remainder.as_str(), row_limit),
+        _ => Err(format!(
+            "Unsupported SHOW command '{}'. Supported: SHOW CON_NAME, SHOW USER, SHOW PDBS, SHOW PARAMETER <filter>.",
+            trimmed
+        )),
+    };
+
+    Some(result)
+}
+
+fn run_show_con_name(session: &OracleSession) -> Result<OracleQueryResult, String> {
+    let sql = "SELECT SYS_CONTEXT('USERENV', 'CON_NAME') FROM DUAL";
+    let con_name = session
+        .connection
+        .query_row_as::<Option<String>>(sql, &[])
+        .map_err(map_oracle_error)?
+        .unwrap_or_default();
+
+    Ok(OracleQueryResult {
+        columns: vec!["CON_NAME".to_string()],
+        rows: vec![vec![con_name]],
+        rows_affected: None,
+        message: "SHOW CON_NAME executed.".to_string(),
+    })
+}
+
+fn run_show_user(session: &OracleSession) -> Result<OracleQueryResult, String> {
+    let sql = "SELECT USER FROM DUAL";
+    let user_name = session
+        .connection
+        .query_row_as::<Option<String>>(sql, &[])
+        .map_err(map_oracle_error)?
+        .unwrap_or_default();
+
+    Ok(OracleQueryResult {
+        columns: vec!["USER".to_string()],
+        rows: vec![vec![user_name]],
+        rows_affected: None,
+        message: "SHOW USER executed.".to_string(),
+    })
+}
+
+fn run_show_pdbs(session: &OracleSession, row_limit: usize) -> Result<OracleQueryResult, String> {
+    let sql = r#"
+        SELECT CON_ID, NAME AS CON_NAME, OPEN_MODE, RESTRICTED
+        FROM V$PDBS
+        ORDER BY CON_ID
+    "#;
+
+    let result_set = session.connection.query(sql, &[]).map_err(map_oracle_error)?;
+    let columns = result_set
+        .column_info()
+        .iter()
+        .map(|column| column.name().to_string())
+        .collect::<Vec<_>>();
+
+    let mut rows = Vec::new();
+    let mut truncated = false;
+    for (index, row_result) in result_set.enumerate() {
+        if index >= row_limit {
+            truncated = true;
+            break;
+        }
+
+        let row = row_result.map_err(map_oracle_error)?;
+        let values = row
+            .sql_values()
+            .iter()
+            .map(sql_value_to_string)
+            .collect::<Vec<_>>();
+        rows.push(values);
+    }
+
+    let mut message = format!("SHOW PDBS executed. Returned {} row(s).", rows.len());
+    if truncated {
+        message.push_str(&format!(" Results truncated at {} rows.", row_limit));
+    }
+
+    Ok(OracleQueryResult {
+        columns,
+        rows,
+        rows_affected: None,
+        message,
+    })
+}
+
+fn run_show_parameter(
+    session: &OracleSession,
+    filter: &str,
+    row_limit: usize,
+) -> Result<OracleQueryResult, String> {
+    let normalized_filter = normalize_show_parameter_filter(filter);
+    let sql = r#"
+        SELECT NAME, TYPE, VALUE, ISDEFAULT, ISSES_MODIFIABLE, ISSYS_MODIFIABLE
+        FROM V$PARAMETER
+        WHERE UPPER(NAME) LIKE UPPER(:1)
+        ORDER BY NAME
+    "#;
+
+    let result_set = session
+        .connection
+        .query(sql, &[&normalized_filter])
+        .map_err(map_oracle_error)?;
+    let columns = result_set
+        .column_info()
+        .iter()
+        .map(|column| column.name().to_string())
+        .collect::<Vec<_>>();
+
+    let mut rows = Vec::new();
+    let mut truncated = false;
+    for (index, row_result) in result_set.enumerate() {
+        if index >= row_limit {
+            truncated = true;
+            break;
+        }
+
+        let row = row_result.map_err(map_oracle_error)?;
+        let values = row
+            .sql_values()
+            .iter()
+            .map(sql_value_to_string)
+            .collect::<Vec<_>>();
+        rows.push(values);
+    }
+
+    let mut message = format!("SHOW PARAMETER executed. Returned {} row(s).", rows.len());
+    if truncated {
+        message.push_str(&format!(" Results truncated at {} rows.", row_limit));
+    }
+
+    Ok(OracleQueryResult {
+        columns,
+        rows,
+        rows_affected: None,
+        message,
+    })
+}
+
+fn normalize_show_parameter_filter(filter: &str) -> String {
+    let normalized = filter.trim().trim_matches(|ch| ch == '\'' || ch == '"');
+    if normalized.is_empty() {
+        return "%".to_string();
+    }
+
+    if normalized.contains('%') || normalized.contains('_') {
+        return normalized.to_string();
+    }
+
+    format!("%{}%", normalized)
+}
+
+fn effective_query_row_limit(request: &OracleQueryRequest) -> usize {
+    request
+        .row_limit
+        .unwrap_or(DEFAULT_QUERY_ROW_LIMIT)
+        .clamp(1, MAX_QUERY_ROW_LIMIT) as usize
 }
 
 fn normalize_schema_name(schema: &str) -> Result<String, String> {

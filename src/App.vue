@@ -5,6 +5,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import ExplorerSidebar from "./components/ExplorerSidebar.vue";
 import QueryResultsPane from "./components/QueryResultsPane.vue";
 import WorkspaceSheet from "./components/WorkspaceSheet.vue";
+import {
+  CREATE_OBJECT_TYPE_OPTIONS,
+  createObjectDefaultName,
+  normalizeCreateObjectType,
+} from "./constants/createObjectTemplates";
 import { useClarityWorkspace } from "./composables/useClarityWorkspace";
 import { usePaneLayout } from "./composables/usePaneLayout";
 import { useUserSettings } from "./composables/useUserSettings";
@@ -21,6 +26,7 @@ const EVENT_OPEN_EXPORT_DATABASE_DIALOG =
   "clarity://open-export-database-dialog";
 const EVENT_OPEN_SETTINGS_DIALOG = "clarity://open-settings-dialog";
 const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
+const EVENT_OPEN_CREATE_OBJECT_TEMPLATE = "clarity://open-create-object-template";
 const EVENT_SAVE_ACTIVE_QUERY_SHEET = "clarity://save-active-query-sheet";
 const EVENT_SAVE_ALL_QUERY_SHEETS = "clarity://save-all-query-sheets";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
@@ -171,6 +177,7 @@ const {
   closeQueryTab,
   closeDdlTab,
   openObjectFromExplorer,
+  openCreateObjectTemplate,
   activateObjectDetailTab,
   refreshActiveObjectDetail,
   updateActiveObjectDataRow,
@@ -197,16 +204,26 @@ const {
 
 const showExportDialog = ref(false);
 const showSettingsDialog = ref(false);
+const showCreateObjectDialog = ref(false);
 const exportSummaryMessage = ref("");
 const exportMenuUnlisten = ref<UnlistenFn | null>(null);
 const settingsMenuUnlisten = ref<UnlistenFn | null>(null);
 const searchMenuUnlisten = ref<UnlistenFn | null>(null);
+const createObjectMenuUnlisten = ref<UnlistenFn | null>(null);
 const saveActiveSheetMenuUnlisten = ref<UnlistenFn | null>(null);
 const saveAllSheetsMenuUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressProcessed = ref(0);
 const exportProgressTotal = ref(0);
 const exportProgressCurrentObject = ref("");
+const createObjectDialogType = ref(CREATE_OBJECT_TYPE_OPTIONS[0].value);
+const createObjectDialogName = ref(
+  createObjectDefaultName(CREATE_OBJECT_TYPE_OPTIONS[0].value),
+);
+const createObjectDialogPreviousDefaultName = ref(
+  createObjectDefaultName(CREATE_OBJECT_TYPE_OPTIONS[0].value),
+);
+const createObjectDialogError = ref("");
 const {
   settings,
   theme,
@@ -336,6 +353,10 @@ interface SchemaExportProgressPayload {
   exportedFiles: number;
   skippedCount: number;
   currentObject: string;
+}
+
+interface CreateObjectTemplatePayload {
+  objectType: string;
 }
 
 function extractReferencedTables(sql: string): Set<string> {
@@ -653,6 +674,61 @@ function openExportDialogFromMenu(): void {
   showExportDialog.value = true;
 }
 
+function openCreateObjectDialog(
+  preferredObjectType: string | null = null,
+): void {
+  const normalizedType =
+    normalizeCreateObjectType(preferredObjectType ?? "") ??
+    CREATE_OBJECT_TYPE_OPTIONS[0].value;
+  const defaultName = createObjectDefaultName(normalizedType);
+  createObjectDialogType.value = normalizedType;
+  createObjectDialogName.value = defaultName;
+  createObjectDialogPreviousDefaultName.value = defaultName;
+  createObjectDialogError.value = "";
+  showCreateObjectDialog.value = true;
+}
+
+function closeCreateObjectDialog(): void {
+  showCreateObjectDialog.value = false;
+  createObjectDialogError.value = "";
+}
+
+function onCreateObjectTypeChange(): void {
+  const nextDefault = createObjectDefaultName(createObjectDialogType.value);
+  const currentName = createObjectDialogName.value.trim().toUpperCase();
+  if (
+    !currentName ||
+    currentName === createObjectDialogPreviousDefaultName.value
+  ) {
+    createObjectDialogName.value = nextDefault;
+  }
+  createObjectDialogPreviousDefaultName.value = nextDefault;
+  createObjectDialogError.value = "";
+}
+
+function submitCreateObjectDialog(): void {
+  const normalizedType = normalizeCreateObjectType(createObjectDialogType.value);
+  if (!normalizedType) {
+    createObjectDialogError.value = "Choose a supported object type.";
+    return;
+  }
+
+  const objectName = createObjectDialogName.value.trim();
+  if (!objectName) {
+    createObjectDialogError.value = "Object name is required.";
+    return;
+  }
+
+  const opened = openCreateObjectTemplate(normalizedType, objectName);
+  if (!opened) {
+    createObjectDialogError.value =
+      errorMessage.value || "Unable to prepare object template.";
+    return;
+  }
+
+  closeCreateObjectDialog();
+}
+
 async function openSettingsDialog(): Promise<void> {
   settingsDialogTheme.value = theme.value;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
@@ -764,6 +840,14 @@ onMounted(() => {
   }).then((unlisten) => {
     searchMenuUnlisten.value = unlisten;
   });
+  void listen<CreateObjectTemplatePayload>(
+    EVENT_OPEN_CREATE_OBJECT_TEMPLATE,
+    (event) => {
+      openCreateObjectDialog(event.payload?.objectType ?? null);
+    },
+  ).then((unlisten) => {
+    createObjectMenuUnlisten.value = unlisten;
+  });
   void listen(EVENT_SAVE_ACTIVE_QUERY_SHEET, () => {
     void saveActiveQuerySheetToDisk();
   }).then((unlisten) => {
@@ -806,6 +890,10 @@ onBeforeUnmount(() => {
     searchMenuUnlisten.value();
     searchMenuUnlisten.value = null;
   }
+  if (createObjectMenuUnlisten.value) {
+    createObjectMenuUnlisten.value();
+    createObjectMenuUnlisten.value = null;
+  }
   if (saveActiveSheetMenuUnlisten.value) {
     saveActiveSheetMenuUnlisten.value();
     saveActiveSheetMenuUnlisten.value = null;
@@ -824,6 +912,7 @@ onBeforeUnmount(() => {
       v-model:profile-name="profileName"
       v-model:save-profile-password="saveProfilePassword"
       :connection="connection"
+      :connection-error="errorMessage"
       :connection-profiles="connectionProfiles"
       :selected-profile="selectedProfile"
       :busy="busy"
@@ -842,6 +931,8 @@ onBeforeUnmount(() => {
       :on-refresh-objects="refreshObjects"
       :on-toggle-object-type="toggleObjectType"
       :on-open-object-from-explorer="openObjectFromExplorer"
+      :create-object-types="CREATE_OBJECT_TYPE_OPTIONS"
+      :on-request-create-object="openCreateObjectDialog"
     />
 
     <div
@@ -933,6 +1024,71 @@ onBeforeUnmount(() => {
       />
     </section>
   </main>
+
+  <div
+    v-if="showCreateObjectDialog"
+    class="dialog-backdrop"
+    @click.self="closeCreateObjectDialog"
+  >
+    <section
+      class="dialog create-object-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="create-object-dialog-title"
+    >
+      <header class="dialog-header">
+        <h2 id="create-object-dialog-title" class="dialog-title">
+          Create Object
+        </h2>
+      </header>
+
+      <div class="dialog-body">
+        <label>
+          Object Type
+          <select
+            v-model="createObjectDialogType"
+            @change="onCreateObjectTypeChange"
+          >
+            <option
+              v-for="option in CREATE_OBJECT_TYPE_OPTIONS"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <label>
+          Object Name
+          <input
+            v-model.trim="createObjectDialogName"
+            placeholder="NEW_OBJECT"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            data-gramm="false"
+            @input="createObjectDialogError = ''"
+          />
+        </label>
+        <p class="muted">
+          A SQL template will open in a new query sheet for schema
+          <code>{{ connectedSchema }}</code>.
+        </p>
+      </div>
+
+      <p v-if="createObjectDialogError" class="settings-error">
+        {{ createObjectDialogError }}
+      </p>
+
+      <footer class="dialog-footer">
+        <button class="btn" @click="closeCreateObjectDialog">Cancel</button>
+        <button class="btn primary" @click="submitCreateObjectDialog">
+          Open Template
+        </button>
+      </footer>
+    </section>
+  </div>
 
   <div
     v-if="showSettingsDialog"
@@ -1182,12 +1338,12 @@ onBeforeUnmount(() => {
   --bg-hover: #eef3fb;
   --bg-active: #e4ecf9;
   --bg-selected: #dbe7fb;
-  --border: #dce3ee;
-  --border-strong: #c9d4e3;
-  --panel-separator: #dbe3ef;
-  --text-primary: #1f2938;
-  --text-secondary: #61728a;
-  --text-subtle: #8392a6;
+  --border: #c8d4e3;
+  --border-strong: #b7c6d9;
+  --panel-separator: #c6d3e3;
+  --text-primary: #172536;
+  --text-secondary: #445a74;
+  --text-subtle: #5f738d;
   --accent: #2f74d8;
   --accent-strong: #4686e5;
   --accent-contrast: #f3f8ff;
@@ -1196,9 +1352,9 @@ onBeforeUnmount(() => {
   --dialog-backdrop: rgba(26, 34, 46, 0.34);
   --dialog-shadow: 0 16px 36px rgba(0, 0, 0, 0.18);
   --splitter-hover: rgba(47, 116, 216, 0.24);
-  --control-bg: #f4f8fe;
-  --control-border: #d7e1ee;
-  --control-hover: #edf4fd;
+  --control-bg: #ffffff;
+  --control-border: #b7c7da;
+  --control-hover: #e7effa;
   --tab-active-bg: #ffffff;
   --tab-active-border: #d7e3f2;
   --table-divider: #e0e8f3;
@@ -1385,6 +1541,10 @@ body {
   display: grid;
   grid-template-rows: auto 1fr auto;
   max-height: min(85vh, 40rem);
+}
+
+.create-object-dialog {
+  width: min(28rem, 100%);
 }
 
 .dialog-header {

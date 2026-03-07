@@ -1176,7 +1176,6 @@ select,
 textarea,
 button {
   font: inherit;
-  color: inherit;
 }
 
 input,
@@ -1185,7 +1184,12 @@ textarea {
   border: 1px solid var(--control-border);
   border-radius: 6px;
   background: var(--control-bg);
+  color: var(--text-primary);
   padding: 0.38rem 0.45rem;
+}
+
+button {
+  color: var(--text-primary);
 }
 
 input:focus-visible,

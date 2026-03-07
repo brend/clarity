@@ -19,12 +19,37 @@ const MENU_ID_TOOLS_FIND_IN_SCHEMA: &str = "tools.find_in_schema";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
 const MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET: &str = "tools.save_active_query_sheet";
 const MENU_ID_TOOLS_SAVE_ALL_QUERY_SHEETS: &str = "tools.save_all_query_sheets";
+const MENU_ID_TOOLS_CREATE_OBJECT_TABLE: &str = "tools.create_object.table";
+const MENU_ID_TOOLS_CREATE_OBJECT_VIEW: &str = "tools.create_object.view";
+const MENU_ID_TOOLS_CREATE_OBJECT_PROCEDURE: &str = "tools.create_object.procedure";
+const MENU_ID_TOOLS_CREATE_OBJECT_FUNCTION: &str = "tools.create_object.function";
+const MENU_ID_TOOLS_CREATE_OBJECT_PACKAGE: &str = "tools.create_object.package";
+const MENU_ID_TOOLS_CREATE_OBJECT_PACKAGE_BODY: &str = "tools.create_object.package_body";
+const MENU_ID_TOOLS_CREATE_OBJECT_TRIGGER: &str = "tools.create_object.trigger";
+const MENU_ID_TOOLS_CREATE_OBJECT_SEQUENCE: &str = "tools.create_object.sequence";
+const MENU_ID_TOOLS_CREATE_OBJECT_TYPE: &str = "tools.create_object.type";
+const MENU_ID_TOOLS_CREATE_OBJECT_SYNONYM: &str = "tools.create_object.synonym";
 const EVENT_OPEN_SETTINGS_DIALOG: &str = "clarity://open-settings-dialog";
 const EVENT_OPEN_SCHEMA_SEARCH: &str = "clarity://open-schema-search";
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG: &str = "clarity://open-export-database-dialog";
+const EVENT_OPEN_CREATE_OBJECT_TEMPLATE: &str = "clarity://open-create-object-template";
 const EVENT_SAVE_ACTIVE_QUERY_SHEET: &str = "clarity://save-active-query-sheet";
 const EVENT_SAVE_ALL_QUERY_SHEETS: &str = "clarity://save-all-query-sheets";
 const EVENT_SCHEMA_EXPORT_PROGRESS: &str = "clarity://schema-export-progress";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateObjectTemplateEventPayload {
+    object_type: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+enum OracleAuthMode {
+    #[default]
+    Normal,
+    Sysdba,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +61,8 @@ struct DbConnectRequest {
     username: String,
     password: String,
     schema: String,
+    #[serde(default)]
+    oracle_auth_mode: OracleAuthMode,
     oracle_client_lib_dir: Option<String>,
 }
 
@@ -128,6 +155,8 @@ struct SaveConnectionProfileRequest {
     service_name: String,
     username: String,
     schema: String,
+    #[serde(default)]
+    oracle_auth_mode: OracleAuthMode,
     save_password: bool,
     password: Option<String>,
 }
@@ -152,6 +181,8 @@ struct ConnectionProfile {
     service_name: String,
     username: String,
     schema: String,
+    #[serde(default)]
+    oracle_auth_mode: OracleAuthMode,
     has_password: bool,
 }
 
@@ -166,6 +197,8 @@ struct StoredConnectionProfile {
     service_name: String,
     username: String,
     schema: String,
+    #[serde(default)]
+    oracle_auth_mode: OracleAuthMode,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -615,6 +648,7 @@ fn db_save_connection_profile(
         service_name: request.service_name.trim().to_string(),
         username: request.username.trim().to_string(),
         schema: request.schema.trim().to_uppercase(),
+        oracle_auth_mode: request.oracle_auth_mode,
     };
 
     if let Some(position) = profiles.iter().position(|profile| profile.id == id) {
@@ -1757,6 +1791,7 @@ fn to_connection_profile(profile: StoredConnectionProfile) -> ConnectionProfile 
         service_name: profile.service_name,
         username: profile.username,
         schema: profile.schema,
+        oracle_auth_mode: profile.oracle_auth_mode,
         has_password,
     }
 }
@@ -1831,6 +1866,93 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Shift+S"),
             )?;
+            let create_table = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_TABLE,
+                "Table",
+                true,
+                None::<&str>,
+            )?;
+            let create_view = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_VIEW,
+                "View",
+                true,
+                None::<&str>,
+            )?;
+            let create_procedure = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_PROCEDURE,
+                "Procedure",
+                true,
+                None::<&str>,
+            )?;
+            let create_function = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_FUNCTION,
+                "Function",
+                true,
+                None::<&str>,
+            )?;
+            let create_package = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_PACKAGE,
+                "Package",
+                true,
+                None::<&str>,
+            )?;
+            let create_package_body = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_PACKAGE_BODY,
+                "Package Body",
+                true,
+                None::<&str>,
+            )?;
+            let create_trigger = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_TRIGGER,
+                "Trigger",
+                true,
+                None::<&str>,
+            )?;
+            let create_sequence = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_SEQUENCE,
+                "Sequence",
+                true,
+                None::<&str>,
+            )?;
+            let create_type = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_TYPE,
+                "Type",
+                true,
+                None::<&str>,
+            )?;
+            let create_synonym = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_CREATE_OBJECT_SYNONYM,
+                "Synonym",
+                true,
+                None::<&str>,
+            )?;
+            let create_object_menu = tauri::menu::Submenu::with_items(
+                app,
+                "Create Object",
+                true,
+                &[
+                    &create_table,
+                    &create_view,
+                    &create_procedure,
+                    &create_function,
+                    &create_package,
+                    &create_package_body,
+                    &create_trigger,
+                    &create_sequence,
+                    &create_type,
+                    &create_synonym,
+                ],
+            )?;
             let settings = tauri::menu::MenuItem::with_id(
                 app,
                 MENU_ID_TOOLS_SETTINGS,
@@ -1859,6 +1981,7 @@ pub fn run() {
                 &[
                     &save_active_query_sheet,
                     &save_all_query_sheets,
+                    &create_object_menu,
                     &find_in_schema,
                     &export_database,
                     &settings,
@@ -1874,7 +1997,39 @@ pub fn run() {
             Ok(menu)
         })
         .on_menu_event(|app, event| {
-            if event.id() == MENU_ID_TOOLS_SETTINGS {
+            let create_object_type = if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_TABLE {
+                Some("TABLE")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_VIEW {
+                Some("VIEW")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_PROCEDURE {
+                Some("PROCEDURE")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_FUNCTION {
+                Some("FUNCTION")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_PACKAGE {
+                Some("PACKAGE")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_PACKAGE_BODY {
+                Some("PACKAGE BODY")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_TRIGGER {
+                Some("TRIGGER")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_SEQUENCE {
+                Some("SEQUENCE")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_TYPE {
+                Some("TYPE")
+            } else if event.id() == MENU_ID_TOOLS_CREATE_OBJECT_SYNONYM {
+                Some("SYNONYM")
+            } else {
+                None
+            };
+            if let Some(object_type) = create_object_type {
+                if let Err(error) = app.emit(
+                    EVENT_OPEN_CREATE_OBJECT_TEMPLATE,
+                    CreateObjectTemplateEventPayload {
+                        object_type: object_type.to_string(),
+                    },
+                ) {
+                    eprintln!("failed to emit create object template event: {error}");
+                }
+            } else if event.id() == MENU_ID_TOOLS_SETTINGS {
                 if let Err(error) = app.emit(EVENT_OPEN_SETTINGS_DIALOG, ()) {
                     eprintln!("failed to emit open settings event: {error}");
                 }

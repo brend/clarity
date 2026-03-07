@@ -1,4 +1,5 @@
 export type DatabaseProvider = "oracle" | "postgres" | "mysql" | "sqlite";
+export type OracleAuthMode = "normal" | "sysdba";
 
 export interface OracleConnectRequest {
   provider: DatabaseProvider;
@@ -8,6 +9,7 @@ export interface OracleConnectRequest {
   username: string;
   password: string;
   schema: string;
+  oracleAuthMode: OracleAuthMode;
   oracleClientLibDir?: string;
 }
 
@@ -42,6 +44,7 @@ export interface ConnectionProfile {
   serviceName: string;
   username: string;
   schema: string;
+  oracleAuthMode: OracleAuthMode;
   hasPassword: boolean;
 }
 

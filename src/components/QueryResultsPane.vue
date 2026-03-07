@@ -272,58 +272,68 @@ onBeforeUnmount(() => {
     <div ref="resultsContentEl" class="results-content" @scroll="onResultsScroll">
       <p v-if="!activePane || !activePane.queryResult" class="muted">{{ props.emptyStateMessage }}</p>
 
-      <p v-else-if="activePane.queryResult.rowsAffected !== null" class="muted">
-        Rows affected: {{ activePane.queryResult.rowsAffected }}
-      </p>
+      <template v-else>
+        <p v-if="activePane.errorMessage" class="results-error">
+          {{ activePane.errorMessage }}
+        </p>
 
-      <table v-else-if="activePane.queryResult.columns.length" class="results-table" :class="{ 'is-resizing': !!resizeState }">
-        <colgroup>
-          <col
-            v-for="(column, columnIndex) in activePane.queryResult.columns"
-            :key="`col-${column}-${columnIndex}`"
-            :style="{ width: `${getColumnWidth(columnIndex)}px` }"
-          />
-        </colgroup>
-        <thead>
-          <tr>
-            <th
+        <p v-if="activePane.queryResult.message" class="muted results-message">
+          {{ activePane.queryResult.message }}
+        </p>
+
+        <p v-if="activePane.queryResult.rowsAffected !== null" class="muted">
+          Rows affected: {{ activePane.queryResult.rowsAffected }}
+        </p>
+
+        <table v-if="activePane.queryResult.columns.length" class="results-table" :class="{ 'is-resizing': !!resizeState }">
+          <colgroup>
+            <col
               v-for="(column, columnIndex) in activePane.queryResult.columns"
-              :key="column"
+              :key="`col-${column}-${columnIndex}`"
+              :style="{ width: `${getColumnWidth(columnIndex)}px` }"
+            />
+          </colgroup>
+          <thead>
+            <tr>
+              <th
+                v-for="(column, columnIndex) in activePane.queryResult.columns"
+                :key="column"
+              >
+                <span class="results-cell-text" :title="column">{{ column }}</span>
+                <button
+                  class="results-col-resize-handle"
+                  type="button"
+                  tabindex="-1"
+                  aria-hidden="true"
+                  @mousedown="startColumnResize(columnIndex, $event)"
+                ></button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="topSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
+              <td :colspan="visibleColumnCount" :style="{ height: `${topSpacerHeight}px` }"></td>
+            </tr>
+            <tr
+              v-for="{ row, rowIndex } in visibleRows"
+              :key="`row-${rowIndex}`"
+              :data-result-row="rowIndex"
+              :class="{ 'results-row-alt': rowIndex % 2 === 1 }"
             >
-              <span class="results-cell-text" :title="column">{{ column }}</span>
-              <button
-                class="results-col-resize-handle"
-                type="button"
-                tabindex="-1"
-                aria-hidden="true"
-                @mousedown="startColumnResize(columnIndex, $event)"
-              ></button>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="topSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
-            <td :colspan="visibleColumnCount" :style="{ height: `${topSpacerHeight}px` }"></td>
-          </tr>
-          <tr
-            v-for="{ row, rowIndex } in visibleRows"
-            :key="`row-${rowIndex}`"
-            :data-result-row="rowIndex"
-            :class="{ 'results-row-alt': rowIndex % 2 === 1 }"
-          >
-            <td
-              v-for="(value, colIndex) in row"
-              :key="`col-${rowIndex}-${colIndex}`"
-              :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
-            >
-              <span class="results-cell-text" :title="value">{{ value }}</span>
-            </td>
-          </tr>
-          <tr v-if="bottomSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
-            <td :colspan="visibleColumnCount" :style="{ height: `${bottomSpacerHeight}px` }"></td>
-          </tr>
-        </tbody>
-      </table>
+              <td
+                v-for="(value, colIndex) in row"
+                :key="`col-${rowIndex}-${colIndex}`"
+                :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
+              >
+                <span class="results-cell-text" :title="value">{{ value }}</span>
+              </td>
+            </tr>
+            <tr v-if="bottomSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
+              <td :colspan="visibleColumnCount" :style="{ height: `${bottomSpacerHeight}px` }"></td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
     </div>
   </section>
 </template>
@@ -497,5 +507,17 @@ onBeforeUnmount(() => {
 .muted {
   color: var(--text-secondary);
   font-size: 0.71rem;
+}
+
+.results-message {
+  margin-bottom: 0.32rem;
+}
+
+.results-error {
+  color: var(--danger);
+  font-size: 0.72rem;
+  margin: 0 0 0.32rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 </style>

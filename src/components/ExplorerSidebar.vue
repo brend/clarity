@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import AppIcon from "./AppIcon.vue";
+import type { CreateObjectTypeOption } from "../constants/createObjectTemplates";
 import type {
   BusyState,
   ConnectionProfile,
@@ -16,6 +24,7 @@ const saveProfilePassword = defineModel<boolean>("saveProfilePassword", { requir
 
 const props = defineProps<{
   connection: OracleConnectRequest;
+  connectionError: string;
   connectionProfiles: ConnectionProfile[];
   selectedProfile: ConnectionProfile | null;
   busy: BusyState;
@@ -34,9 +43,41 @@ const props = defineProps<{
   onRefreshObjects: () => void;
   onToggleObjectType: (objectType: string) => void;
   onOpenObjectFromExplorer: (object: OracleObjectEntry) => void;
+  createObjectTypes: CreateObjectTypeOption[];
+  onRequestCreateObject: (objectType: string) => void;
 }>();
 
 const connectionPanelCollapsed = ref(props.isConnected);
+const createContextMenu = ref<{
+  x: number;
+  y: number;
+  preferredObjectType: string | null;
+} | null>(null);
+const createContextMenuEl = ref<HTMLElement | null>(null);
+
+const canOpenCreateContextMenu = computed(
+  () => props.isConnected && props.createObjectTypes.length > 0,
+);
+const createContextMenuOptions = computed<CreateObjectTypeOption[]>(() => {
+  const preferredType = createContextMenu.value?.preferredObjectType;
+  if (!preferredType) {
+    return props.createObjectTypes;
+  }
+
+  const preferredOption = props.createObjectTypes.find(
+    (option) => normalizeObjectType(option.value) === preferredType,
+  );
+  if (!preferredOption) {
+    return props.createObjectTypes;
+  }
+
+  return [
+    preferredOption,
+    ...props.createObjectTypes.filter(
+      (option) => option.value !== preferredOption.value,
+    ),
+  ];
+});
 
 watch(
   () => props.isConnected,
@@ -51,10 +92,110 @@ watch(
     }
   },
 );
+watch(
+  () => props.isConnected,
+  (isConnected) => {
+    if (!isConnected) {
+      closeCreateContextMenu();
+    }
+  },
+);
 
 function toggleConnectionPanel(): void {
   connectionPanelCollapsed.value = !connectionPanelCollapsed.value;
 }
+
+function normalizeObjectType(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function closeCreateContextMenu(): void {
+  createContextMenu.value = null;
+}
+
+function clampCreateContextMenuPosition(): void {
+  if (!createContextMenu.value || !createContextMenuEl.value) {
+    return;
+  }
+
+  const menuRect = createContextMenuEl.value.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const margin = 8;
+  const clampedX = Math.min(
+    Math.max(createContextMenu.value.x, margin),
+    Math.max(margin, viewportWidth - menuRect.width - margin),
+  );
+  const clampedY = Math.min(
+    Math.max(createContextMenu.value.y, margin),
+    Math.max(margin, viewportHeight - menuRect.height - margin),
+  );
+  createContextMenu.value = {
+    ...createContextMenu.value,
+    x: clampedX,
+    y: clampedY,
+  };
+}
+
+async function openCreateContextMenu(
+  event: MouseEvent,
+  preferredObjectType: string | null,
+): Promise<void> {
+  event.preventDefault();
+  event.stopPropagation();
+  if (!canOpenCreateContextMenu.value) {
+    closeCreateContextMenu();
+    return;
+  }
+
+  createContextMenu.value = {
+    x: event.clientX,
+    y: event.clientY,
+    preferredObjectType: preferredObjectType
+      ? normalizeObjectType(preferredObjectType)
+      : null,
+  };
+  await nextTick();
+  clampCreateContextMenuPosition();
+}
+
+function requestCreateObject(objectType: string): void {
+  closeCreateContextMenu();
+  props.onRequestCreateObject(objectType);
+}
+
+function onGlobalPointerDown(event: MouseEvent): void {
+  if (!createContextMenu.value) {
+    return;
+  }
+
+  const target = event.target as Node | null;
+  if (target && createContextMenuEl.value?.contains(target)) {
+    return;
+  }
+
+  closeCreateContextMenu();
+}
+
+function onGlobalKeyDown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    closeCreateContextMenu();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("pointerdown", onGlobalPointerDown);
+  window.addEventListener("keydown", onGlobalKeyDown);
+  window.addEventListener("resize", closeCreateContextMenu);
+  window.addEventListener("blur", closeCreateContextMenu);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pointerdown", onGlobalPointerDown);
+  window.removeEventListener("keydown", onGlobalKeyDown);
+  window.removeEventListener("resize", closeCreateContextMenu);
+  window.removeEventListener("blur", closeCreateContextMenu);
+});
 </script>
 
 <template>
@@ -198,6 +339,14 @@ function toggleConnectionPanel(): void {
             />
           </label>
 
+          <label v-if="props.connection.provider === 'oracle'">
+            Auth Mode
+            <select v-model="props.connection.oracleAuthMode">
+              <option value="normal">Normal</option>
+              <option value="sysdba">SYSDBA</option>
+            </select>
+          </label>
+
           <label>
             Schema
             <input
@@ -240,10 +389,11 @@ function toggleConnectionPanel(): void {
             {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
           </button>
         </div>
+        <p v-if="props.connectionError" class="connect-error">{{ props.connectionError }}</p>
       </div>
     </section>
 
-    <section class="tree-area">
+    <section class="tree-area" @contextmenu="(event) => void openCreateContextMenu(event, null)">
       <div class="tree-caption">{{ props.connectedSchema }} Objects</div>
       <p v-if="!props.objectTree.length" class="muted">No objects loaded.</p>
       <ul v-else class="tree-root" role="tree" aria-label="Database object explorer">
@@ -258,6 +408,7 @@ function toggleConnectionPanel(): void {
             class="tree-row tree-type"
             :class="{ expanded: props.isObjectTypeExpanded(typeNode.objectType) }"
             @click="props.onToggleObjectType(typeNode.objectType)"
+            @contextmenu="(event) => void openCreateContextMenu(event, typeNode.objectType)"
           >
             <AppIcon name="chevron-right" class="tree-caret-icon" aria-hidden="true" />
             <span class="tree-type-label">
@@ -281,6 +432,7 @@ function toggleConnectionPanel(): void {
                     props.selectedObject?.objectType === entry.objectType,
                 }"
                 @click="props.onOpenObjectFromExplorer(entry)"
+                @contextmenu="(event) => void openCreateContextMenu(event, entry.objectType)"
               >
                 <AppIcon name="object" class="tree-leaf-icon" aria-hidden="true" />
                 <span>{{ entry.objectName }}</span>
@@ -290,6 +442,29 @@ function toggleConnectionPanel(): void {
         </li>
       </ul>
     </section>
+
+    <div
+      v-if="createContextMenu"
+      ref="createContextMenuEl"
+      class="explorer-context-menu"
+      :style="{
+        left: `${createContextMenu.x}px`,
+        top: `${createContextMenu.y}px`,
+      }"
+      role="menu"
+      aria-label="Create object"
+    >
+      <button
+        v-for="option in createContextMenuOptions"
+        :key="option.value"
+        class="explorer-context-menu-item"
+        type="button"
+        role="menuitem"
+        @click.stop="requestCreateObject(option.value)"
+      >
+        Create {{ option.label }}...
+      </button>
+    </div>
   </aside>
 </template>
 
@@ -399,7 +574,6 @@ select,
 textarea,
 button {
   font: inherit;
-  color: inherit;
 }
 
 input,
@@ -408,7 +582,12 @@ textarea {
   border: 1px solid var(--control-border);
   border-radius: 6px;
   background: var(--control-bg);
+  color: var(--text-primary);
   padding: 0.27rem 0.36rem;
+}
+
+button {
+  color: var(--text-primary);
 }
 
 input:focus-visible,
@@ -422,6 +601,15 @@ button:focus-visible {
   margin-top: 0.45rem;
   display: flex;
   gap: 0.34rem;
+}
+
+.connect-error {
+  margin: 0.4rem 0 0;
+  color: var(--danger);
+  font-size: 0.69rem;
+  line-height: 1.28;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .btn {
@@ -575,6 +763,36 @@ button:focus-visible {
 .muted {
   color: var(--text-secondary);
   font-size: 0.71rem;
+}
+
+.explorer-context-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 12.5rem;
+  padding: 0.26rem;
+  border-radius: 8px;
+  border: 1px solid var(--control-border);
+  background: var(--bg-surface);
+  box-shadow: var(--dialog-shadow);
+  display: grid;
+  gap: 0.12rem;
+}
+
+.explorer-context-menu-item {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 0.73rem;
+  text-align: left;
+  padding: 0.32rem 0.45rem;
+  cursor: pointer;
+}
+
+.explorer-context-menu-item:hover,
+.explorer-context-menu-item:focus-visible {
+  background: var(--control-hover);
+  outline: none;
 }
 
 @media (max-width: 980px) {

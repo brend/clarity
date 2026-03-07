@@ -1,5 +1,10 @@
 import { computed, reactive, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  buildCreateObjectTemplate,
+  normalizeCreateObjectName,
+  normalizeCreateObjectType,
+} from "../constants/createObjectTemplates";
 import type {
   BusyState,
   ConnectionProfile,
@@ -26,13 +31,6 @@ const OBJECT_DATA_PREVIEW_LIMIT = 500;
 const OBJECT_DATA_ROW_ID_COLUMN = "__CLARITY_ROWID__";
 const DEFAULT_QUERY_ROW_LIMIT = 1000;
 const MAX_QUERY_ROW_LIMIT = 10000;
-const SAFE_SQL_LEADING_KEYWORDS = new Set([
-  "SELECT",
-  "WITH",
-  "EXPLAIN",
-  "DESCRIBE",
-  "DESC",
-]);
 const NON_STANDALONE_SQL_KEYWORDS = new Set([
   "END",
   "EXCEPTION",
@@ -42,8 +40,6 @@ const NON_STANDALONE_SQL_KEYWORDS = new Set([
   "LOOP",
   "THEN",
 ]);
-const MUTATING_SQL_KEYWORD_PATTERN =
-  /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|RENAME|GRANT|REVOKE|COMMENT|BEGIN|DECLARE|CALL|EXECUTE)\b/g;
 
 interface PersistedQuerySheet {
   id: string;
@@ -125,18 +121,6 @@ function isLikelyNumeric(value: string): boolean {
   return /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(normalized);
 }
 
-function extractMutatingSqlKeywords(sql: string): string[] {
-  const normalized = sql
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/--.*$/gm, " ")
-    .replace(/'(?:''|[^'])*'/g, "''")
-    .replace(/"(?:\"\"|[^"])*"/g, '""')
-    .toUpperCase();
-
-  const matches = normalized.match(MUTATING_SQL_KEYWORD_PATTERN) ?? [];
-  return [...new Set(matches)];
-}
-
 function extractLeadingSqlKeyword(sql: string): string | null {
   const normalized = sql
     .replace(/\/\*[\s\S]*?\*\//g, " ")
@@ -145,32 +129,6 @@ function extractLeadingSqlKeyword(sql: string): string | null {
     .toUpperCase();
   const match = normalized.match(/^[A-Z]+/);
   return match ? match[0] : null;
-}
-
-function shouldConfirmBeforeExecution(sql: string): {
-  shouldConfirm: boolean;
-  reasons: string[];
-} {
-  const reasons = extractMutatingSqlKeywords(sql);
-  if (reasons.length > 0) {
-    return { shouldConfirm: true, reasons };
-  }
-
-  const leadingKeyword = extractLeadingSqlKeyword(sql);
-  if (!leadingKeyword) {
-    return { shouldConfirm: false, reasons: [] };
-  }
-
-  if (!SAFE_SQL_LEADING_KEYWORDS.has(leadingKeyword)) {
-    return { shouldConfirm: true, reasons: [leadingKeyword] };
-  }
-
-  return { shouldConfirm: false, reasons: [] };
-}
-
-function buildMutatingQueryPrompt(reasons: string[]): string {
-  const reasonList = reasons.slice(0, 4).join(", ");
-  return `This statement appears to modify data/schema (${reasonList}). Continue execution?`;
 }
 
 function removeSqlComments(sql: string): string {
@@ -322,34 +280,6 @@ function splitQueryTextForExecution(sql: string): string[] {
   }
 
   return candidates;
-}
-
-function collectExecutionPreflight(statements: string[]): {
-  shouldConfirm: boolean;
-  reasons: string[];
-} {
-  const reasons: string[] = [];
-  const seen = new Set<string>();
-
-  for (const statement of statements) {
-    const preflight = shouldConfirmBeforeExecution(statement);
-    if (!preflight.shouldConfirm) {
-      continue;
-    }
-
-    for (const reason of preflight.reasons) {
-      if (seen.has(reason)) {
-        continue;
-      }
-      seen.add(reason);
-      reasons.push(reason);
-    }
-  }
-
-  return {
-    shouldConfirm: reasons.length > 0,
-    reasons,
-  };
 }
 
 async function yieldUiFrame(): Promise<void> {
@@ -556,6 +486,7 @@ export function useClarityWorkspace() {
       ? (import.meta.env.VITE_ORACLE_PASSWORD ?? "")
       : "",
     schema: readDebugConnectionString(import.meta.env.VITE_ORACLE_SCHEMA, "HR"),
+    oracleAuthMode: "normal",
   });
   const profileName = ref("");
   const selectedProfileId = ref("");
@@ -918,6 +849,41 @@ export function useClarityWorkspace() {
 
     queryTabs.value.push(tab);
     activateWorkspaceTab(tab.id);
+  }
+
+  function openCreateObjectTemplate(
+    objectType: string,
+    objectName: string,
+  ): boolean {
+    const normalizedType = normalizeCreateObjectType(objectType);
+    if (!normalizedType) {
+      errorMessage.value = `Unsupported object type: ${objectType}`;
+      return false;
+    }
+
+    const normalizedName = normalizeCreateObjectName(normalizedType, objectName);
+    const schemaName =
+      connectedSchema.value.trim().toUpperCase() ||
+      connection.schema.trim().toUpperCase() ||
+      "APP";
+    const template = buildCreateObjectTemplate({
+      schema: schemaName,
+      objectType: normalizedType,
+      objectName: normalizedName,
+    });
+
+    addQueryTab();
+    const tab = activeQueryTab.value;
+    if (!tab) {
+      errorMessage.value = "Unable to open query tab for object template.";
+      return false;
+    }
+
+    tab.title = `Create ${normalizedType}: ${normalizedName}`;
+    tab.queryText = template;
+    errorMessage.value = "";
+    statusMessage.value = `Prepared ${normalizedType} template for ${schemaName}.${normalizedName}`;
+    return true;
   }
 
   function openSearchTab(focusInput = false): void {
@@ -1414,6 +1380,7 @@ export function useClarityWorkspace() {
     connection.serviceName = profile.serviceName;
     connection.username = profile.username;
     connection.schema = profile.schema;
+    connection.oracleAuthMode = profile.oracleAuthMode;
     connection.password = "";
     syncSelectedProfileUi();
 
@@ -1462,6 +1429,7 @@ export function useClarityWorkspace() {
             serviceName: connection.serviceName,
             username: connection.username,
             schema: connection.schema,
+            oracleAuthMode: connection.oracleAuthMode,
             savePassword: saveProfilePassword.value,
             password: saveProfilePassword.value ? connection.password : null,
           },
@@ -1779,19 +1747,7 @@ export function useClarityWorkspace() {
       return;
     }
 
-    const preflight = collectExecutionPreflight(statements);
-    let allowDestructive = false;
-    if (preflight.shouldConfirm) {
-      const shouldContinue = window.confirm(
-        buildMutatingQueryPrompt(preflight.reasons),
-      );
-      if (!shouldContinue) {
-        statusMessage.value = "Execution cancelled.";
-        return;
-      }
-
-      allowDestructive = true;
-    }
+    const allowDestructive = true;
 
     prepareQueryResultPanes(queryTab, statements.length);
     errorMessage.value = "";
@@ -1829,11 +1785,19 @@ export function useClarityWorkspace() {
       const failedPane = queryTab.resultPanes[completedStatements];
       if (failedPane) {
         failedPane.errorMessage = message;
+        failedPane.queryResult = {
+          columns: [],
+          rows: [],
+          rowsAffected: null,
+          message: `Execution failed: ${message}`,
+        };
         queryTab.activeResultPaneId = failedPane.id;
       }
       errorMessage.value = message;
       if (statements.length > 1) {
         statusMessage.value = `Execution stopped at statement ${completedStatements + 1} of ${statements.length}.`;
+      } else {
+        statusMessage.value = "Execution failed. See the error in Results.";
       }
     } finally {
       busy.runningQuery = false;
@@ -1986,6 +1950,7 @@ export function useClarityWorkspace() {
     closeQueryTab,
     closeDdlTab,
     openObjectFromExplorer,
+    openCreateObjectTemplate,
     activateObjectDetailTab,
     refreshActiveObjectDetail,
     updateActiveObjectDataRow,
