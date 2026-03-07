@@ -1974,18 +1974,17 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let tools_menu = tauri::menu::Submenu::with_items(
+            let query_menu = tauri::menu::Submenu::with_items(
                 app,
-                "Tools",
+                "Query",
                 true,
-                &[
-                    &save_active_query_sheet,
-                    &save_all_query_sheets,
-                    &create_object_menu,
-                    &find_in_schema,
-                    &export_database,
-                    &settings,
-                ],
+                &[&save_active_query_sheet, &save_all_query_sheets],
+            )?;
+            let database_menu = tauri::menu::Submenu::with_items(
+                app,
+                "Database",
+                true,
+                &[&create_object_menu, &find_in_schema, &export_database],
             )?;
             let menu = tauri::menu::Menu::default(app)?;
             let existing_items = menu.items()?;
@@ -1993,7 +1992,27 @@ pub fn run() {
                 .iter()
                 .position(|item| item.id() == tauri::menu::HELP_SUBMENU_ID)
                 .unwrap_or(existing_items.len());
-            menu.insert(&tools_menu, help_position)?;
+            #[cfg(target_os = "macos")]
+            let app_menu = existing_items.iter().find_map(|item| {
+                let submenu = item.as_submenu()?;
+                let text = submenu.text().ok()?;
+                if text == app.package_info().name {
+                    Some(submenu.clone())
+                } else {
+                    None
+                }
+            });
+            menu.insert(&query_menu, help_position)?;
+            menu.insert(&database_menu, help_position + 1)?;
+            #[cfg(target_os = "macos")]
+            if let Some(app_menu) = app_menu {
+                // Place Settings in the app menu where macOS users expect Preferences.
+                app_menu.insert(&settings, 1)?;
+            } else {
+                menu.insert(&settings, help_position + 2)?;
+            }
+            #[cfg(not(target_os = "macos"))]
+            menu.insert(&settings, help_position + 2)?;
             Ok(menu)
         })
         .on_menu_event(|app, event| {
