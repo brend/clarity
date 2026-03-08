@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { invoke } from "@tauri-apps/api/core";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { WorkspaceQueryResultPane } from "../types/clarity";
+import type { OracleQueryResult, WorkspaceQueryResultPane } from "../types/clarity";
 
 const props = defineProps<{
   resultPanes: WorkspaceQueryResultPane[];
@@ -33,10 +34,76 @@ type ColumnResizeState = {
   startWidth: number;
 };
 
+type SortDirection = "asc" | "desc";
+
+type SortState = {
+  columnIndex: number;
+  direction: SortDirection;
+};
+
+interface OracleFilteredQueryRequest {
+  sessionId: number;
+  sql: string;
+  rowLimit?: number;
+  globalSearch?: string;
+  columnFilters?: string[];
+}
+
 const columnWidths = ref<number[]>([]);
 const resizeState = ref<ColumnResizeState | null>(null);
-const activeColumns = computed<string[]>(() => activePane.value?.queryResult?.columns ?? []);
-const activeRows = computed<string[][]>(() => activePane.value?.queryResult?.rows ?? []);
+const paneSearchTerms = ref<Record<string, string>>({});
+const paneColumnFilters = ref<Record<string, string[]>>({});
+const paneSortStates = ref<Record<string, SortState | null>>({});
+const paneFilteredResults = ref<Record<string, OracleQueryResult | null>>({});
+const paneFilterLoading = ref<Record<string, boolean>>({});
+const paneFilterError = ref<Record<string, string>>({});
+const activePaneId = computed<string>(() => activePane.value?.id ?? "");
+const activeBaseResult = computed<OracleQueryResult | null>(
+  () => activePane.value?.queryResult ?? null,
+);
+const baseColumns = computed<string[]>(() => activeBaseResult.value?.columns ?? []);
+const baseRows = computed<string[][]>(() => activeBaseResult.value?.rows ?? []);
+const activeRemoteFilteredResult = computed<OracleQueryResult | null>(() => {
+  if (!activePaneId.value) {
+    return null;
+  }
+
+  return paneFilteredResults.value[activePaneId.value] ?? null;
+});
+const activeRemoteFilterLoading = computed<boolean>(() => {
+  if (!activePaneId.value) {
+    return false;
+  }
+
+  return paneFilterLoading.value[activePaneId.value] === true;
+});
+const activeRemoteFilterError = computed<string>(() => {
+  if (!activePaneId.value) {
+    return "";
+  }
+
+  return paneFilterError.value[activePaneId.value] ?? "";
+});
+const activeColumns = computed<string[]>(() => {
+  const hasLocalFilterCriteria =
+    currentSearchTerm.value.trim().length > 0 ||
+    currentColumnFilters.value.some((value) => value.trim().length > 0);
+  if (hasLocalFilterCriteria && activeRemoteFilteredResult.value) {
+    return activeRemoteFilteredResult.value.columns;
+  }
+
+  return baseColumns.value;
+});
+const activeRows = computed<string[][]>(() => {
+  const hasLocalFilterCriteria =
+    currentSearchTerm.value.trim().length > 0 ||
+    currentColumnFilters.value.some((value) => value.trim().length > 0);
+  if (hasLocalFilterCriteria && activeRemoteFilteredResult.value) {
+    return activeRemoteFilteredResult.value.rows;
+  }
+
+  return baseRows.value;
+});
 const visibleColumnCount = computed<number>(() => Math.max(1, activeColumns.value.length));
 const resultsContentEl = ref<HTMLElement | null>(null);
 const resultsScrollTop = ref(0);
@@ -45,14 +112,412 @@ const resultRowHeight = ref(DEFAULT_ROW_HEIGHT);
 let resizeRafId: number | null = null;
 let pendingResizePointerX: number | null = null;
 let resultsResizeObserver: ResizeObserver | null = null;
+let filterRefreshDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+let filterRefreshRequestToken = 0;
+
+function normalizeSearchText(value: string): string {
+  return value.toLocaleLowerCase();
+}
+
+function ensurePaneGridState(paneId: string, columnCount: number): void {
+  if (!(paneId in paneSearchTerms.value)) {
+    paneSearchTerms.value[paneId] = "";
+  }
+
+  const existingFilters = paneColumnFilters.value[paneId];
+  if (!existingFilters || existingFilters.length !== columnCount) {
+    paneColumnFilters.value[paneId] = Array.from(
+      { length: columnCount },
+      (_, index) => existingFilters?.[index] ?? "",
+    );
+  }
+
+  const existingSortState = paneSortStates.value[paneId];
+  if (existingSortState && existingSortState.columnIndex >= columnCount) {
+    paneSortStates.value[paneId] = null;
+  }
+}
 
 function resetColumnWidths(): void {
   columnWidths.value = activeColumns.value.map(() => DEFAULT_COLUMN_WIDTH);
 }
 
+const currentSearchTerm = computed<string>({
+  get: () => {
+    const paneId = activePaneId.value;
+    if (!paneId) {
+      return "";
+    }
+
+    return paneSearchTerms.value[paneId] ?? "";
+  },
+  set: (value) => {
+    const paneId = activePaneId.value;
+    if (!paneId) {
+      return;
+    }
+
+    paneSearchTerms.value[paneId] = value;
+  },
+});
+
+const currentColumnFilters = computed<string[]>(() => {
+  const paneId = activePaneId.value;
+  if (!paneId) {
+    return [];
+  }
+
+  return paneColumnFilters.value[paneId] ?? [];
+});
+
+const currentSortState = computed<SortState | null>(() => {
+  const paneId = activePaneId.value;
+  if (!paneId) {
+    return null;
+  }
+
+  return paneSortStates.value[paneId] ?? null;
+});
+
+const normalizedGlobalSearchTerm = computed<string>(() =>
+  normalizeSearchText(currentSearchTerm.value.trim()),
+);
+const normalizedColumnFilters = computed<string[]>(() =>
+  currentColumnFilters.value.map((value) => normalizeSearchText(value.trim())),
+);
+const hasActiveFilterCriteria = computed<boolean>(() => {
+  if (normalizedGlobalSearchTerm.value.length > 0) {
+    return true;
+  }
+
+  return normalizedColumnFilters.value.some((value) => value.length > 0);
+});
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unexpected error";
+  }
+}
+
+async function refreshServerFilteredRows(): Promise<void> {
+  const pane = activePane.value;
+  const paneId = activePaneId.value;
+  if (!paneId) {
+    return;
+  }
+
+  if (!hasActiveFilterCriteria.value) {
+    paneFilterLoading.value[paneId] = false;
+    paneFilterError.value[paneId] = "";
+    paneFilteredResults.value[paneId] = null;
+    return;
+  }
+
+  if (
+    !pane?.queryResult ||
+    !pane.sourceSql ||
+    !Number.isFinite(pane.sourceSessionId) ||
+    pane.sourceSessionId === null
+  ) {
+    paneFilterLoading.value[paneId] = false;
+    paneFilterError.value[paneId] = "";
+    paneFilteredResults.value[paneId] = null;
+    return;
+  }
+
+  const requestToken = ++filterRefreshRequestToken;
+  paneFilterLoading.value[paneId] = true;
+  paneFilterError.value[paneId] = "";
+  paneFilteredResults.value[paneId] = null;
+
+  const request: OracleFilteredQueryRequest = {
+    sessionId: pane.sourceSessionId,
+    sql: pane.sourceSql,
+    rowLimit: pane.sourceRowLimit ?? undefined,
+    globalSearch: currentSearchTerm.value.trim() || undefined,
+    columnFilters: currentColumnFilters.value.map((value) => value.trim()),
+  };
+
+  try {
+    const result = await invoke<OracleQueryResult>("db_run_query_filtered", {
+      request,
+    });
+    if (requestToken !== filterRefreshRequestToken) {
+      return;
+    }
+
+    paneFilteredResults.value[paneId] = result;
+  } catch (error) {
+    if (requestToken !== filterRefreshRequestToken) {
+      return;
+    }
+
+    paneFilterError.value[paneId] = toErrorMessage(error);
+    paneFilteredResults.value[paneId] = null;
+  } finally {
+    if (requestToken === filterRefreshRequestToken) {
+      paneFilterLoading.value[paneId] = false;
+    }
+  }
+}
+
+const filteredRows = computed<Array<{ row: string[]; sourceRowIndex: number }>>(() => {
+  if (!activeRows.value.length) {
+    return [];
+  }
+
+  const globalTerm = normalizedGlobalSearchTerm.value;
+  const columnFilters = normalizedColumnFilters.value;
+
+  return activeRows.value
+    .map((row, sourceRowIndex) => ({ row, sourceRowIndex }))
+    .filter(({ row }) => {
+      if (globalTerm) {
+        const matchesGlobalSearch = row.some((value) =>
+          normalizeSearchText(value ?? "").includes(globalTerm),
+        );
+        if (!matchesGlobalSearch) {
+          return false;
+        }
+      }
+
+      for (let columnIndex = 0; columnIndex < columnFilters.length; columnIndex += 1) {
+        const filterTerm = columnFilters[columnIndex];
+        if (!filterTerm) {
+          continue;
+        }
+
+        const cellValue = normalizeSearchText(row[columnIndex] ?? "");
+        if (!cellValue.includes(filterTerm)) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+});
+
+function compareCellValues(leftValue: string | undefined, rightValue: string | undefined): number {
+  const left = (leftValue ?? "").trim();
+  const right = (rightValue ?? "").trim();
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+
+  if (
+    left.length > 0 &&
+    right.length > 0 &&
+    Number.isFinite(leftNumber) &&
+    Number.isFinite(rightNumber)
+  ) {
+    return leftNumber - rightNumber;
+  }
+
+  return left.localeCompare(right, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+const filteredAndSortedRows = computed<Array<{ row: string[]; sourceRowIndex: number }>>(() => {
+  const rows = [...filteredRows.value];
+  const sortState = currentSortState.value;
+  if (!sortState) {
+    return rows;
+  }
+
+  const directionMultiplier = sortState.direction === "asc" ? 1 : -1;
+  return rows.sort((left, right) => {
+    const comparison = compareCellValues(
+      left.row[sortState.columnIndex],
+      right.row[sortState.columnIndex],
+    );
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    return left.sourceRowIndex - right.sourceRowIndex;
+  });
+});
+
+const visibleRowCount = computed<number>(() => filteredAndSortedRows.value.length);
+const hasFilteredRows = computed<boolean>(() => visibleRowCount.value > 0);
+const hasActiveColumnFilters = computed<boolean>(() =>
+  currentColumnFilters.value.some((value) => value.trim().length > 0),
+);
+const canClearGridTools = computed<boolean>(
+  () =>
+    currentSearchTerm.value.trim().length > 0 ||
+    hasActiveColumnFilters.value ||
+    currentSortState.value !== null,
+);
+const canExportCsv = computed<boolean>(() => activeColumns.value.length > 0);
+const rowSummaryLabel = computed<string>(() => {
+  if (hasActiveFilterCriteria.value && activeRemoteFilterLoading.value) {
+    return "Filtering...";
+  }
+
+  const totalRows = activeRows.value.length;
+  const shownRows = visibleRowCount.value;
+  const rowLabel = shownRows === 1 ? "row" : "rows";
+
+  if (hasActiveFilterCriteria.value) {
+    return `${shownRows} filtered ${rowLabel}`;
+  }
+
+  if (shownRows === totalRows) {
+    return `${shownRows} ${rowLabel}`;
+  }
+
+  return `${shownRows} of ${totalRows} rows`;
+});
+
+function setCurrentSortState(nextSortState: SortState | null): void {
+  const paneId = activePaneId.value;
+  if (!paneId) {
+    return;
+  }
+
+  paneSortStates.value[paneId] = nextSortState;
+}
+
+function toggleColumnSort(columnIndex: number): void {
+  const sortState = currentSortState.value;
+  if (!sortState || sortState.columnIndex !== columnIndex) {
+    setCurrentSortState({
+      columnIndex,
+      direction: "asc",
+    });
+    return;
+  }
+
+  if (sortState.direction === "asc") {
+    setCurrentSortState({
+      columnIndex,
+      direction: "desc",
+    });
+    return;
+  }
+
+  setCurrentSortState(null);
+}
+
+function getColumnSortIndicator(columnIndex: number): string {
+  const sortState = currentSortState.value;
+  if (!sortState || sortState.columnIndex !== columnIndex) {
+    return "";
+  }
+
+  return sortState.direction === "asc" ? "^" : "v";
+}
+
+function getColumnSortLabel(column: string, columnIndex: number): string {
+  const sortState = currentSortState.value;
+  if (!sortState || sortState.columnIndex !== columnIndex) {
+    return `Sort ${column} ascending`;
+  }
+
+  if (sortState.direction === "asc") {
+    return `Sort ${column} descending`;
+  }
+
+  return `Clear sort for ${column}`;
+}
+
+function onColumnFilterInput(columnIndex: number, event: Event): void {
+  const paneId = activePaneId.value;
+  if (!paneId) {
+    return;
+  }
+
+  const target = event.target as HTMLInputElement | null;
+  if (!target) {
+    return;
+  }
+
+  ensurePaneGridState(paneId, baseColumns.value.length);
+  const nextFilters = [...(paneColumnFilters.value[paneId] ?? [])];
+  nextFilters[columnIndex] = target.value;
+  paneColumnFilters.value[paneId] = nextFilters;
+}
+
+function clearGridTools(): void {
+  const paneId = activePaneId.value;
+  if (!paneId) {
+    return;
+  }
+
+  paneSearchTerms.value[paneId] = "";
+  paneSortStates.value[paneId] = null;
+  paneColumnFilters.value[paneId] = baseColumns.value.map(() => "");
+}
+
+function toCsvCell(value: string): string {
+  if (/["\r\n,]/.test(value)) {
+    return `"${value.replace(/"/g, "\"\"")}"`;
+  }
+
+  return value;
+}
+
+function sanitizeFileNameSegment(value: string): string {
+  return (
+    value
+      .trim()
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "results"
+  );
+}
+
+function exportCsv(): void {
+  if (!canExportCsv.value || !activePane.value) {
+    return;
+  }
+
+  const columns = activeColumns.value;
+  const csvRows = filteredAndSortedRows.value.map(({ row }) =>
+    columns.map((_, columnIndex) => row[columnIndex] ?? ""),
+  );
+  const csvLines = [
+    columns.map((value) => toCsvCell(value)).join(","),
+    ...csvRows.map((row) => row.map((value) => toCsvCell(value)).join(",")),
+  ];
+  const csvText = `${csvLines.join("\r\n")}\r\n`;
+  const blob = new Blob([csvText], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/:/g, "-")
+    .replace(/\.\d{3}Z$/, "Z");
+  const fileName = `${sanitizeFileNameSegment(activePane.value.title)}-${timestamp}.csv`;
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 watch(
-  () => [activePane.value?.id ?? "", activeColumns.value.length],
+  () => [activePaneId.value, baseColumns.value.length],
   () => {
+    if (activePaneId.value) {
+      ensurePaneGridState(activePaneId.value, baseColumns.value.length);
+    }
+
     resetColumnWidths();
     resultRowHeight.value = DEFAULT_ROW_HEIGHT;
     const contentEl = resultsContentEl.value;
@@ -69,13 +534,69 @@ watch(
 );
 
 watch(
-  () => activeRows.value.length,
+  () => [activeRows.value.length, filteredAndSortedRows.value.length],
   () => {
     void nextTick(() => {
       updateResultsViewportMetrics();
       measureResultRowHeight();
     });
   },
+);
+
+const gridViewStateToken = computed<string>(() => {
+  const sortState = currentSortState.value;
+  return [
+    activePaneId.value,
+    currentSearchTerm.value,
+    normalizedColumnFilters.value.join("\u001f"),
+    sortState ? `${sortState.columnIndex}:${sortState.direction}` : "",
+  ].join("\u001e");
+});
+
+watch(gridViewStateToken, () => {
+  const contentEl = resultsContentEl.value;
+  if (contentEl) {
+    contentEl.scrollTop = 0;
+  }
+
+  resultsScrollTop.value = 0;
+  void nextTick(() => {
+    updateResultsViewportMetrics();
+    measureResultRowHeight();
+  });
+});
+
+const filterRefreshToken = computed<string>(() => {
+  const pane = activePane.value;
+  return [
+    activePaneId.value,
+    pane?.sourceSql ?? "",
+    pane?.sourceSessionId ?? "",
+    pane?.sourceRowLimit ?? "",
+    normalizedGlobalSearchTerm.value,
+    normalizedColumnFilters.value.join("\u001f"),
+  ].join("\u001e");
+});
+
+watch(
+  filterRefreshToken,
+  () => {
+    if (filterRefreshDebounceHandle) {
+      window.clearTimeout(filterRefreshDebounceHandle);
+      filterRefreshDebounceHandle = null;
+    }
+
+    if (!hasActiveFilterCriteria.value) {
+      void refreshServerFilteredRows();
+      return;
+    }
+
+    filterRefreshDebounceHandle = window.setTimeout(() => {
+      filterRefreshDebounceHandle = null;
+      void refreshServerFilteredRows();
+    }, 220);
+  },
+  { immediate: true },
 );
 
 function getColumnWidth(index: number): number {
@@ -180,7 +701,7 @@ function measureResultRowHeight(): void {
 }
 
 const visibleStartRow = computed<number>(() => {
-  if (!activeRows.value.length || resultRowHeight.value <= 0) {
+  if (!filteredAndSortedRows.value.length || resultRowHeight.value <= 0) {
     return 0;
   }
 
@@ -189,7 +710,7 @@ const visibleStartRow = computed<number>(() => {
 });
 
 const visibleEndRow = computed<number>(() => {
-  const rowCount = activeRows.value.length;
+  const rowCount = filteredAndSortedRows.value.length;
   if (!rowCount || resultRowHeight.value <= 0) {
     return 0;
   }
@@ -202,16 +723,19 @@ const visibleEndRow = computed<number>(() => {
   return Math.min(rowCount, bufferedEnd);
 });
 
-const visibleRows = computed<Array<{ row: string[]; rowIndex: number }>>(() => {
-  if (!activeRows.value.length) {
+const visibleRows = computed<
+  Array<{ row: string[]; rowIndex: number; sourceRowIndex: number }>
+>(() => {
+  if (!filteredAndSortedRows.value.length) {
     return [];
   }
 
-  return activeRows.value
+  return filteredAndSortedRows.value
     .slice(visibleStartRow.value, visibleEndRow.value)
-    .map((row, localIndex) => ({
+    .map(({ row, sourceRowIndex }, localIndex) => ({
       row,
       rowIndex: visibleStartRow.value + localIndex,
+      sourceRowIndex,
     }));
 });
 
@@ -220,7 +744,10 @@ const topSpacerHeight = computed<number>(() => {
 });
 
 const bottomSpacerHeight = computed<number>(() => {
-  const remainingRows = Math.max(0, activeRows.value.length - visibleEndRow.value);
+  const remainingRows = Math.max(
+    0,
+    filteredAndSortedRows.value.length - visibleEndRow.value,
+  );
   return remainingRows * resultRowHeight.value;
 });
 
@@ -240,6 +767,11 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopColumnResize();
+  if (filterRefreshDebounceHandle) {
+    window.clearTimeout(filterRefreshDebounceHandle);
+    filterRefreshDebounceHandle = null;
+  }
+  filterRefreshRequestToken += 1;
   if (resultsResizeObserver) {
     resultsResizeObserver.disconnect();
     resultsResizeObserver = null;
@@ -251,7 +783,12 @@ onBeforeUnmount(() => {
 <template>
   <section class="results-pane">
     <div class="results-header">
-      <div v-if="props.resultPanes.length" class="results-tabs" role="tablist" aria-label="Result tabs">
+      <div
+        v-if="props.resultPanes.length"
+        class="results-tabs"
+        role="tablist"
+        aria-label="Result tabs"
+      >
         <button
           v-for="pane in props.resultPanes"
           :key="pane.id"
@@ -273,6 +810,37 @@ onBeforeUnmount(() => {
       <p v-if="!activePane || !activePane.queryResult" class="muted">{{ props.emptyStateMessage }}</p>
 
       <template v-else>
+        <div v-if="activePane.queryResult.columns.length" class="results-toolbar">
+          <input
+            v-model="currentSearchTerm"
+            class="results-search-input"
+            type="search"
+            placeholder="Search visible result rows"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            data-gramm="false"
+          />
+          <span class="muted results-row-summary">{{ rowSummaryLabel }}</span>
+          <button
+            class="results-toolbar-btn"
+            type="button"
+            :disabled="!canClearGridTools"
+            @click="clearGridTools"
+          >
+            Clear
+          </button>
+          <button
+            class="results-toolbar-btn"
+            type="button"
+            :disabled="!canExportCsv"
+            @click="exportCsv"
+          >
+            Export CSV
+          </button>
+        </div>
+
         <p v-if="activePane.errorMessage" class="results-error">
           {{ activePane.errorMessage }}
         </p>
@@ -284,8 +852,25 @@ onBeforeUnmount(() => {
         <p v-if="activePane.queryResult.rowsAffected !== null" class="muted">
           Rows affected: {{ activePane.queryResult.rowsAffected }}
         </p>
+        <p
+          v-else-if="baseRows.length > 0 && !hasFilteredRows"
+          class="muted results-empty-filtered"
+        >
+          No rows match current search or column filters.
+        </p>
+        <p
+          v-if="hasActiveFilterCriteria && activeRemoteFilterError"
+          class="muted results-filter-fallback"
+          :title="activeRemoteFilterError"
+        >
+          Showing matches from loaded rows only.
+        </p>
 
-        <table v-if="activePane.queryResult.columns.length" class="results-table" :class="{ 'is-resizing': !!resizeState }">
+        <table
+          v-if="activePane.queryResult.columns.length"
+          class="results-table"
+          :class="{ 'is-resizing': !!resizeState }"
+        >
           <colgroup>
             <col
               v-for="(column, columnIndex) in activePane.queryResult.columns"
@@ -297,9 +882,23 @@ onBeforeUnmount(() => {
             <tr>
               <th
                 v-for="(column, columnIndex) in activePane.queryResult.columns"
-                :key="column"
+                :key="`${column}-${columnIndex}`"
+                :class="{
+                  'results-sort-active':
+                    currentSortState?.columnIndex === columnIndex,
+                }"
               >
-                <span class="results-cell-text" :title="column">{{ column }}</span>
+                <button
+                  class="results-col-sort-button"
+                  type="button"
+                  :aria-label="getColumnSortLabel(column, columnIndex)"
+                  @click="toggleColumnSort(columnIndex)"
+                >
+                  <span class="results-cell-text" :title="column">{{ column }}</span>
+                  <span class="results-sort-indicator" aria-hidden="true">
+                    {{ getColumnSortIndicator(columnIndex) }}
+                  </span>
+                </button>
                 <button
                   class="results-col-resize-handle"
                   type="button"
@@ -309,14 +908,33 @@ onBeforeUnmount(() => {
                 ></button>
               </th>
             </tr>
+            <tr class="results-filter-row">
+              <th
+                v-for="(column, columnIndex) in activePane.queryResult.columns"
+                :key="`filter-${column}-${columnIndex}`"
+              >
+                <input
+                  class="results-filter-input"
+                  :value="currentColumnFilters[columnIndex] ?? ''"
+                  :placeholder="`Filter ${column}`"
+                  type="search"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  data-gramm="false"
+                  @input="onColumnFilterInput(columnIndex, $event)"
+                />
+              </th>
+            </tr>
           </thead>
           <tbody>
             <tr v-if="topSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
               <td :colspan="visibleColumnCount" :style="{ height: `${topSpacerHeight}px` }"></td>
             </tr>
             <tr
-              v-for="{ row, rowIndex } in visibleRows"
-              :key="`row-${rowIndex}`"
+              v-for="{ row, rowIndex, sourceRowIndex } in visibleRows"
+              :key="`row-${sourceRowIndex}-${rowIndex}`"
               :data-result-row="rowIndex"
               :class="{ 'results-row-alt': rowIndex % 2 === 1 }"
             >
@@ -406,6 +1024,61 @@ onBeforeUnmount(() => {
   font-family: Consolas, "Courier New", monospace;
 }
 
+.results-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.33rem 0.42rem;
+  border-bottom: 1px solid var(--panel-separator);
+  background: var(--bg-surface-muted);
+}
+
+.results-search-input,
+.results-filter-input {
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+
+.results-search-input {
+  flex: 1 1 14rem;
+  min-width: 11rem;
+  padding: 0.2rem 0.32rem;
+  font-size: 0.69rem;
+}
+
+.results-filter-input {
+  width: 100%;
+  padding: 0.16rem 0.25rem;
+  font-size: 0.67rem;
+}
+
+.results-toolbar-btn {
+  border: 1px solid var(--control-border);
+  border-radius: 5px;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  font-size: 0.67rem;
+  padding: 0.15rem 0.34rem;
+  cursor: pointer;
+}
+
+.results-toolbar-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.results-toolbar-btn:not(:disabled):hover {
+  background: var(--control-hover);
+}
+
+.results-row-summary {
+  white-space: nowrap;
+  margin-left: auto;
+}
+
 .results-table {
   width: auto;
   min-width: 100%;
@@ -450,6 +1123,41 @@ onBeforeUnmount(() => {
 
 .results-table tbody tr:not(.results-spacer-row):hover {
   background: var(--bg-hover);
+}
+
+.results-sort-active {
+  background: color-mix(in srgb, var(--table-header-bg) 80%, var(--accent) 20%);
+}
+
+.results-col-sort-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: calc(100% - 10px);
+  min-width: 0;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.results-sort-indicator {
+  width: 0.68rem;
+  min-width: 0.68rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.63rem;
+}
+
+.results-filter-row th {
+  position: static;
+  top: auto;
+  z-index: 1;
+  background: var(--bg-surface-muted);
+  padding: 0.24rem 0.28rem;
 }
 
 .results-spacer-row td {
@@ -510,6 +1218,14 @@ onBeforeUnmount(() => {
 }
 
 .results-message {
+  margin-bottom: 0.32rem;
+}
+
+.results-empty-filtered {
+  margin-bottom: 0.32rem;
+}
+
+.results-filter-fallback {
   margin-bottom: 0.32rem;
 }
 

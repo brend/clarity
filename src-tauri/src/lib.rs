@@ -82,6 +82,16 @@ struct OracleQueryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct OracleFilteredQueryRequest {
+    session_id: u64,
+    sql: String,
+    row_limit: Option<u32>,
+    global_search: Option<String>,
+    column_filters: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DbSchemaSearchRequest {
     session_id: u64,
     search_term: String,
@@ -462,6 +472,22 @@ fn db_run_query(
         .ok_or_else(|| "Session not found".to_string())?;
 
     ProviderRegistry::run_query(session, &request)
+}
+
+#[tauri::command]
+fn db_run_query_filtered(
+    request: OracleFilteredQueryRequest,
+    state: tauri::State<AppState>,
+) -> Result<OracleQueryResult, String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get_mut(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    ProviderRegistry::run_filtered_query(session, &request)
 }
 
 #[tauri::command]
@@ -2151,6 +2177,7 @@ pub fn run() {
             db_list_objects,
             db_list_object_columns,
             db_run_query,
+            db_run_query_filtered,
             db_get_transaction_state,
             db_begin_transaction,
             db_commit_transaction,

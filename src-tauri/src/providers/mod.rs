@@ -2,8 +2,8 @@ pub(crate) mod oracle;
 
 use crate::{
     DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
-    OracleQueryResult,
+    OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef,
+    OracleQueryRequest, OracleQueryResult,
 };
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +100,18 @@ impl ProviderRegistry {
         match (session.provider, &mut session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::run_query(oracle_session, request)
+            }
+            (provider, _) => Err(not_implemented_error(provider)),
+        }
+    }
+
+    pub(crate) fn run_filtered_query(
+        session: &mut AppSession,
+        request: &OracleFilteredQueryRequest,
+    ) -> Result<OracleQueryResult, String> {
+        match (session.provider, &mut session.session) {
+            (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
+                oracle::run_filtered_query(oracle_session, request)
             }
             (provider, _) => Err(not_implemented_error(provider)),
         }

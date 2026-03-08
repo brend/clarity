@@ -143,6 +143,9 @@ export interface WorkspaceQueryResultPane {
   title: string;
   queryResult: OracleQueryResult | null;
   errorMessage: string;
+  sourceSql: string | null;
+  sourceSessionId: number | null;
+  sourceRowLimit: number | null;
 }
 
 export interface BusyState {

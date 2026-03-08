@@ -306,6 +306,9 @@ function createQueryResultPane(
     title: `Result ${paneNumber}`,
     queryResult: null,
     errorMessage: "",
+    sourceSql: null,
+    sourceSessionId: null,
+    sourceRowLimit: null,
   };
 }
 
@@ -857,12 +860,18 @@ export function useClarityWorkspace() {
 
   function prepareQueryResultPanes(
     tab: WorkspaceQueryTab,
-    statementCount: number,
+    statements: string[],
+    sessionId: number,
+    rowLimit: number,
   ): void {
-    const paneCount = Math.max(1, statementCount);
-    const panes = Array.from({ length: paneCount }, (_, index) =>
-      createQueryResultPane(tab.id, index + 1),
-    );
+    const paneCount = Math.max(1, statements.length);
+    const panes = Array.from({ length: paneCount }, (_, index) => {
+      const pane = createQueryResultPane(tab.id, index + 1);
+      pane.sourceSql = statements[index] ?? null;
+      pane.sourceSessionId = sessionId;
+      pane.sourceRowLimit = rowLimit;
+      return pane;
+    });
     tab.resultPanes = panes;
     tab.activeResultPaneId = panes[0].id;
     tab.nextResultPaneNumber = paneCount + 1;
@@ -1773,7 +1782,12 @@ export function useClarityWorkspace() {
       return;
     }
 
-    prepareQueryResultPanes(queryTab, statements.length);
+    prepareQueryResultPanes(
+      queryTab,
+      statements,
+      sessionId,
+      effectiveRowLimit,
+    );
     errorMessage.value = "";
     busy.runningQuery = true;
     let completedStatements = 0;
@@ -1790,6 +1804,9 @@ export function useClarityWorkspace() {
         if (pane) {
           pane.queryResult = result;
           pane.errorMessage = "";
+          pane.sourceSql = statements[index] ?? pane.sourceSql;
+          pane.sourceSessionId = sessionId;
+          pane.sourceRowLimit = effectiveRowLimit;
         }
         completedStatements += 1;
 
@@ -1806,6 +1823,9 @@ export function useClarityWorkspace() {
       const failedPane = queryTab.resultPanes[completedStatements];
       if (failedPane) {
         failedPane.errorMessage = message;
+        failedPane.sourceSql = statements[completedStatements] ?? failedPane.sourceSql;
+        failedPane.sourceSessionId = sessionId;
+        failedPane.sourceRowLimit = effectiveRowLimit;
         failedPane.queryResult = {
           columns: [],
           rows: [],

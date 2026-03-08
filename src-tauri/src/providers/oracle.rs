@@ -1,7 +1,7 @@
 use crate::{
     DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleAuthMode, OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
-    OracleQueryResult,
+    OracleAuthMode, OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry,
+    OracleObjectRef, OracleQueryRequest, OracleQueryResult,
 };
 use oracle::{Connection, Connector, Error as OracleError, InitParams, Privilege, SqlValue};
 use std::env;
@@ -530,6 +530,114 @@ pub(crate) fn run_query(
     })
 }
 
+pub(crate) fn run_filtered_query(
+    session: &mut OracleSession,
+    request: &OracleFilteredQueryRequest,
+) -> Result<OracleQueryResult, String> {
+    let sql = request.sql.trim();
+    if sql.is_empty() {
+        return Err("Query cannot be empty".to_string());
+    }
+
+    let query_request = OracleQueryRequest {
+        session_id: request.session_id,
+        sql: request.sql.clone(),
+        row_limit: request.row_limit,
+    };
+    let row_limit = effective_query_row_limit(&query_request);
+
+    let normalized_global_search = request
+        .global_search
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let normalized_column_filters = request
+        .column_filters
+        .as_ref()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|value| value.trim().to_lowercase())
+        .collect::<Vec<_>>();
+
+    if let Some(show_result) = try_run_show_command(session, &query_request) {
+        let mut result = show_result?;
+        let mut filtered_rows = Vec::new();
+        for row in result.rows {
+            if !row_matches_query_filters(
+                row.as_slice(),
+                normalized_global_search.as_str(),
+                normalized_column_filters.as_slice(),
+            ) {
+                continue;
+            }
+
+            filtered_rows.push(row);
+            if filtered_rows.len() >= row_limit {
+                break;
+            }
+        }
+
+        result.rows = filtered_rows;
+        result.message = format!("Query executed. Returned {} row(s).", result.rows.len());
+        return Ok(result);
+    }
+
+    let mut statement = session
+        .connection
+        .statement(sql)
+        .build()
+        .map_err(map_oracle_error)?;
+    if !statement.is_query() {
+        return Err("Filtering is only available for query result sets.".to_string());
+    }
+
+    let result_set = statement.query(&[]).map_err(map_oracle_error)?;
+    let columns = result_set
+        .column_info()
+        .iter()
+        .map(|column| column.name().to_string())
+        .collect::<Vec<_>>();
+
+    let mut rows = Vec::new();
+    let mut truncated = false;
+
+    for row_result in result_set {
+        let row = row_result.map_err(map_oracle_error)?;
+        let values = row
+            .sql_values()
+            .iter()
+            .map(sql_value_to_string)
+            .collect::<Vec<_>>();
+        if !row_matches_query_filters(
+            values.as_slice(),
+            normalized_global_search.as_str(),
+            normalized_column_filters.as_slice(),
+        ) {
+            continue;
+        }
+
+        rows.push(values);
+        if rows.len() >= row_limit {
+            truncated = true;
+            break;
+        }
+    }
+
+    let mut message = format!("Query executed. Returned {} row(s).", rows.len());
+    if truncated {
+        message.push_str(&format!(" Results truncated at {} rows.", row_limit));
+    }
+
+    Ok(OracleQueryResult {
+        columns,
+        rows,
+        rows_affected: None,
+        message,
+    })
+}
+
 pub(crate) fn begin_transaction(session: &mut OracleSession) -> Result<bool, String> {
     session.transaction_active = true;
     Ok(session.transaction_active)
@@ -814,6 +922,37 @@ fn effective_query_row_limit(request: &OracleQueryRequest) -> usize {
         .row_limit
         .unwrap_or(DEFAULT_QUERY_ROW_LIMIT)
         .clamp(1, MAX_QUERY_ROW_LIMIT) as usize
+}
+
+fn row_matches_query_filters(
+    row: &[String],
+    normalized_global_search: &str,
+    normalized_column_filters: &[String],
+) -> bool {
+    if !normalized_global_search.is_empty()
+        && !row
+            .iter()
+            .any(|value| value.to_lowercase().contains(normalized_global_search))
+    {
+        return false;
+    }
+
+    for (column_index, normalized_filter) in normalized_column_filters.iter().enumerate() {
+        if normalized_filter.is_empty() {
+            continue;
+        }
+
+        let cell_value = row
+            .get(column_index)
+            .map(|value| value.as_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        if !cell_value.contains(normalized_filter) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn normalize_schema_name(schema: &str) -> Result<String, String> {
