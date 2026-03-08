@@ -19,6 +19,8 @@ const MENU_ID_TOOLS_FIND_IN_SCHEMA: &str = "tools.find_in_schema";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
 const MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET: &str = "tools.save_active_query_sheet";
 const MENU_ID_TOOLS_SAVE_ALL_QUERY_SHEETS: &str = "tools.save_all_query_sheets";
+const MENU_ID_TOOLS_NAVIGATE_SCRIPT_LINE_BACK: &str = "tools.navigate_script_line_back";
+const MENU_ID_TOOLS_NAVIGATE_SCRIPT_LINE_FORWARD: &str = "tools.navigate_script_line_forward";
 const MENU_ID_TOOLS_CREATE_OBJECT_TABLE: &str = "tools.create_object.table";
 const MENU_ID_TOOLS_CREATE_OBJECT_VIEW: &str = "tools.create_object.view";
 const MENU_ID_TOOLS_CREATE_OBJECT_PROCEDURE: &str = "tools.create_object.procedure";
@@ -35,6 +37,8 @@ const EVENT_OPEN_EXPORT_DATABASE_DIALOG: &str = "clarity://open-export-database-
 const EVENT_OPEN_CREATE_OBJECT_TEMPLATE: &str = "clarity://open-create-object-template";
 const EVENT_SAVE_ACTIVE_QUERY_SHEET: &str = "clarity://save-active-query-sheet";
 const EVENT_SAVE_ALL_QUERY_SHEETS: &str = "clarity://save-all-query-sheets";
+const EVENT_NAVIGATE_SCRIPT_LINE_BACK: &str = "clarity://navigate-script-line-back";
+const EVENT_NAVIGATE_SCRIPT_LINE_FORWARD: &str = "clarity://navigate-script-line-forward";
 const EVENT_SCHEMA_EXPORT_PROGRESS: &str = "clarity://schema-export-progress";
 
 #[derive(Clone, Debug, Serialize)]
@@ -1965,6 +1969,20 @@ pub fn run() {
                 true,
                 Some("CmdOrCtrl+Shift+S"),
             )?;
+            let navigate_script_line_back = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_NAVIGATE_SCRIPT_LINE_BACK,
+                "Navigate Back to Script Line",
+                true,
+                Some("CmdOrCtrl+Alt+Left"),
+            )?;
+            let navigate_script_line_forward = tauri::menu::MenuItem::with_id(
+                app,
+                MENU_ID_TOOLS_NAVIGATE_SCRIPT_LINE_FORWARD,
+                "Navigate Forward to Script Line",
+                true,
+                Some("CmdOrCtrl+Alt+Right"),
+            )?;
             let create_table = tauri::menu::MenuItem::with_id(
                 app,
                 MENU_ID_TOOLS_CREATE_OBJECT_TABLE,
@@ -2077,7 +2095,12 @@ pub fn run() {
                 app,
                 "Query",
                 true,
-                &[&save_active_query_sheet, &save_all_query_sheets],
+                &[
+                    &save_active_query_sheet,
+                    &save_all_query_sheets,
+                    &navigate_script_line_back,
+                    &navigate_script_line_forward,
+                ],
             )?;
             let database_menu = tauri::menu::Submenu::with_items(
                 app,
@@ -2158,6 +2181,14 @@ pub fn run() {
             } else if event.id() == MENU_ID_TOOLS_SAVE_ALL_QUERY_SHEETS {
                 if let Err(error) = app.emit(EVENT_SAVE_ALL_QUERY_SHEETS, ()) {
                     eprintln!("failed to emit save all query sheets event: {error}");
+                }
+            } else if event.id() == MENU_ID_TOOLS_NAVIGATE_SCRIPT_LINE_BACK {
+                if let Err(error) = app.emit(EVENT_NAVIGATE_SCRIPT_LINE_BACK, ()) {
+                    eprintln!("failed to emit navigate back script line event: {error}");
+                }
+            } else if event.id() == MENU_ID_TOOLS_NAVIGATE_SCRIPT_LINE_FORWARD {
+                if let Err(error) = app.emit(EVENT_NAVIGATE_SCRIPT_LINE_FORWARD, ()) {
+                    eprintln!("failed to emit navigate forward script line event: {error}");
                 }
             } else if event.id() == MENU_ID_TOOLS_FIND_IN_SCHEMA {
                 if let Err(error) = app.emit(EVENT_OPEN_SCHEMA_SEARCH, ()) {

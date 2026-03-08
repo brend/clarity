@@ -29,6 +29,9 @@ const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
 const EVENT_OPEN_CREATE_OBJECT_TEMPLATE = "clarity://open-create-object-template";
 const EVENT_SAVE_ACTIVE_QUERY_SHEET = "clarity://save-active-query-sheet";
 const EVENT_SAVE_ALL_QUERY_SHEETS = "clarity://save-all-query-sheets";
+const EVENT_NAVIGATE_SCRIPT_LINE_BACK = "clarity://navigate-script-line-back";
+const EVENT_NAVIGATE_SCRIPT_LINE_FORWARD =
+  "clarity://navigate-script-line-forward";
 const EVENT_SCHEMA_EXPORT_PROGRESS = "clarity://schema-export-progress";
 const SQL_COMPLETION_OBJECT_TYPES = new Set([
   "TABLE",
@@ -183,6 +186,7 @@ const {
   refreshActiveObjectDetail,
   updateActiveObjectDataRow,
   insertActiveObjectDataRow,
+  deleteActiveObjectDataRow,
   startSchemaExport,
   chooseSchemaExportDirectory,
   exportDatabaseSchema,
@@ -203,6 +207,8 @@ const {
   rollbackTransaction,
   runSchemaSearch,
   openSchemaSearchResult,
+  navigateScriptLineBack,
+  navigateScriptLineForward,
   isLikelyNumeric,
 } = useClarityWorkspace();
 
@@ -216,6 +222,8 @@ const searchMenuUnlisten = ref<UnlistenFn | null>(null);
 const createObjectMenuUnlisten = ref<UnlistenFn | null>(null);
 const saveActiveSheetMenuUnlisten = ref<UnlistenFn | null>(null);
 const saveAllSheetsMenuUnlisten = ref<UnlistenFn | null>(null);
+const navigateScriptLineBackMenuUnlisten = ref<UnlistenFn | null>(null);
+const navigateScriptLineForwardMenuUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressUnlisten = ref<UnlistenFn | null>(null);
 const exportProgressProcessed = ref(0);
 const exportProgressTotal = ref(0);
@@ -862,6 +870,16 @@ onMounted(() => {
   }).then((unlisten) => {
     saveAllSheetsMenuUnlisten.value = unlisten;
   });
+  void listen(EVENT_NAVIGATE_SCRIPT_LINE_BACK, () => {
+    void navigateScriptLineBack();
+  }).then((unlisten) => {
+    navigateScriptLineBackMenuUnlisten.value = unlisten;
+  });
+  void listen(EVENT_NAVIGATE_SCRIPT_LINE_FORWARD, () => {
+    void navigateScriptLineForward();
+  }).then((unlisten) => {
+    navigateScriptLineForwardMenuUnlisten.value = unlisten;
+  });
   void listen<SchemaExportProgressPayload>(
     EVENT_SCHEMA_EXPORT_PROGRESS,
     (event) => {
@@ -905,6 +923,14 @@ onBeforeUnmount(() => {
   if (saveAllSheetsMenuUnlisten.value) {
     saveAllSheetsMenuUnlisten.value();
     saveAllSheetsMenuUnlisten.value = null;
+  }
+  if (navigateScriptLineBackMenuUnlisten.value) {
+    navigateScriptLineBackMenuUnlisten.value();
+    navigateScriptLineBackMenuUnlisten.value = null;
+  }
+  if (navigateScriptLineForwardMenuUnlisten.value) {
+    navigateScriptLineForwardMenuUnlisten.value();
+    navigateScriptLineForwardMenuUnlisten.value = null;
   }
 });
 </script>
@@ -1006,6 +1032,7 @@ onBeforeUnmount(() => {
         :on-refresh-active-object-detail="refreshActiveObjectDetail"
         :on-update-active-object-data-row="updateActiveObjectDataRow"
         :on-insert-active-object-data-row="insertActiveObjectDataRow"
+        :on-delete-active-object-data-row="deleteActiveObjectDataRow"
         :on-activate-object-detail-tab="activateObjectDetailTab"
         :on-run-schema-search="runSchemaSearch"
         :on-open-schema-search-result="openSchemaSearchResult"

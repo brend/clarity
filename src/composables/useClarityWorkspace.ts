@@ -32,6 +32,7 @@ const OBJECT_DATA_PREVIEW_LIMIT = 500;
 const OBJECT_DATA_ROW_ID_COLUMN = "__CLARITY_ROWID__";
 const DEFAULT_QUERY_ROW_LIMIT = 1000;
 const MAX_QUERY_ROW_LIMIT = 10000;
+const SCRIPT_LINE_HISTORY_LIMIT = 200;
 const NON_STANDALONE_SQL_KEYWORDS = new Set([
   "END",
   "EXCEPTION",
@@ -52,6 +53,11 @@ interface PersistedQuerySheetState {
   queryTabs: PersistedQuerySheet[];
   activeWorkspaceTabId: string;
   queryTabNumber: number;
+}
+
+interface ScriptLineLocation {
+  object: OracleObjectEntry;
+  line: number | null;
 }
 
 function readDebugConnectionString(
@@ -531,6 +537,9 @@ export function useClarityWorkspace() {
   const errorMessage = ref("");
   const activeWorkspaceTabId = ref(initialQuerySheetState.activeWorkspaceTabId);
   const expandedObjectTypes = ref<Record<string, boolean>>({});
+  const scriptLineBackHistory = ref<ScriptLineLocation[]>([]);
+  const scriptLineForwardHistory = ref<ScriptLineLocation[]>([]);
+  const currentScriptLineLocation = ref<ScriptLineLocation | null>(null);
 
   const busy = reactive<BusyState>({
     connecting: false,
@@ -708,7 +717,6 @@ export function useClarityWorkspace() {
 
     return false;
   });
-
   const objectTree = computed(() => {
     const byType = new Map<string, OracleObjectEntry[]>();
 
@@ -831,6 +839,74 @@ export function useClarityWorkspace() {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
   }
 
+  function normalizeLineReference(value: number | null): number | null {
+    if (value === null || !Number.isFinite(value)) {
+      return null;
+    }
+
+    return Math.max(1, Math.trunc(value));
+  }
+
+  function cloneObjectRef(object: OracleObjectEntry): OracleObjectEntry {
+    return {
+      schema: object.schema,
+      objectType: object.objectType,
+      objectName: object.objectName,
+    };
+  }
+
+  function createScriptLineLocation(
+    object: OracleObjectEntry,
+    line: number | null,
+  ): ScriptLineLocation {
+    return {
+      object: cloneObjectRef(object),
+      line: normalizeLineReference(line),
+    };
+  }
+
+  function isSameScriptLineLocation(
+    left: ScriptLineLocation,
+    right: ScriptLineLocation,
+  ): boolean {
+    return (
+      left.object.schema === right.object.schema &&
+      left.object.objectType === right.object.objectType &&
+      left.object.objectName === right.object.objectName &&
+      left.line === right.line
+    );
+  }
+
+  function pushScriptLineHistoryEntry(
+    history: { value: ScriptLineLocation[] },
+    location: ScriptLineLocation,
+  ): void {
+    const previous = history.value[history.value.length - 1];
+    if (previous && isSameScriptLineLocation(previous, location)) {
+      return;
+    }
+
+    history.value = [...history.value, location].slice(
+      -SCRIPT_LINE_HISTORY_LIMIT,
+    );
+  }
+
+  function getActiveScriptLineLocation(): ScriptLineLocation | null {
+    if (!activeDdlTab.value) {
+      const current = currentScriptLineLocation.value;
+      if (!current) {
+        return null;
+      }
+      return createScriptLineLocation(current.object, current.line);
+    }
+    const activeLocation = createScriptLineLocation(
+      activeDdlTab.value.object,
+      activeDdlTab.value.focusLine,
+    );
+    currentScriptLineLocation.value = activeLocation;
+    return activeLocation;
+  }
+
   async function runQueryForSession(
     sessionId: number,
     sql: string,
@@ -945,6 +1021,10 @@ export function useClarityWorkspace() {
 
     const tab = ddlTabs.value.find((entry) => entry.id === tabId);
     if (tab) {
+      currentScriptLineLocation.value = createScriptLineLocation(
+        tab.object,
+        tab.focusLine,
+      );
       selectedObject.value = tab.object;
       void ensureObjectDetailLoaded(tab, tab.activeDetailTabId);
     }
@@ -1200,7 +1280,7 @@ export function useClarityWorkspace() {
           `${toQuotedIdentifier(editableColumns[index])} = ${toSqlDataLiteral(values[index])}`,
       )
       .join(", ");
-    const sql = `update ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} set ${setClauses} where rowid = chartorowid(${toSqlStringLiteral(rowId)})`;
+    const sql = `update ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} set ${setClauses} where rowidtochar(rowid) = ${toSqlStringLiteral(rowId)}`;
 
     errorMessage.value = "";
     busy.updatingData = true;
@@ -1284,6 +1364,66 @@ export function useClarityWorkspace() {
     try {
       const result = await runQueryForSession(sessionId, sql);
 
+      statusMessage.value = `${tab.object.schema}.${tab.object.objectName}: ${result.message}`;
+      return true;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+      return false;
+    } finally {
+      busy.updatingData = false;
+    }
+  }
+
+  async function deleteActiveObjectDataRow(rowIndex: number): Promise<boolean> {
+    const tab = activeDdlTab.value;
+    if (
+      !session.value ||
+      !tab ||
+      tab.activeDetailTabId !== "data" ||
+      !isTableObject(tab.object.objectType)
+    ) {
+      return false;
+    }
+    const sessionId = session.value.sessionId;
+
+    if (busy.updatingData) {
+      return false;
+    }
+
+    if (!tab.dataResult) {
+      errorMessage.value =
+        "No table data is loaded. Refresh the Data tab and try again.";
+      return false;
+    }
+
+    if (!hasObjectDataRowIdColumn(tab.dataResult)) {
+      errorMessage.value =
+        "Row editing is not ready yet. Refresh the Data tab and try again.";
+      return false;
+    }
+
+    const row = tab.dataResult.rows[rowIndex];
+    if (!row) {
+      errorMessage.value =
+        "Unable to delete row: row no longer exists in the current result set.";
+      return false;
+    }
+
+    const rowId = row[0];
+    if (!rowId) {
+      errorMessage.value =
+        "Unable to delete row: data preview shape changed. Refresh and try again.";
+      return false;
+    }
+
+    const sql = `delete from ${toQuotedIdentifier(tab.object.schema)}.${toQuotedIdentifier(tab.object.objectName)} where rowidtochar(rowid) = ${toSqlStringLiteral(rowId)}`;
+
+    errorMessage.value = "";
+    busy.updatingData = true;
+
+    try {
+      const result = await runQueryForSession(sessionId, sql);
+      tab.dataResult.rows.splice(rowIndex, 1);
       statusMessage.value = `${tab.object.schema}.${tab.object.objectName}: ${result.message}`;
       return true;
     } catch (error) {
@@ -1599,6 +1739,9 @@ export function useClarityWorkspace() {
       schemaSearchResults.value = [];
       schemaSearchPerformed.value = false;
       schemaSearchFocusToken.value = 0;
+      scriptLineBackHistory.value = [];
+      scriptLineForwardHistory.value = [];
+      currentScriptLineLocation.value = null;
       statusMessage.value = "Disconnected.";
     }
   }
@@ -1666,10 +1809,11 @@ export function useClarityWorkspace() {
   async function loadDdl(
     object: OracleObjectEntry,
     targetLine: number | null = null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!session.value) {
-      return;
+      return false;
     }
+    const normalizedTargetLine = normalizeLineReference(targetLine);
 
     errorMessage.value = "";
     busy.loadingDdl = true;
@@ -1687,20 +1831,22 @@ export function useClarityWorkspace() {
 
       const tabId = buildDdlTabId(object);
       const detailTabId =
-        targetLine === null ? getDefaultObjectDetailTabId(object) : "ddl";
+        normalizedTargetLine === null
+          ? getDefaultObjectDetailTabId(object)
+          : "ddl";
       const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
       if (existingTab) {
         existingTab.ddlText = ddl;
         existingTab.object = object;
-        existingTab.focusLine = targetLine;
-        existingTab.focusToken += targetLine === null ? 0 : 1;
+        existingTab.focusLine = normalizedTargetLine;
+        existingTab.focusToken += normalizedTargetLine === null ? 0 : 1;
         existingTab.activeDetailTabId = isObjectDetailTabSupported(
           existingTab.object,
           existingTab.activeDetailTabId,
         )
           ? existingTab.activeDetailTabId
           : detailTabId;
-        if (targetLine !== null) {
+        if (normalizedTargetLine !== null) {
           existingTab.activeDetailTabId = "ddl";
         }
       } else {
@@ -1708,8 +1854,8 @@ export function useClarityWorkspace() {
           id: tabId,
           object,
           ddlText: ddl,
-          focusLine: targetLine,
-          focusToken: targetLine === null ? 0 : 1,
+          focusLine: normalizedTargetLine,
+          focusToken: normalizedTargetLine === null ? 0 : 1,
           activeDetailTabId: detailTabId,
           dataResult: null,
           metadataResult: null,
@@ -1721,11 +1867,17 @@ export function useClarityWorkspace() {
       activateWorkspaceTab(tabId);
       const objectTab = ddlTabs.value.find((tab) => tab.id === tabId);
       if (objectTab) {
+        currentScriptLineLocation.value = createScriptLineLocation(
+          objectTab.object,
+          objectTab.focusLine,
+        );
         void ensureObjectDetailLoaded(objectTab, objectTab.activeDetailTabId);
       }
       statusMessage.value = `Loaded DDL: ${object.schema}.${object.objectName}`;
+      return true;
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
+      return false;
     } finally {
       busy.loadingDdl = false;
     }
@@ -1965,14 +2117,73 @@ export function useClarityWorkspace() {
   async function openSchemaSearchResult(
     match: OracleSchemaSearchResult,
   ): Promise<void> {
-    await loadDdl(
+    const currentLocation = getActiveScriptLineLocation();
+    const targetLocation = createScriptLineLocation(
       {
         schema: match.schema,
         objectType: match.objectType,
         objectName: match.objectName,
       },
-      match.line ?? null,
+      match.line,
     );
+    const loaded = await loadDdl(targetLocation.object, targetLocation.line);
+    if (!loaded) {
+      return;
+    }
+
+    if (
+      currentLocation &&
+      !isSameScriptLineLocation(currentLocation, targetLocation)
+    ) {
+      pushScriptLineHistoryEntry(scriptLineBackHistory, currentLocation);
+    }
+    scriptLineForwardHistory.value = [];
+  }
+
+  async function navigateScriptLineBack(): Promise<void> {
+    const targetLocation =
+      scriptLineBackHistory.value[scriptLineBackHistory.value.length - 1];
+    if (!targetLocation) {
+      statusMessage.value = "No previous script line in navigation history.";
+      return;
+    }
+
+    const currentLocation = getActiveScriptLineLocation();
+    const loaded = await loadDdl(targetLocation.object, targetLocation.line);
+    if (!loaded) {
+      return;
+    }
+
+    scriptLineBackHistory.value = scriptLineBackHistory.value.slice(0, -1);
+    if (
+      currentLocation &&
+      !isSameScriptLineLocation(currentLocation, targetLocation)
+    ) {
+      pushScriptLineHistoryEntry(scriptLineForwardHistory, currentLocation);
+    }
+  }
+
+  async function navigateScriptLineForward(): Promise<void> {
+    const targetLocation =
+      scriptLineForwardHistory.value[scriptLineForwardHistory.value.length - 1];
+    if (!targetLocation) {
+      statusMessage.value = "No next script line in navigation history.";
+      return;
+    }
+
+    const currentLocation = getActiveScriptLineLocation();
+    const loaded = await loadDdl(targetLocation.object, targetLocation.line);
+    if (!loaded) {
+      return;
+    }
+
+    scriptLineForwardHistory.value = scriptLineForwardHistory.value.slice(0, -1);
+    if (
+      currentLocation &&
+      !isSameScriptLineLocation(currentLocation, targetLocation)
+    ) {
+      pushScriptLineHistoryEntry(scriptLineBackHistory, currentLocation);
+    }
   }
 
   watch(
@@ -2069,6 +2280,7 @@ export function useClarityWorkspace() {
     refreshActiveObjectDetail,
     updateActiveObjectDataRow,
     insertActiveObjectDataRow,
+    deleteActiveObjectDataRow,
     startSchemaExport,
     chooseSchemaExportDirectory,
     exportDatabaseSchema,
@@ -2089,6 +2301,8 @@ export function useClarityWorkspace() {
     rollbackTransaction,
     runSchemaSearch,
     openSchemaSearchResult,
+    navigateScriptLineBack,
+    navigateScriptLineForward,
     isLikelyNumeric,
   };
 }

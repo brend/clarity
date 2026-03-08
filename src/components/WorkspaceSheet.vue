@@ -90,6 +90,7 @@ const props = defineProps<{
     values: string[],
   ) => Promise<boolean>;
   onInsertActiveObjectDataRow: (values: string[]) => Promise<boolean>;
+  onDeleteActiveObjectDataRow: (rowIndex: number) => Promise<boolean>;
   onActivateObjectDetailTab: (tabId: ObjectDetailTabId) => void;
   onRunSchemaSearch: () => void;
   onOpenSchemaSearchResult: (result: OracleSchemaSearchResult) => void;
@@ -101,6 +102,7 @@ const props = defineProps<{
 
 const queryEditorRef = ref<InstanceType<typeof SqlCodeEditor> | null>(null);
 const dataDraftRows = ref<string[][]>([]);
+const dataDraftSourceIndexes = ref<Array<number | null>>([]);
 const committingDataChanges = ref(false);
 const suppressDraftSync = ref(false);
 const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
@@ -147,6 +149,9 @@ const objectDetailColumns = computed<string[]>(
 const objectDetailColumnWidths = ref<number[]>([]);
 const objectDetailVisibleColumnCount = computed<number>(() =>
   Math.max(1, objectDetailColumns.value.length),
+);
+const objectDetailRenderedColumnCount = computed<number>(() =>
+  objectDetailVisibleColumnCount.value + (showEditableRowActions.value ? 1 : 0),
 );
 const objectDetailScrollTop = ref(0);
 const objectDetailViewportHeight = ref(0);
@@ -216,13 +221,24 @@ function cloneRows(rows: string[][]): string[][] {
   return rows.map((row) => [...row]);
 }
 
+function getDraftSourceRowIndex(rowIndex: number): number | null {
+  const sourceIndex = dataDraftSourceIndexes.value[rowIndex];
+  return typeof sourceIndex === "number" && sourceIndex >= 0
+    ? sourceIndex
+    : null;
+}
+
 function syncDraftRowsFromResult(): void {
   if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
     dataDraftRows.value = [];
+    dataDraftSourceIndexes.value = [];
     return;
   }
 
   dataDraftRows.value = cloneRows(props.activeObjectDetailResult.rows);
+  dataDraftSourceIndexes.value = props.activeObjectDetailResult.rows.map(
+    (_, rowIndex) => rowIndex,
+  );
 }
 
 function onCellDraftInput(
@@ -254,6 +270,7 @@ function addDraftRow(): void {
   const newRow = Array.from({ length: editableColumnCount.value }, () => "");
   const newRowIndex = dataDraftRows.value.length;
   dataDraftRows.value = [...dataDraftRows.value, newRow];
+  dataDraftSourceIndexes.value = [...dataDraftSourceIndexes.value, null];
 
   void nextTick(() => {
     const gridWrap = objectDetailGridWrapEl.value;
@@ -274,14 +291,19 @@ function isRowDirty(rowIndex: number): boolean {
     return false;
   }
 
-  const sourceRow = sourceDataRows.value[rowIndex];
+  const sourceRowIndex = getDraftSourceRowIndex(rowIndex);
   const draftRow = dataDraftRows.value[rowIndex];
   if (!draftRow) {
     return false;
   }
 
-  if (!sourceRow) {
+  if (sourceRowIndex === null || sourceRowIndex === undefined) {
     return draftRow.some((value) => value !== "");
+  }
+
+  const sourceRow = sourceDataRows.value[sourceRowIndex];
+  if (!sourceRow) {
+    return true;
   }
 
   if (sourceRow.length !== draftRow.length) {
@@ -306,19 +328,94 @@ const dirtyRowIndexes = computed<number[]>(() => {
   return dirtyIndexes;
 });
 
+const deletedSourceRowIndexes = computed<number[]>(() => {
+  if (!showEditableRowActions.value) {
+    return [];
+  }
+
+  const remainingSourceIndexes = new Set<number>();
+  for (const sourceIndex of dataDraftSourceIndexes.value) {
+    if (sourceIndex !== null && sourceIndex >= 0) {
+      remainingSourceIndexes.add(sourceIndex);
+    }
+  }
+
+  const deletedIndexes: number[] = [];
+  for (let rowIndex = 0; rowIndex < sourceDataRowCount.value; rowIndex += 1) {
+    if (!remainingSourceIndexes.has(rowIndex)) {
+      deletedIndexes.push(rowIndex);
+    }
+  }
+
+  return deletedIndexes;
+});
+
+const pendingDataChangeCount = computed<number>(
+  () => dirtyRowIndexes.value.length + deletedSourceRowIndexes.value.length,
+);
 const hasPendingDataChanges = computed<boolean>(
-  () => dirtyRowIndexes.value.length > 0,
+  () => pendingDataChangeCount.value > 0,
 );
 const hasDraftStructureChanges = computed<boolean>(() => {
   if (!showEditableRowActions.value) {
     return false;
   }
 
-  return dataDraftRows.value.length !== sourceDataRowCount.value;
+  if (dataDraftRows.value.length !== sourceDataRowCount.value) {
+    return true;
+  }
+
+  for (let rowIndex = 0; rowIndex < dataDraftSourceIndexes.value.length; rowIndex += 1) {
+    if (dataDraftSourceIndexes.value[rowIndex] !== rowIndex) {
+      return true;
+    }
+  }
+
+  return false;
 });
 const canRevertDataChanges = computed<boolean>(
   () => hasPendingDataChanges.value || hasDraftStructureChanges.value,
 );
+
+function isPersistedDataRow(rowIndex: number): boolean {
+  return getDraftSourceRowIndex(rowIndex) !== null;
+}
+
+function canDeleteDraftRow(rowIndex: number): boolean {
+  if (!showEditableRowActions.value) {
+    return false;
+  }
+
+  return (
+    rowIndex >= 0 &&
+    rowIndex < dataDraftRows.value.length &&
+    !committingDataChanges.value &&
+    !props.busy.updatingData
+  );
+}
+
+function deleteRowActionTitle(rowIndex: number): string {
+  if (!isPersistedDataRow(rowIndex)) {
+    return "Remove unsaved draft row";
+  }
+
+  if (!canDeleteDraftRow(rowIndex)) {
+    return "Delete is unavailable while another data update is in progress";
+  }
+
+  return "Mark row for deletion (applied on Commit)";
+}
+
+async function deleteDraftRow(rowIndex: number): Promise<void> {
+  if (!canDeleteDraftRow(rowIndex)) {
+    return;
+  }
+
+  dataDraftRows.value.splice(rowIndex, 1);
+  dataDraftRows.value = [...dataDraftRows.value];
+  dataDraftSourceIndexes.value.splice(rowIndex, 1);
+  dataDraftSourceIndexes.value = [...dataDraftSourceIndexes.value];
+}
 
 function revertDataChanges(): void {
   if (!canRevertDataChanges.value || committingDataChanges.value) {
@@ -334,9 +431,12 @@ async function commitDataChanges(): Promise<void> {
   }
 
   const dirtyIndexes = [...dirtyRowIndexes.value];
+  const deletedIndexes = [...deletedSourceRowIndexes.value].sort(
+    (left, right) => right - left,
+  );
   let completedAllUpdates = true;
   let insertedRows = false;
-  const originalRowCount = sourceDataRowCount.value;
+  let appliedStructuralChange = false;
 
   committingDataChanges.value = true;
   suppressDraftSync.value = true;
@@ -347,21 +447,30 @@ async function commitDataChanges(): Promise<void> {
         continue;
       }
 
+      const sourceRowIndex = getDraftSourceRowIndex(rowIndex);
       const didSave =
-        rowIndex < originalRowCount
-          ? await props.onUpdateActiveObjectDataRow(rowIndex, [...rowValues])
+        sourceRowIndex !== null
+          ? await props.onUpdateActiveObjectDataRow(sourceRowIndex, [...rowValues])
           : await props.onInsertActiveObjectDataRow([...rowValues]);
       if (!didSave) {
         completedAllUpdates = false;
         break;
       }
 
-      if (rowIndex >= originalRowCount) {
+      if (sourceRowIndex === null) {
         insertedRows = true;
-        dataDraftRows.value[rowIndex] = Array.from(
-          { length: rowValues.length },
-          () => "",
-        );
+      }
+    }
+
+    if (completedAllUpdates) {
+      for (const deletedSourceIndex of deletedIndexes) {
+        const didDelete =
+          await props.onDeleteActiveObjectDataRow(deletedSourceIndex);
+        if (!didDelete) {
+          completedAllUpdates = false;
+          break;
+        }
+        appliedStructuralChange = true;
       }
     }
   } finally {
@@ -371,9 +480,14 @@ async function commitDataChanges(): Promise<void> {
 
   if (completedAllUpdates) {
     syncDraftRowsFromResult();
-    if (insertedRows) {
+    if (insertedRows || appliedStructuralChange) {
       props.onRefreshActiveObjectDetail();
     }
+    return;
+  }
+
+  if (appliedStructuralChange) {
+    syncDraftRowsFromResult();
   }
 }
 
@@ -963,7 +1077,7 @@ watch(
           </p>
           <template v-else>
             <p v-if="showEditableRowActions" class="muted object-detail-hint">
-              Cells are editable. Use Add Row, Revert, or Commit below.
+              Cells are editable. Add/Delete adjusts draft rows. Use Commit to apply, or Revert to discard.
             </p>
             <p v-else-if="isDataDetailTab" class="muted object-detail-hint">
               Data preview is read-only for this object type.
@@ -988,6 +1102,7 @@ watch(
                       width: `${getObjectDetailColumnWidth(columnIndex)}px`,
                     }"
                   />
+                  <col v-if="showEditableRowActions" class="results-row-actions-col" />
                 </colgroup>
                 <thead>
                   <tr>
@@ -1009,6 +1124,9 @@ watch(
                         "
                       ></button>
                     </th>
+                    <th v-if="showEditableRowActions" class="results-row-actions-header">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1018,7 +1136,7 @@ watch(
                     aria-hidden="true"
                   >
                     <td
-                      :colspan="objectDetailVisibleColumnCount"
+                      :colspan="objectDetailRenderedColumnCount"
                       :style="{
                         height: `${objectDetailTopSpacerHeight}px`,
                       }"
@@ -1035,7 +1153,7 @@ watch(
                         showEditableRowActions && isRowDirty(rowIndex),
                       'results-row-new':
                         showEditableRowActions &&
-                        rowIndex >= sourceDataRowCount,
+                        !isPersistedDataRow(rowIndex),
                     }"
                   >
                     <td
@@ -1049,7 +1167,7 @@ watch(
                         v-if="showEditableRowActions"
                         class="cell-editor"
                         :value="value"
-                        :disabled="committingDataChanges"
+                        :disabled="committingDataChanges || props.busy.updatingData"
                         spellcheck="false"
                         autocomplete="off"
                         autocorrect="off"
@@ -1066,6 +1184,20 @@ watch(
                         }}</span>
                       </template>
                     </td>
+                    <td
+                      v-if="showEditableRowActions"
+                      class="results-row-actions-cell"
+                    >
+                      <button
+                        class="btn row-delete-btn"
+                        :class="{ 'delete-existing': isPersistedDataRow(rowIndex) }"
+                        :disabled="!canDeleteDraftRow(rowIndex)"
+                        :title="deleteRowActionTitle(rowIndex)"
+                        @click="deleteDraftRow(rowIndex)"
+                      >
+                        {{ isPersistedDataRow(rowIndex) ? "Delete" : "Remove" }}
+                      </button>
+                    </td>
                   </tr>
                   <tr
                     v-if="objectDetailBottomSpacerHeight > 0"
@@ -1073,7 +1205,7 @@ watch(
                     aria-hidden="true"
                   >
                     <td
-                      :colspan="objectDetailVisibleColumnCount"
+                      :colspan="objectDetailRenderedColumnCount"
                       :style="{
                         height: `${objectDetailBottomSpacerHeight}px`,
                       }"
@@ -1089,21 +1221,25 @@ watch(
               <div class="object-detail-edit-leading">
                 <button
                   class="btn row-action-btn"
-                  :disabled="committingDataChanges"
+                  :disabled="committingDataChanges || props.busy.updatingData"
                   @click="addDraftRow"
                 >
                   Add Row
                 </button>
                 <div class="muted">
                   Pending row changes:
-                  {{ dirtyRowIndexes.length }}
+                  {{ pendingDataChangeCount }}
                 </div>
               </div>
               <div class="object-detail-edit-actions">
                 <button
                   class="btn row-action-btn"
                   title="Revert pending changes (Esc)"
-                  :disabled="!canRevertDataChanges || committingDataChanges"
+                  :disabled="
+                    !canRevertDataChanges ||
+                    committingDataChanges ||
+                    props.busy.updatingData
+                  "
                   @click="revertDataChanges"
                 >
                   Revert (Esc)
@@ -1111,7 +1247,11 @@ watch(
                 <button
                   class="btn row-action-btn primary"
                   title="Commit pending changes (Cmd/Ctrl+Enter)"
-                  :disabled="!hasPendingDataChanges || committingDataChanges"
+                  :disabled="
+                    !hasPendingDataChanges ||
+                    committingDataChanges ||
+                    props.busy.updatingData
+                  "
                   @click="commitDataChanges"
                 >
                   {{
@@ -1659,6 +1799,15 @@ button:focus-visible {
   border-right: 0;
 }
 
+.results-row-actions-col {
+  width: 7.4rem;
+}
+
+.results-row-actions-header {
+  text-align: center;
+  min-width: 7.4rem;
+}
+
 .results-table tbody tr.results-row-alt {
   background: var(--table-row-alt);
 }
@@ -1743,6 +1892,22 @@ button:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.results-row-actions-cell {
+  text-align: center;
+  padding: 0.22rem 0.28rem;
+}
+
+.row-delete-btn {
+  min-width: 5.2rem;
+  justify-content: center;
+  padding: 0.17rem 0.38rem;
+  font-size: 0.68rem;
+}
+
+.row-delete-btn.delete-existing {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--control-border));
 }
 
 .row-action-btn {
@@ -1842,7 +2007,7 @@ button:focus-visible {
   overflow: auto;
 }
 
-.object-detail-grid-pane.is-data-view .results-table td {
+.object-detail-grid-pane.is-data-view .results-table td:not(.results-row-actions-cell) {
   font-family: Consolas, "Courier New", monospace;
 }
 
