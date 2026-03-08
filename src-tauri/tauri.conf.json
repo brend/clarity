@@ -24,6 +24,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
+	"createUpdaterArtifacts": true,
+"plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU0ODRFRTE4RDZFMThCNUIKUldSYmkrSFdHTzZFNUVTM0lvRnNWQitOQktDcjdzSE0vc2VkWTZHcWFIeDEzWkJCa0swNWRNRk8K",
+      "endpoints": [
+        "https://github.com/brend/clarity/releases/latest/download/latest.json"
+      ]
+    }
+  }
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
