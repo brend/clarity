@@ -79,6 +79,48 @@ npm run build
 cd src-tauri && cargo check
 ```
 
+## CI/CD (GitHub Actions)
+
+Clarity now includes two workflows:
+
+- CI: `.github/workflows/ci.yml`
+  - Runs on pull requests and pushes to `main`
+  - Builds the Vue frontend (`npm run build`)
+  - Runs Rust checks/tests for `src-tauri` (`cargo check`, `cargo test`)
+- Release: `.github/workflows/release.yml`
+  - Runs when a Git tag matching `v*` is pushed (example: `v0.1.0`)
+  - Builds Tauri bundles on Linux, macOS, and Windows
+  - Creates/updates a GitHub Release and uploads platform artifacts
+
+### Required GitHub secrets
+
+In `Settings -> Secrets and variables -> Actions`, add:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+
+These are used by `tauri-action` for signed updater artifacts. `GITHUB_TOKEN` is provided automatically by GitHub Actions.
+
+### Recommended branch protection
+
+For `main`, enable:
+
+- Require a pull request before merging
+- Require status checks to pass before merging
+- Select checks from the `CI` workflow (`Frontend Build`, `Rust Check`)
+- Require branches to be up to date before merging
+
+### Release command
+
+From a clean `main` branch:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+That tag triggers the release workflow and creates a draft release with attached binaries/installers.
+
 ## Next Step
 
 Add profile import/export tooling and provider implementations beyond Oracle.
