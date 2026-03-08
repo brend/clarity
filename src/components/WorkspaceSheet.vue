@@ -48,6 +48,7 @@ const props = defineProps<{
   isSearchTabActive: boolean;
   schemaSearchFocusToken: number;
   isConnected: boolean;
+  transactionActive: boolean;
   busy: BusyState;
   activeQueryTab: WorkspaceQueryTab | null;
   activeDdlTab: WorkspaceDdlTab | null;
@@ -79,6 +80,9 @@ const props = defineProps<{
   onOpenSettings: () => void;
   onCloseDdlTab: (tabId: string) => void;
   onRunQuery: (selectedText?: string) => void;
+  onBeginTransaction: () => void;
+  onCommitTransaction: () => void;
+  onRollbackTransaction: () => void;
   onSaveDdl: () => void;
   onRefreshActiveObjectDetail: () => void;
   onUpdateActiveObjectDataRow: (
@@ -728,6 +732,45 @@ watch(
       <button
         class="btn"
         :disabled="
+          !props.isConnected ||
+          props.transactionActive ||
+          props.busy.runningQuery ||
+          props.busy.updatingData ||
+          props.busy.managingTransaction
+        "
+        @click="props.onBeginTransaction"
+      >
+        Begin
+      </button>
+      <button
+        class="btn"
+        :disabled="
+          !props.isConnected ||
+          !props.transactionActive ||
+          props.busy.runningQuery ||
+          props.busy.updatingData ||
+          props.busy.managingTransaction
+        "
+        @click="props.onCommitTransaction"
+      >
+        Commit
+      </button>
+      <button
+        class="btn"
+        :disabled="
+          !props.isConnected ||
+          !props.transactionActive ||
+          props.busy.runningQuery ||
+          props.busy.updatingData ||
+          props.busy.managingTransaction
+        "
+        @click="props.onRollbackTransaction"
+      >
+        Rollback
+      </button>
+      <button
+        class="btn"
+        :disabled="
           !props.canUseAiSuggestions ||
           !props.activeQueryTab ||
           props.aiSuggestionLoading
@@ -753,6 +796,12 @@ watch(
         >Provider: {{ props.selectedProviderLabel }}</span
       >
       <span class="schema-chip">Schema: {{ props.connectedSchema }}</span>
+      <span
+        class="schema-chip transaction-chip"
+        :class="{ active: props.transactionActive }"
+      >
+        Txn: {{ props.transactionActive ? "Active (Uncommitted)" : "Auto-commit" }}
+      </span>
     </div>
 
     <section v-if="props.isQueryTabActive" class="query-sheet-pane">
@@ -1427,6 +1476,14 @@ button:focus-visible {
   padding: 0;
   border-radius: 0;
   letter-spacing: 0.01em;
+}
+
+.transaction-chip {
+  font-weight: 500;
+}
+
+.transaction-chip.active {
+  color: var(--danger);
 }
 
 .ai-suggestion-banner {

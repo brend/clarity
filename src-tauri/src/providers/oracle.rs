@@ -19,6 +19,7 @@ const MAX_SEARCH_SNIPPET_CHARS: usize = 220;
 pub(crate) struct OracleSession {
     pub(crate) connection: Connection,
     target_schema: String,
+    transaction_active: bool,
 }
 
 pub(crate) fn connect(
@@ -55,6 +56,7 @@ pub(crate) fn connect(
     let session = OracleSession {
         connection,
         target_schema: schema.clone(),
+        transaction_active: false,
     };
 
     Ok((session, display_name, schema))
@@ -423,6 +425,7 @@ pub(crate) fn update_object_ddl(
         .execute(ddl.as_str(), &[])
         .map_err(map_oracle_error)?;
     session.connection.commit().map_err(map_oracle_error)?;
+    session.transaction_active = false;
 
     Ok(format!(
         "{} {}.{} updated",
@@ -450,15 +453,7 @@ pub(crate) fn run_query(
         .statement(sql)
         .build()
         .map_err(map_oracle_error)?;
-
-    let is_write_statement = statement.is_dml() || statement.is_ddl() || statement.is_plsql();
-    let allow_destructive = request.allow_destructive.unwrap_or(false);
-    if is_write_statement && !allow_destructive {
-        return Err(
-            "Safety check blocked a write/DDL/PLSQL statement. Confirm execution and retry."
-                .to_string(),
-        );
-    }
+    let transaction_control = detect_transaction_control(sql);
 
     if statement.is_query() {
         let row_limit = request
@@ -507,7 +502,14 @@ pub(crate) fn run_query(
     let rows_affected = statement.row_count().map_err(map_oracle_error)?;
 
     if statement.is_dml() || statement.is_plsql() {
-        session.connection.commit().map_err(map_oracle_error)?;
+        if !session.transaction_active {
+            session.connection.commit().map_err(map_oracle_error)?;
+        }
+    } else if statement.is_ddl() {
+        // Oracle DDL statements auto-commit and end any active transaction.
+        session.transaction_active = false;
+    } else {
+        apply_transaction_control(session, transaction_control);
     }
 
     let message = if statement.is_dml() {
@@ -526,6 +528,86 @@ pub(crate) fn run_query(
         rows_affected: Some(rows_affected),
         message,
     })
+}
+
+pub(crate) fn begin_transaction(session: &mut OracleSession) -> Result<bool, String> {
+    session.transaction_active = true;
+    Ok(session.transaction_active)
+}
+
+pub(crate) fn commit_transaction(session: &mut OracleSession) -> Result<bool, String> {
+    if session.transaction_active {
+        session.connection.commit().map_err(map_oracle_error)?;
+    }
+    session.transaction_active = false;
+    Ok(session.transaction_active)
+}
+
+pub(crate) fn rollback_transaction(session: &mut OracleSession) -> Result<bool, String> {
+    if session.transaction_active {
+        session.connection.rollback().map_err(map_oracle_error)?;
+    }
+    session.transaction_active = false;
+    Ok(session.transaction_active)
+}
+
+pub(crate) fn transaction_active(session: &OracleSession) -> bool {
+    session.transaction_active
+}
+
+#[derive(Clone, Copy)]
+enum TransactionControl {
+    None,
+    Commit,
+    Rollback,
+    RollbackToSavepoint,
+    Savepoint,
+    SetTransaction,
+}
+
+fn detect_transaction_control(sql: &str) -> TransactionControl {
+    let normalized = sql.trim().trim_end_matches(';').trim();
+    if normalized.is_empty() {
+        return TransactionControl::None;
+    }
+
+    let mut parts = normalized.split_whitespace();
+    let Some(first) = parts.next() else {
+        return TransactionControl::None;
+    };
+    let second = parts.next().unwrap_or_default();
+    let first = first.to_ascii_uppercase();
+    let second = second.to_ascii_uppercase();
+
+    if first == "COMMIT" {
+        return TransactionControl::Commit;
+    }
+    if first == "ROLLBACK" {
+        if second == "TO" {
+            return TransactionControl::RollbackToSavepoint;
+        }
+        return TransactionControl::Rollback;
+    }
+    if first == "SAVEPOINT" {
+        return TransactionControl::Savepoint;
+    }
+    if first == "SET" && second == "TRANSACTION" {
+        return TransactionControl::SetTransaction;
+    }
+
+    TransactionControl::None
+}
+
+fn apply_transaction_control(session: &mut OracleSession, control: TransactionControl) {
+    match control {
+        TransactionControl::Commit | TransactionControl::Rollback => {
+            session.transaction_active = false;
+        }
+        TransactionControl::Savepoint | TransactionControl::SetTransaction => {
+            session.transaction_active = true;
+        }
+        TransactionControl::None | TransactionControl::RollbackToSavepoint => {}
+    }
 }
 
 fn try_run_show_command(

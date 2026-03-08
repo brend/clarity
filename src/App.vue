@@ -134,6 +134,7 @@ const {
   schemaExportTargets,
   busy,
   isConnected,
+  transactionActive,
   connectedSchema,
   selectedProviderLabel,
   objectTree,
@@ -197,6 +198,9 @@ const {
   saveAllQuerySheetsToDisk,
   saveDdl,
   runQuery,
+  beginTransaction,
+  commitTransaction,
+  rollbackTransaction,
   runSchemaSearch,
   openSchemaSearchResult,
   isLikelyNumeric,
@@ -961,6 +965,7 @@ onBeforeUnmount(() => {
         :is-search-tab-active="isSearchTabActive"
         :schema-search-focus-token="schemaSearchFocusToken"
         :is-connected="isConnected"
+        :transaction-active="transactionActive"
         :busy="busy"
         :active-query-tab="activeQueryTab"
         :active-ddl-tab="activeDdlTab"
@@ -994,6 +999,9 @@ onBeforeUnmount(() => {
         :on-open-settings="openSettingsDialog"
         :on-close-ddl-tab="closeDdlTab"
         :on-run-query="runQuery"
+        :on-begin-transaction="beginTransaction"
+        :on-commit-transaction="commitTransaction"
+        :on-rollback-transaction="rollbackTransaction"
         :on-save-ddl="saveDdl"
         :on-refresh-active-object-detail="refreshActiveObjectDetail"
         :on-update-active-object-data-row="updateActiveObjectDataRow"

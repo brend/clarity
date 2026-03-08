@@ -81,4 +81,4 @@ cd src-tauri && cargo check
 
 ## Next Step
 
-Add query safety guards (default row limits, destructive statement confirmation), profile import/export tooling, and provider implementations beyond Oracle.
+Add profile import/export tooling and provider implementations beyond Oracle.

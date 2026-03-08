@@ -116,6 +116,42 @@ impl ProviderRegistry {
             (provider, _) => Err(not_implemented_error(provider)),
         }
     }
+
+    pub(crate) fn begin_transaction(session: &mut AppSession) -> Result<bool, String> {
+        match (session.provider, &mut session.session) {
+            (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
+                oracle::begin_transaction(oracle_session)
+            }
+            (provider, _) => Err(not_implemented_error(provider)),
+        }
+    }
+
+    pub(crate) fn commit_transaction(session: &mut AppSession) -> Result<bool, String> {
+        match (session.provider, &mut session.session) {
+            (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
+                oracle::commit_transaction(oracle_session)
+            }
+            (provider, _) => Err(not_implemented_error(provider)),
+        }
+    }
+
+    pub(crate) fn rollback_transaction(session: &mut AppSession) -> Result<bool, String> {
+        match (session.provider, &mut session.session) {
+            (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
+                oracle::rollback_transaction(oracle_session)
+            }
+            (provider, _) => Err(not_implemented_error(provider)),
+        }
+    }
+
+    pub(crate) fn transaction_active(session: &AppSession) -> Result<bool, String> {
+        match (session.provider, &session.session) {
+            (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
+                Ok(oracle::transaction_active(oracle_session))
+            }
+            (provider, _) => Err(not_implemented_error(provider)),
+        }
+    }
 }
 
 impl DatabaseProvider {

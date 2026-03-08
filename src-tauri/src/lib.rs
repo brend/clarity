@@ -78,7 +78,6 @@ struct OracleQueryRequest {
     session_id: u64,
     sql: String,
     row_limit: Option<u32>,
-    allow_destructive: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,6 +225,12 @@ struct OracleQueryResult {
     rows: Vec<Vec<String>>,
     rows_affected: Option<u64>,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DbTransactionState {
+    active: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -457,6 +462,74 @@ fn db_run_query(
         .ok_or_else(|| "Session not found".to_string())?;
 
     ProviderRegistry::run_query(session, &request)
+}
+
+#[tauri::command]
+fn db_get_transaction_state(
+    request: SessionRequest,
+    state: tauri::State<AppState>,
+) -> Result<DbTransactionState, String> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let active = ProviderRegistry::transaction_active(session)?;
+    Ok(DbTransactionState { active })
+}
+
+#[tauri::command]
+fn db_begin_transaction(
+    request: SessionRequest,
+    state: tauri::State<AppState>,
+) -> Result<DbTransactionState, String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get_mut(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let active = ProviderRegistry::begin_transaction(session)?;
+    Ok(DbTransactionState { active })
+}
+
+#[tauri::command]
+fn db_commit_transaction(
+    request: SessionRequest,
+    state: tauri::State<AppState>,
+) -> Result<DbTransactionState, String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get_mut(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let active = ProviderRegistry::commit_transaction(session)?;
+    Ok(DbTransactionState { active })
+}
+
+#[tauri::command]
+fn db_rollback_transaction(
+    request: SessionRequest,
+    state: tauri::State<AppState>,
+) -> Result<DbTransactionState, String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to acquire session lock".to_string())?;
+    let session = sessions
+        .get_mut(&request.session_id)
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let active = ProviderRegistry::rollback_transaction(session)?;
+    Ok(DbTransactionState { active })
 }
 
 #[tauri::command]
@@ -2078,6 +2151,10 @@ pub fn run() {
             db_list_objects,
             db_list_object_columns,
             db_run_query,
+            db_get_transaction_state,
+            db_begin_transaction,
+            db_commit_transaction,
+            db_rollback_transaction,
             db_search_schema_text,
             db_get_object_ddl,
             db_update_object_ddl,

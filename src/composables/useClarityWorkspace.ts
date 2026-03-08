@@ -8,6 +8,7 @@ import {
 import type {
   BusyState,
   ConnectionProfile,
+  DbTransactionState,
   ObjectDetailTabDefinition,
   ObjectDetailTabId,
   OracleConnectRequest,
@@ -522,6 +523,7 @@ export function useClarityWorkspace() {
   );
   const schemaSearchResults = ref<OracleSchemaSearchResult[]>([]);
   const schemaSearchPerformed = ref(false);
+  const transactionActive = ref(false);
   const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
   const errorMessage = ref("");
   const activeWorkspaceTabId = ref(initialQuerySheetState.activeWorkspaceTabId);
@@ -537,6 +539,7 @@ export function useClarityWorkspace() {
     loadingDdl: false,
     savingDdl: false,
     runningQuery: false,
+    managingTransaction: false,
     updatingData: false,
     exportingSchema: false,
     searchingSchema: false,
@@ -825,6 +828,33 @@ export function useClarityWorkspace() {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
   }
 
+  async function runQueryForSession(
+    sessionId: number,
+    sql: string,
+    rowLimit?: number,
+  ): Promise<OracleQueryResult> {
+    const result = await invoke<OracleQueryResult>("db_run_query", {
+      request: {
+        sessionId,
+        sql,
+        rowLimit,
+      },
+    });
+    await syncTransactionState(sessionId);
+    return result;
+  }
+
+  async function syncTransactionState(sessionId: number): Promise<void> {
+    try {
+      const result = await invoke<DbTransactionState>("db_get_transaction_state", {
+        request: { sessionId },
+      });
+      transactionActive.value = result.active;
+    } catch {
+      // Ignore follow-up state sync errors.
+    }
+  }
+
   function prepareQueryResultPanes(
     tab: WorkspaceQueryTab,
     statementCount: number,
@@ -1110,6 +1140,7 @@ export function useClarityWorkspace() {
     ) {
       return false;
     }
+    const sessionId = session.value.sessionId;
 
     if (busy.updatingData) {
       return false;
@@ -1166,13 +1197,7 @@ export function useClarityWorkspace() {
     busy.updatingData = true;
 
     try {
-      const result = await invoke<OracleQueryResult>("db_run_query", {
-        request: {
-          sessionId: session.value.sessionId,
-          sql,
-          allowDestructive: true,
-        },
-      });
+      const result = await runQueryForSession(sessionId, sql);
 
       for (const index of changedIndexes) {
         row[index + 1] = values[index];
@@ -1198,6 +1223,7 @@ export function useClarityWorkspace() {
     ) {
       return false;
     }
+    const sessionId = session.value.sessionId;
 
     if (busy.updatingData) {
       return false;
@@ -1247,13 +1273,7 @@ export function useClarityWorkspace() {
     busy.updatingData = true;
 
     try {
-      const result = await invoke<OracleQueryResult>("db_run_query", {
-        request: {
-          sessionId: session.value.sessionId,
-          sql,
-          allowDestructive: true,
-        },
-      });
+      const result = await runQueryForSession(sessionId, sql);
 
       statusMessage.value = `${tab.object.schema}.${tab.object.objectName}: ${result.message}`;
       return true;
@@ -1519,6 +1539,7 @@ export function useClarityWorkspace() {
       });
 
       session.value = summary;
+      transactionActive.value = false;
       selectedExportSessionId.value = summary.sessionId;
       const firstQueryTab = queryTabs.value[0];
       if (
@@ -1531,6 +1552,7 @@ export function useClarityWorkspace() {
         firstQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
       }
       statusMessage.value = `Connected: ${summary.displayName}`;
+      await syncTransactionState(summary.sessionId);
       await refreshObjects();
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
@@ -1555,6 +1577,7 @@ export function useClarityWorkspace() {
       errorMessage.value = toErrorMessage(error);
     } finally {
       session.value = null;
+      transactionActive.value = false;
       objects.value = [];
       objectColumns.value = [];
       expandedObjectTypes.value = {};
@@ -1703,6 +1726,7 @@ export function useClarityWorkspace() {
     if (!session.value || !activeDdlTab.value) {
       return;
     }
+    const sessionId = session.value.sessionId;
 
     errorMessage.value = "";
     busy.savingDdl = true;
@@ -1711,7 +1735,7 @@ export function useClarityWorkspace() {
       const object = activeDdlTab.value.object;
       const message = await invoke<string>("db_update_object_ddl", {
         request: {
-          sessionId: session.value.sessionId,
+          sessionId,
           schema: object.schema,
           objectType: object.objectType,
           objectName: object.objectName,
@@ -1719,6 +1743,7 @@ export function useClarityWorkspace() {
         },
       });
 
+      await syncTransactionState(sessionId);
       statusMessage.value = `${object.objectName}: ${message}`;
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
@@ -1733,6 +1758,7 @@ export function useClarityWorkspace() {
     }
 
     const queryTab = activeQueryTab.value;
+    const sessionId = session.value.sessionId;
     const effectiveRowLimit = clampQueryRowLimit(queryRowLimit.value);
     if (effectiveRowLimit !== queryRowLimit.value) {
       queryRowLimit.value = effectiveRowLimit;
@@ -1747,8 +1773,6 @@ export function useClarityWorkspace() {
       return;
     }
 
-    const allowDestructive = true;
-
     prepareQueryResultPanes(queryTab, statements.length);
     errorMessage.value = "";
     busy.runningQuery = true;
@@ -1756,14 +1780,11 @@ export function useClarityWorkspace() {
 
     try {
       for (let index = 0; index < statements.length; index += 1) {
-        const result = await invoke<OracleQueryResult>("db_run_query", {
-          request: {
-            sessionId: session.value.sessionId,
-            sql: statements[index],
-            rowLimit: effectiveRowLimit,
-            allowDestructive,
-          },
-        });
+        const result = await runQueryForSession(
+          sessionId,
+          statements[index],
+          effectiveRowLimit,
+        );
 
         const pane = queryTab.resultPanes[index];
         if (pane) {
@@ -1801,6 +1822,78 @@ export function useClarityWorkspace() {
       }
     } finally {
       busy.runningQuery = false;
+    }
+  }
+
+  async function beginTransaction(): Promise<void> {
+    if (!session.value || busy.managingTransaction) {
+      return;
+    }
+
+    errorMessage.value = "";
+    busy.managingTransaction = true;
+
+    try {
+      const result = await invoke<DbTransactionState>("db_begin_transaction", {
+        request: { sessionId: session.value.sessionId },
+      });
+      transactionActive.value = result.active;
+      statusMessage.value = result.active
+        ? "Transaction started. Changes are pending until commit or rollback."
+        : "Unable to start transaction.";
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+    } finally {
+      busy.managingTransaction = false;
+    }
+  }
+
+  async function commitTransaction(): Promise<void> {
+    if (!session.value || busy.managingTransaction) {
+      return;
+    }
+
+    errorMessage.value = "";
+    busy.managingTransaction = true;
+
+    try {
+      const result = await invoke<DbTransactionState>("db_commit_transaction", {
+        request: { sessionId: session.value.sessionId },
+      });
+      transactionActive.value = result.active;
+      statusMessage.value = result.active
+        ? "Transaction is still active."
+        : "Transaction committed.";
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+    } finally {
+      busy.managingTransaction = false;
+    }
+  }
+
+  async function rollbackTransaction(): Promise<void> {
+    if (!session.value || busy.managingTransaction) {
+      return;
+    }
+
+    errorMessage.value = "";
+    busy.managingTransaction = true;
+
+    try {
+      const result = await invoke<DbTransactionState>(
+        "db_rollback_transaction",
+        {
+          request: { sessionId: session.value.sessionId },
+        },
+      );
+      transactionActive.value = result.active;
+      statusMessage.value = result.active
+        ? "Transaction is still active."
+        : "Transaction rolled back.";
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+    } finally {
+      busy.managingTransaction = false;
     }
   }
 
@@ -1906,6 +1999,7 @@ export function useClarityWorkspace() {
     schemaExportTargets,
     busy,
     isConnected,
+    transactionActive,
     connectedSchema,
     selectedProviderLabel,
     objectTree,
@@ -1970,6 +2064,9 @@ export function useClarityWorkspace() {
     saveAllQuerySheetsToDisk,
     saveDdl,
     runQuery,
+    beginTransaction,
+    commitTransaction,
+    rollbackTransaction,
     runSchemaSearch,
     openSchemaSearchResult,
     isLikelyNumeric,

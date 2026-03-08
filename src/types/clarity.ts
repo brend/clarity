@@ -35,6 +35,10 @@ export interface SchemaExportResult {
   message: string;
 }
 
+export interface DbTransactionState {
+  active: boolean;
+}
+
 export interface ConnectionProfile {
   id: string;
   name: string;
@@ -151,6 +155,7 @@ export interface BusyState {
   loadingDdl: boolean;
   savingDdl: boolean;
   runningQuery: boolean;
+  managingTransaction: boolean;
   updatingData: boolean;
   exportingSchema: boolean;
   searchingSchema: boolean;
