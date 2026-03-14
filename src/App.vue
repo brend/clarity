@@ -1619,7 +1619,8 @@ body {
 .sidebar-shell {
   min-width: 0;
   min-height: 0;
-  display: block;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
   background: var(--bg-sidebar);
   overflow: hidden;
 }

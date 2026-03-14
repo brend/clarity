@@ -659,6 +659,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.6rem;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   padding: 0.7rem 0.7rem 0.7rem 0;
@@ -684,8 +685,8 @@ onBeforeUnmount(() => {
 
 .connect-box {
   display: grid;
-  gap: 0.65rem;
-  padding: 0.85rem;
+  gap: 0.5rem;
+  padding: 0.72rem;
 }
 
 .tree-area {
@@ -702,6 +703,13 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+.connect-box > .card-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
 }
 
 .connect-header-actions {
@@ -733,6 +741,10 @@ onBeforeUnmount(() => {
   color: var(--text-primary);
 }
 
+.connect-box .card-title {
+  font-size: 0.92rem;
+}
+
 .card-description {
   margin: 0;
   font-size: 0.72rem;
@@ -741,12 +753,17 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
+.connect-box .card-description {
+  font-size: 0.66rem;
+  line-height: 1.3;
+}
+
 .connect-state-pill {
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
   color: var(--text-secondary);
-  padding: 0.34rem 0.72rem;
-  font-size: 0.62rem;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.58rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -762,9 +779,9 @@ onBeforeUnmount(() => {
   border: 0;
   background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
   color: var(--text-secondary);
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 8px;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 7px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -789,8 +806,8 @@ onBeforeUnmount(() => {
 
 .connection-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.45rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
 }
 
 .connect-pane-body {
@@ -804,14 +821,14 @@ onBeforeUnmount(() => {
 
 .summary-tile {
   display: grid;
-  gap: 0.2rem;
-  padding: 0.65rem 0.7rem;
-  border-radius: 12px;
+  gap: 0.14rem;
+  padding: 0.5rem 0.58rem;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
 .summary-label {
-  font-size: 0.6rem;
+  font-size: 0.54rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-subtle);
@@ -819,12 +836,19 @@ onBeforeUnmount(() => {
 
 .summary-value {
   min-width: 0;
-  font-size: 0.8rem;
+  font-size: 0.68rem;
   font-weight: 600;
+  line-height: 1.2;
   color: var(--text-primary);
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: normal;
+}
+
+@media (max-width: 1240px) {
+  .connection-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .connect-toggle-icon {
@@ -1057,6 +1081,7 @@ button:focus-visible {
 }
 
 .tree-scroll {
+  height: 100%;
   min-height: 0;
   overflow: auto;
   padding-top: 0.35rem;
