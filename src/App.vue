@@ -4,6 +4,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import ExplorerSidebar from "./components/ExplorerSidebar.vue";
 import QueryResultsPane from "./components/QueryResultsPane.vue";
+import WorkbenchHeader from "./components/WorkbenchHeader.vue";
+import WorkbenchSidebarNav from "./components/WorkbenchSidebarNav.vue";
+import WorkbenchSummaryCards from "./components/WorkbenchSummaryCards.vue";
 import WorkspaceSheet from "./components/WorkspaceSheet.vue";
 import {
   CREATE_OBJECT_TYPE_OPTIONS,
@@ -113,6 +116,23 @@ const SQL_IDENTIFIER_STOP_WORDS = new Set([
   "EXPLAIN",
 ]);
 
+type SidebarSection =
+  | "connections"
+  | "explorer"
+  | "query"
+  | "object"
+  | "settings";
+
+type SummaryCardTone = "default" | "accent" | "muted";
+
+interface WorkbenchSummaryCard {
+  key: string;
+  label: string;
+  value: string;
+  meta: string;
+  tone?: SummaryCardTone;
+}
+
 const desktopShellEl = ref<HTMLElement | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
 
@@ -215,6 +235,9 @@ const {
 const showExportDialog = ref(false);
 const showSettingsDialog = ref(false);
 const showCreateObjectDialog = ref(false);
+const highlightedSidebarSection = ref<"connections" | "explorer">(
+  "connections",
+);
 const exportSummaryMessage = ref("");
 const exportMenuUnlisten = ref<UnlistenFn | null>(null);
 const settingsMenuUnlisten = ref<UnlistenFn | null>(null);
@@ -277,6 +300,163 @@ const queryResultsEmptyStateMessage = computed<string>(() =>
     ? "Run a query to see results."
     : "Select a query sheet to see results.",
 );
+const connectionLabel = computed<string>(() => {
+  return (
+    session.value?.displayName ||
+    selectedProfile.value?.name ||
+    profileName.value.trim() ||
+    "No active connection"
+  );
+});
+const activeWorkspaceLabel = computed<string>(() => {
+  if (activeDdlObject.value) {
+    return `${activeDdlObject.value.objectName} details`;
+  }
+
+  if (isSearchTabActive.value) {
+    return "Schema search";
+  }
+
+  if (activeQueryTab.value) {
+    return activeQueryTab.value.title;
+  }
+
+  return "Query workspace";
+});
+const selectedObjectLabel = computed<string>(() => {
+  const object = activeDdlObject.value ?? selectedObject.value;
+  if (!object) {
+    return "";
+  }
+
+  return `${object.schema}.${object.objectName}`;
+});
+const executionSummary = computed<{ value: string; meta: string }>(() => {
+  if (busy.runningQuery) {
+    return {
+      value: "Running query",
+      meta: "Statement execution is in progress.",
+    };
+  }
+
+  if (busy.savingDdl) {
+    return {
+      value: "Saving DDL",
+      meta: "Persisting the active object definition.",
+    };
+  }
+
+  if (busy.updatingData) {
+    return {
+      value: "Committing data",
+      meta: "Applying pending row edits in the detail panel.",
+    };
+  }
+
+  if (busy.searchingSchema) {
+    return {
+      value: "Searching schema",
+      meta: "Scanning object names, source, and DDL.",
+    };
+  }
+
+  if (errorMessage.value.trim()) {
+    return {
+      value: "Needs attention",
+      meta: errorMessage.value,
+    };
+  }
+
+  const activePane =
+    activeQueryResultPanes.value.find(
+      (pane) => pane.id === activeQueryResultPaneId.value,
+    ) ?? activeQueryResultPanes.value[0];
+  if (activePane?.errorMessage) {
+    return {
+      value: "Query error",
+      meta: activePane.errorMessage,
+    };
+  }
+
+  if (activePane?.queryResult) {
+    if (activePane.queryResult.rowsAffected !== null) {
+      return {
+        value: `${activePane.queryResult.rowsAffected} rows affected`,
+        meta: activePane.queryResult.message || activePane.title,
+      };
+    }
+
+    return {
+      value: `${activePane.queryResult.rows.length} rows returned`,
+      meta: activePane.queryResult.message || activePane.title,
+    };
+  }
+
+  return {
+    value: statusMessage.value || "Ready",
+    meta: isConnected.value
+      ? "The workspace is ready for the next action."
+      : "Connect to start exploring objects and running SQL.",
+  };
+});
+const summaryCards = computed<WorkbenchSummaryCard[]>(() => [
+  {
+    key: "connection",
+    label: "Active Connection",
+    value: connectionLabel.value,
+    meta: isConnected.value
+      ? "Connected session and saved profile context."
+      : "Choose a profile or enter credentials to connect.",
+    tone: isConnected.value ? "accent" : "muted",
+  },
+  {
+    key: "provider",
+    label: "Provider",
+    value: selectedProviderLabel.value || connection.provider.toUpperCase(),
+    meta: selectedProfile.value
+      ? `Profile: ${selectedProfile.value.name}`
+      : "Provider-aware flow stays intact across the redesign.",
+  },
+  {
+    key: "schema",
+    label: "Schema",
+    value: connectedSchema.value || connection.connection.schema || "Not selected",
+    meta: isConnected.value
+      ? "Explorer, completions, and object tabs are scoped here."
+      : "This schema will be used when the next session connects.",
+  },
+  {
+    key: "object",
+    label: "Selected Object",
+    value: selectedObject.value?.objectName || "No object selected",
+    meta: selectedObject.value
+      ? `${selectedObject.value.schema} • ${selectedObject.value.objectType}`
+      : "Open a table, view, or package from the explorer.",
+    tone: selectedObject.value ? "default" : "muted",
+  },
+  {
+    key: "execution",
+    label: "Execution Status",
+    value: executionSummary.value.value,
+    meta: executionSummary.value.meta,
+    tone: busy.runningQuery ? "accent" : "default",
+  },
+]);
+const activeSidebarSection = computed<SidebarSection>(() => {
+  if (showSettingsDialog.value) {
+    return "settings";
+  }
+
+  if (activeDdlTab.value) {
+    return "object";
+  }
+
+  if (isQueryTabActive.value || isSearchTabActive.value) {
+    return "query";
+  }
+
+  return highlightedSidebarSection.value;
+});
 const exportProgressPercent = computed<number>(() => {
   if (exportProgressTotal.value <= 0) {
     return 0;
@@ -742,6 +922,50 @@ function submitCreateObjectDialog(): void {
   closeCreateObjectDialog();
 }
 
+function openQueryWorkspace(): void {
+  if (activeQueryTab.value) {
+    activateWorkspaceTab(activeQueryTab.value.id);
+    return;
+  }
+
+  addQueryTab();
+}
+
+function openObjectWorkspace(): void {
+  if (activeDdlTab.value) {
+    activateWorkspaceTab(activeDdlTab.value.id);
+    return;
+  }
+
+  if (!selectedObject.value) {
+    highlightedSidebarSection.value = "explorer";
+    return;
+  }
+
+  openObjectFromExplorer(selectedObject.value);
+}
+
+async function handleSidebarNavigate(section: SidebarSection): Promise<void> {
+  if (section === "connections" || section === "explorer") {
+    highlightedSidebarSection.value = section;
+    return;
+  }
+
+  if (section === "query") {
+    highlightedSidebarSection.value = "explorer";
+    openQueryWorkspace();
+    return;
+  }
+
+  if (section === "object") {
+    highlightedSidebarSection.value = "explorer";
+    openObjectWorkspace();
+    return;
+  }
+
+  await openSettingsDialog();
+}
+
 async function openSettingsDialog(): Promise<void> {
   settingsDialogTheme.value = theme.value;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
@@ -961,33 +1185,46 @@ onBeforeUnmount(() => {
 
 <template>
   <main ref="desktopShellEl" class="desktop-shell" :style="desktopShellStyle">
-    <ExplorerSidebar
-      v-model:selected-profile-id="selectedProfileId"
-      v-model:profile-name="profileName"
-      v-model:save-profile-password="saveProfilePassword"
-      :connection="connection"
-      :connection-error="errorMessage"
-      :connection-profiles="connectionProfiles"
-      :selected-profile="selectedProfile"
-      :busy="busy"
-      :is-connected="isConnected"
-      :session="session"
-      :connected-schema="connectedSchema"
-      :object-tree="objectTree"
-      :selected-object="selectedObject"
-      :is-object-type-expanded="isObjectTypeExpanded"
-      :on-sync-selected-profile-ui="syncSelectedProfileUi"
-      :on-apply-selected-profile="applySelectedProfile"
-      :on-delete-selected-profile="deleteSelectedProfile"
-      :on-save-connection-profile="saveConnectionProfile"
-      :on-connect="handleConnect"
-      :on-disconnect="disconnectOracle"
-      :on-refresh-objects="refreshObjects"
-      :on-toggle-object-type="toggleObjectType"
-      :on-open-object-from-explorer="openObjectFromExplorer"
-      :create-object-types="CREATE_OBJECT_TYPE_OPTIONS"
-      :on-request-create-object="openCreateObjectDialog"
-    />
+    <aside class="sidebar-shell">
+      <WorkbenchSidebarNav
+        :active-section="activeSidebarSection"
+        :is-connected="isConnected"
+        :provider-label="selectedProviderLabel"
+        :connected-schema="connectedSchema"
+        :selected-object-label="selectedObjectLabel"
+        @navigate="(section) => void handleSidebarNavigate(section)"
+      />
+
+      <ExplorerSidebar
+        v-model:selected-profile-id="selectedProfileId"
+        v-model:profile-name="profileName"
+        v-model:save-profile-password="saveProfilePassword"
+        :connection="connection"
+        :connection-error="errorMessage"
+        :connection-profiles="connectionProfiles"
+        :selected-profile="selectedProfile"
+        :busy="busy"
+        :is-connected="isConnected"
+        :session="session"
+        :connected-schema="connectedSchema"
+        :selected-provider-label="selectedProviderLabel"
+        :highlighted-section="highlightedSidebarSection"
+        :object-tree="objectTree"
+        :selected-object="selectedObject"
+        :is-object-type-expanded="isObjectTypeExpanded"
+        :on-sync-selected-profile-ui="syncSelectedProfileUi"
+        :on-apply-selected-profile="applySelectedProfile"
+        :on-delete-selected-profile="deleteSelectedProfile"
+        :on-save-connection-profile="saveConnectionProfile"
+        :on-connect="handleConnect"
+        :on-disconnect="disconnectOracle"
+        :on-refresh-objects="refreshObjects"
+        :on-toggle-object-type="toggleObjectType"
+        :on-open-object-from-explorer="openObjectFromExplorer"
+        :create-object-types="CREATE_OBJECT_TYPE_OPTIONS"
+        :on-request-create-object="openCreateObjectDialog"
+      />
+    </aside>
 
     <div
       class="panel-resizer vertical"
@@ -997,8 +1234,24 @@ onBeforeUnmount(() => {
       @pointerdown="beginSidebarResize"
     ></div>
 
-    <section ref="workspaceEl" class="workspace" :style="workspaceStyle">
+    <section class="app-main">
+      <WorkbenchHeader
+        :workspace-label="activeWorkspaceLabel"
+        :status-message="statusMessage"
+        :is-connected="isConnected"
+        :connection-label="connectionLabel"
+        :provider-label="selectedProviderLabel"
+        :connected-schema="connectedSchema"
+        :transaction-active="transactionActive"
+        @open-settings="openSettingsDialog"
+        @open-export="openExportDialogFromMenu"
+      />
+
+      <WorkbenchSummaryCards :cards="summaryCards" />
+
+      <section ref="workspaceEl" class="workspace" :style="workspaceStyle">
       <WorkspaceSheet
+        class="workspace-card"
         v-model:query-text="activeQueryText"
         v-model:ddl-text="activeDdlText"
         v-model:query-row-limit="queryRowLimit"
@@ -1074,13 +1327,15 @@ onBeforeUnmount(() => {
         @pointerdown="beginResultsResize"
       ></div>
 
-      <QueryResultsPane
-        :result-panes="activeQueryResultPanes"
-        :active-result-pane-id="activeQueryResultPaneId"
-        :empty-state-message="queryResultsEmptyStateMessage"
-        @activate-pane="activateQueryResultPane"
-        :is-likely-numeric="isLikelyNumeric"
-      />
+        <QueryResultsPane
+          class="results-card"
+          :result-panes="activeQueryResultPanes"
+          :active-result-pane-id="activeQueryResultPaneId"
+          :empty-state-message="queryResultsEmptyStateMessage"
+          @activate-pane="activateQueryResultPane"
+          :is-likely-numeric="isLikelyNumeric"
+        />
+      </section>
     </section>
   </main>
 
@@ -1389,69 +1644,74 @@ onBeforeUnmount(() => {
 :root,
 :root[data-theme="light"] {
   --font-ui: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
-  --bg-canvas: #edf1f6;
-  --bg-shell: #e7ecf3;
-  --bg-sidebar: #f4f7fb;
-  --bg-surface: #ffffff;
-  --bg-surface-muted: #f6f8fc;
-  --bg-hover: #eef3fb;
-  --bg-active: #e4ecf9;
-  --bg-selected: #dbe7fb;
-  --border: #c8d4e3;
-  --border-strong: #b7c6d9;
-  --panel-separator: #c6d3e3;
-  --text-primary: #172536;
-  --text-secondary: #445a74;
-  --text-subtle: #5f738d;
-  --accent: #2f74d8;
-  --accent-strong: #4686e5;
-  --accent-contrast: #f3f8ff;
-  --danger: #b04f4f;
-  --focus-ring: rgba(47, 116, 216, 0.26);
-  --dialog-backdrop: rgba(26, 34, 46, 0.34);
-  --dialog-shadow: 0 16px 36px rgba(0, 0, 0, 0.18);
-  --splitter-hover: rgba(47, 116, 216, 0.24);
+  --bg-canvas: #f4efef;
+  --bg-shell: #f7f2f3;
+  --bg-sidebar: #f2ecee;
+  --bg-surface: rgba(255, 255, 255, 0.92);
+  --bg-surface-muted: #fbf7f7;
+  --bg-hover: #f6eef1;
+  --bg-active: #f2e4e9;
+  --bg-selected: #eed9e1;
+  --border: #e3d7dc;
+  --border-strong: #d7c6ce;
+  --panel-separator: #e7dde1;
+  --text-primary: #2b2530;
+  --text-secondary: #675a66;
+  --text-subtle: #8a7f88;
+  --accent: #c97d92;
+  --accent-soft: #f0dce3;
+  --accent-strong: #b85e78;
+  --accent-contrast: #fff9fb;
+  --success: #4f8c74;
+  --danger: #b35b67;
+  --warning: #a97a3e;
+  --focus-ring: rgba(201, 125, 146, 0.24);
+  --dialog-backdrop: rgba(78, 61, 68, 0.22);
+  --dialog-shadow: 0 32px 80px rgba(88, 68, 77, 0.18);
+  --card-shadow: 0 18px 36px rgba(89, 70, 80, 0.08);
+  --shell-shadow: 0 28px 60px rgba(89, 70, 80, 0.1);
+  --splitter-hover: rgba(201, 125, 146, 0.28);
   --control-bg: #ffffff;
-  --control-border: #b7c7da;
-  --control-hover: #e7effa;
+  --control-border: #dccfd5;
+  --control-hover: #f7eef1;
   --tab-active-bg: #ffffff;
-  --tab-active-border: #d7e3f2;
-  --table-divider: #e0e8f3;
-  --table-header-bg: #f5f8fd;
-  --table-row-alt: transparent;
-  --schema-chip-bg: #e9f0fb;
-  --schema-chip-border: #ccdaee;
-  --schema-chip-text: #56708f;
-  --link-hover: #1f4f8c;
-  --row-new-bg: rgba(84, 157, 242, 0.12);
-  --row-dirty-bg: rgba(221, 171, 89, 0.18);
-  --tree-selected-text: #193a67;
+  --tab-active-border: #e6d7de;
+  --table-divider: #ece3e7;
+  --table-header-bg: #fbf7f8;
+  --table-row-alt: rgba(248, 242, 244, 0.58);
+  --schema-chip-bg: #f5e7ec;
+  --schema-chip-border: #ead2da;
+  --schema-chip-text: #8a5f6e;
+  --link-hover: #8f4259;
+  --row-new-bg: rgba(138, 188, 170, 0.16);
+  --row-dirty-bg: rgba(201, 125, 146, 0.16);
+  --tree-selected-text: #6f3448;
   --editor-surface: #ffffff;
-  --editor-gutter-bg: #f5f8fd;
-  --editor-gutter-border: #d9e2ef;
-  --editor-gutter-text: #8291a5;
-  --editor-focus-outline: #bbcee7;
-  --editor-text: #1f2e43;
-  --editor-caret: #2f74d8;
-  --editor-active-line: rgba(47, 116, 216, 0.08);
-  --editor-active-gutter: rgba(47, 116, 216, 0.15);
-  --editor-selection: rgba(47, 116, 216, 0.2);
-  --editor-selection-focused: rgba(47, 116, 216, 0.28);
-  --editor-placeholder: #8f9db0;
-  --editor-token-keyword: #9b2fd2;
-  --editor-token-operator: #4d6e95;
-  --editor-token-string: #b35a1d;
-  --editor-token-number: #0c74bc;
-  --editor-token-comment: #7388a5;
-  --editor-token-type: #1c6da9;
-  --editor-token-variable: #1f2e43;
-  --editor-token-property: #1f2e43;
-  --editor-token-function: #0b5f9f;
-  --resizer-line: #dbe4f1;
-  --resizer-line-hover: #6da0e4;
-  --scrollbar-thumb: rgba(103, 125, 152, 0.42);
-  --scrollbar-thumb-hover: rgba(90, 114, 146, 0.62);
-  --pane-header-height: 42px;
+  --editor-gutter-bg: #fbf6f7;
+  --editor-gutter-border: #eee4e8;
+  --editor-gutter-text: #9c8f98;
+  --editor-focus-outline: #e8c8d3;
+  --editor-text: #302834;
+  --editor-caret: #c97d92;
+  --editor-active-line: rgba(201, 125, 146, 0.08);
+  --editor-active-gutter: rgba(201, 125, 146, 0.14);
+  --editor-selection: rgba(201, 125, 146, 0.18);
+  --editor-selection-focused: rgba(201, 125, 146, 0.24);
+  --editor-placeholder: #a09099;
+  --editor-token-keyword: #b55373;
+  --editor-token-operator: #866878;
+  --editor-token-string: #aa6a30;
+  --editor-token-number: #2d7d8f;
+  --editor-token-comment: #8c7f89;
+  --editor-token-type: #855f8b;
+  --editor-token-variable: #302834;
+  --editor-token-property: #302834;
+  --editor-token-function: #8f4259;
+  --resizer-line: #eadde3;
+  --resizer-line-hover: #c97d92;
+  --scrollbar-thumb: rgba(139, 117, 128, 0.32);
+  --scrollbar-thumb-hover: rgba(139, 117, 128, 0.46);
+  --pane-header-height: 58px;
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -1459,68 +1719,73 @@ onBeforeUnmount(() => {
 }
 
 :root[data-theme="dark"] {
-  --bg-canvas: #090d13;
-  --bg-shell: #0f151e;
-  --bg-sidebar: #161d29;
-  --bg-surface: #111826;
-  --bg-surface-muted: #151d2b;
-  --bg-hover: #202b3b;
-  --bg-active: #28384f;
-  --bg-selected: #2e4360;
-  --border: #243246;
-  --border-strong: #334760;
-  --panel-separator: #253348;
-  --text-primary: #d7e1ed;
-  --text-secondary: #96a8be;
-  --text-subtle: #7e91a8;
-  --accent: #57a2ff;
-  --accent-strong: #7bb6ff;
-  --accent-contrast: #041325;
-  --danger: #e39393;
-  --focus-ring: rgba(87, 162, 255, 0.36);
-  --dialog-backdrop: rgba(4, 8, 12, 0.7);
-  --dialog-shadow: 0 18px 38px rgba(0, 0, 0, 0.42);
-  --splitter-hover: rgba(87, 162, 255, 0.36);
-  --control-bg: #1a2433;
-  --control-border: #2d4058;
-  --control-hover: #222f43;
-  --tab-active-bg: #121a27;
-  --tab-active-border: #405773;
-  --table-divider: #223245;
-  --table-header-bg: #131d2d;
-  --table-row-alt: transparent;
-  --schema-chip-bg: #20324a;
-  --schema-chip-border: #3a5578;
-  --schema-chip-text: #adc3de;
-  --link-hover: #c1d7ef;
-  --row-new-bg: rgba(68, 134, 207, 0.22);
-  --row-dirty-bg: rgba(124, 94, 49, 0.28);
-  --tree-selected-text: #e6eefb;
-  --editor-surface: #0d1522;
-  --editor-gutter-bg: #141c2a;
-  --editor-gutter-border: #29384d;
-  --editor-gutter-text: #8196b2;
-  --editor-focus-outline: #4b6e99;
-  --editor-text: #dbe7f6;
-  --editor-caret: #7ab6ff;
-  --editor-active-line: rgba(82, 120, 166, 0.22);
-  --editor-active-gutter: rgba(82, 120, 166, 0.3);
-  --editor-selection: rgba(93, 145, 207, 0.3);
-  --editor-selection-focused: rgba(105, 163, 231, 0.42);
-  --editor-placeholder: #7489a3;
-  --editor-token-keyword: #cf78ff;
-  --editor-token-operator: #9bb2cd;
-  --editor-token-string: #ffb569;
-  --editor-token-number: #7bd8ff;
-  --editor-token-comment: #7e95b3;
-  --editor-token-type: #76c7ff;
-  --editor-token-variable: #dbe7f6;
-  --editor-token-property: #e4edf9;
-  --editor-token-function: #9bc4ff;
-  --resizer-line: #2a3c53;
-  --resizer-line-hover: #69adff;
-  --scrollbar-thumb: rgba(123, 147, 175, 0.34);
-  --scrollbar-thumb-hover: rgba(123, 157, 196, 0.54);
+  --bg-canvas: #171316;
+  --bg-shell: #1d171b;
+  --bg-sidebar: #241d22;
+  --bg-surface: rgba(39, 31, 37, 0.94);
+  --bg-surface-muted: #2b2328;
+  --bg-hover: #342a31;
+  --bg-active: #41313a;
+  --bg-selected: #4a3641;
+  --border: #453640;
+  --border-strong: #5b4752;
+  --panel-separator: #3b2f37;
+  --text-primary: #f1e6eb;
+  --text-secondary: #ccbfc7;
+  --text-subtle: #a994a0;
+  --accent: #d8879e;
+  --accent-soft: #4d3340;
+  --accent-strong: #e9a3b7;
+  --accent-contrast: #26161d;
+  --success: #75b79b;
+  --danger: #e39aa7;
+  --warning: #d6a26a;
+  --focus-ring: rgba(216, 135, 158, 0.34);
+  --dialog-backdrop: rgba(8, 5, 7, 0.7);
+  --dialog-shadow: 0 32px 80px rgba(0, 0, 0, 0.42);
+  --card-shadow: 0 20px 42px rgba(0, 0, 0, 0.24);
+  --shell-shadow: 0 30px 70px rgba(0, 0, 0, 0.32);
+  --splitter-hover: rgba(216, 135, 158, 0.36);
+  --control-bg: #2b2328;
+  --control-border: #58434f;
+  --control-hover: #382d34;
+  --tab-active-bg: #2a2126;
+  --tab-active-border: #604852;
+  --table-divider: #43343d;
+  --table-header-bg: #261d22;
+  --table-row-alt: rgba(255, 255, 255, 0.02);
+  --schema-chip-bg: #402b35;
+  --schema-chip-border: #6b4d59;
+  --schema-chip-text: #f0d6de;
+  --link-hover: #ffdce6;
+  --row-new-bg: rgba(117, 183, 155, 0.16);
+  --row-dirty-bg: rgba(216, 135, 158, 0.18);
+  --tree-selected-text: #ffe3ec;
+  --editor-surface: #231b20;
+  --editor-gutter-bg: #2a2227;
+  --editor-gutter-border: #43343d;
+  --editor-gutter-text: #a88f9b;
+  --editor-focus-outline: #7a5564;
+  --editor-text: #f2e7ec;
+  --editor-caret: #e9a3b7;
+  --editor-active-line: rgba(216, 135, 158, 0.18);
+  --editor-active-gutter: rgba(216, 135, 158, 0.24);
+  --editor-selection: rgba(216, 135, 158, 0.26);
+  --editor-selection-focused: rgba(216, 135, 158, 0.34);
+  --editor-placeholder: #a7909b;
+  --editor-token-keyword: #f0a8bc;
+  --editor-token-operator: #d3b6c0;
+  --editor-token-string: #efc48f;
+  --editor-token-number: #8bd7ea;
+  --editor-token-comment: #ad95a0;
+  --editor-token-type: #d7b0ea;
+  --editor-token-variable: #f2e7ec;
+  --editor-token-property: #f2e7ec;
+  --editor-token-function: #f4c1d0;
+  --resizer-line: #4a3943;
+  --resizer-line-hover: #d8879e;
+  --scrollbar-thumb: rgba(177, 153, 163, 0.28);
+  --scrollbar-thumb-hover: rgba(177, 153, 163, 0.4);
   color-scheme: dark;
 }
 
@@ -1535,6 +1800,14 @@ body {
   overflow: hidden;
   background: var(--bg-canvas);
   color: var(--text-primary);
+}
+
+body {
+  font-family: var(--font-ui);
+  background:
+    radial-gradient(circle at top left, rgba(221, 187, 197, 0.55), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(231, 214, 219, 0.72), transparent 24%),
+    var(--bg-canvas);
 }
 
 #app {
@@ -1560,24 +1833,51 @@ body {
 }
 
 .desktop-shell {
-  --splitter-size: 5px;
+  --splitter-size: 8px;
   height: 100%;
   display: grid;
   grid-template-columns:
-    var(--sidebar-width, 330px) var(--splitter-size)
+    var(--sidebar-width, 28rem) var(--splitter-size)
     minmax(0, 1fr);
   background: var(--bg-shell);
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.sidebar-shell {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  background: color-mix(in srgb, var(--bg-surface) 88%, white);
+  box-shadow: var(--shell-shadow);
+  overflow: hidden;
+}
+
+.app-main {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.1rem 0 0.1rem 1.2rem;
   overflow: hidden;
 }
 
 .workspace {
   display: grid;
   grid-template-rows:
-    var(--pane-header-height) minmax(180px, 1fr) var(--splitter-size)
-    var(--results-height, 42%);
+    minmax(16rem, 1fr) var(--splitter-size) minmax(12rem, var(--results-height, 38%));
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-card,
+.results-card {
+  min-height: 0;
 }
 
 .dialog-backdrop {
@@ -1589,46 +1889,48 @@ body {
   justify-content: center;
   z-index: 50;
   padding: 1.2rem;
+  backdrop-filter: blur(8px);
 }
 
 .dialog {
-  width: min(36rem, 100%);
+  width: min(40rem, 100%);
   background: var(--bg-surface);
-  border: 1px solid var(--panel-separator);
-  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-radius: 1.6rem;
   box-shadow: var(--dialog-shadow);
   display: grid;
   grid-template-rows: auto 1fr auto;
   max-height: min(85vh, 40rem);
+  backdrop-filter: blur(18px);
 }
 
 .create-object-dialog {
-  width: min(28rem, 100%);
+  width: min(30rem, 100%);
 }
 
 .dialog-header {
-  padding: 0.6rem 0.75rem;
+  padding: 1rem 1.15rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface-muted);
 }
 
 .dialog-title {
   margin: 0;
-  font-size: 0.86rem;
-  font-weight: 600;
+  font-size: 0.95rem;
+  font-weight: 700;
 }
 
 .dialog-body {
-  padding: 0.7rem;
+  padding: 1rem 1.15rem;
   display: grid;
-  gap: 0.6rem;
+  gap: 0.85rem;
   overflow: auto;
 }
 
 .dialog-body label {
   display: grid;
-  gap: 0.28rem;
-  font-size: 0.76rem;
+  gap: 0.35rem;
+  font-size: 0.78rem;
   color: var(--text-secondary);
 }
 
@@ -1642,9 +1944,9 @@ body {
 .dialog-body input,
 .dialog-body select {
   border: 1px solid var(--control-border);
-  border-radius: 6px;
+  border-radius: 0.9rem;
   background: var(--control-bg);
-  padding: 0.38rem 0.45rem;
+  padding: 0.72rem 0.85rem;
   font: inherit;
   color: var(--text-primary);
 }
@@ -1657,17 +1959,17 @@ body {
 
 .settings-group {
   margin: 0;
-  padding: 0.5rem 0.55rem;
+  padding: 0.8rem 0.9rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 1rem;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.7rem;
 }
 
 .settings-group legend {
-  padding: 0 0.25rem;
+  padding: 0 0.35rem;
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
 .settings-option {
@@ -1695,18 +1997,19 @@ body {
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.45rem;
-  padding: 0.55rem 0.75rem;
+  gap: 0.6rem;
+  padding: 1rem 1.15rem;
   border-top: 1px solid var(--border);
   background: var(--bg-surface-muted);
 }
 
 .dialog .btn {
   border: 1px solid var(--control-border);
-  border-radius: 6px;
+  border-radius: 999px;
   background: var(--control-bg);
-  padding: 0.28rem 0.54rem;
-  font-size: 0.74rem;
+  padding: 0.72rem 1rem;
+  font-size: 0.76rem;
+  font-weight: 600;
   cursor: pointer;
   color: var(--text-primary);
 }
@@ -1735,6 +2038,7 @@ body {
   margin: 0;
   color: var(--text-secondary);
   font-size: 0.76rem;
+  line-height: 1.5;
 }
 
 .export-progress-wrap {
@@ -1760,7 +2064,7 @@ body {
 }
 
 .settings-error {
-  margin: 0.5rem 1rem 0;
+  margin: 0.75rem 1.15rem 0;
   font-size: 0.76rem;
   color: var(--danger);
 }
@@ -1784,25 +2088,27 @@ body {
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 1px;
+  width: 2px;
   transform: translateX(-50%);
   background: var(--resizer-line);
-  transition: background-color 0.12s ease;
+  border-radius: 999px;
+  transition:
+    background-color 0.16s ease,
+    transform 0.16s ease;
   opacity: 0.9;
 }
 
 .panel-resizer:hover::after {
   background: var(--resizer-line-hover);
+  transform: translateX(-50%) scaleY(0.86);
 }
 
 .panel-resizer.vertical {
   cursor: col-resize;
-  border: 0;
 }
 
 .panel-resizer.horizontal {
   cursor: row-resize;
-  border: 0;
 }
 
 .panel-resizer.horizontal::after {
@@ -1810,19 +2116,30 @@ body {
   right: 0;
   top: 50%;
   width: auto;
-  height: 1px;
+  height: 2px;
   transform: translateY(-50%);
+}
+
+@media (max-width: 1180px) {
+  .sidebar-shell {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 980px) {
   .desktop-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: 42% var(--splitter-size) 58%;
+    grid-template-rows: auto var(--splitter-size) minmax(0, 1fr);
+    padding: 0.85rem;
+  }
+
+  .sidebar-shell {
+    grid-template-columns: 1fr;
+    border-radius: 1.6rem;
   }
 
   .panel-resizer.vertical {
     cursor: row-resize;
-    border: 0;
   }
 
   .panel-resizer.vertical::after {
@@ -1830,14 +2147,17 @@ body {
     right: 0;
     top: 50%;
     width: auto;
-    height: 1px;
+    height: 2px;
     transform: translateY(-50%);
+  }
+
+  .app-main {
+    padding: 0.8rem 0 0;
   }
 
   .workspace {
     grid-template-rows:
-      var(--pane-header-height) minmax(150px, 1fr) var(--splitter-size)
-      var(--results-height, 44%);
+      minmax(14rem, 1fr) var(--splitter-size) minmax(12rem, var(--results-height, 44%));
   }
 }
 </style>

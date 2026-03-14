@@ -1,11 +1,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 
 const PANEL_SPLITTER_SIZE = 6;
-const MIN_SIDEBAR_WIDTH = 240;
+const MIN_SIDEBAR_WIDTH = 360;
 const MIN_WORKSPACE_WIDTH = 560;
-const MIN_SHEET_HEIGHT = 180;
-const MIN_RESULTS_HEIGHT = 120;
-const WORKSPACE_HEADER_HEIGHT = 42;
+const MIN_SHEET_HEIGHT = 220;
+const MIN_RESULTS_HEIGHT = 180;
 
 type ResizeState =
   | {
@@ -50,7 +49,7 @@ export function usePaneLayout(options: PaneLayoutOptions) {
     const workspaceHeight = options.workspaceEl.value?.clientHeight ?? 800;
     return Math.max(
       MIN_RESULTS_HEIGHT,
-      workspaceHeight - WORKSPACE_HEADER_HEIGHT - PANEL_SPLITTER_SIZE - MIN_SHEET_HEIGHT,
+      workspaceHeight - PANEL_SPLITTER_SIZE - MIN_SHEET_HEIGHT,
     );
   }
 
