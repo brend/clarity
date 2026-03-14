@@ -2,6 +2,7 @@
 type IconName =
   | "chevron-right"
   | "object"
+  | "database"
   | "plug"
   | "plug-off"
   | "refresh"
@@ -42,6 +43,12 @@ withDefaults(
     <g v-else-if="name === 'object'">
       <rect x="4.5" y="4.5" width="15" height="15" rx="2.25" />
       <path d="M8 8h8M8 12h8M8 16h4" />
+    </g>
+
+    <g v-else-if="name === 'database'">
+      <ellipse cx="12" cy="6" rx="6.5" ry="2.75" />
+      <path d="M5.5 6v5.8c0 1.5 2.9 2.7 6.5 2.7s6.5-1.2 6.5-2.7V6" />
+      <path d="M5.5 11.8v5.2c0 1.5 2.9 2.7 6.5 2.7s6.5-1.2 6.5-2.7v-5.2" />
     </g>
 
     <g v-else-if="name === 'plug'">

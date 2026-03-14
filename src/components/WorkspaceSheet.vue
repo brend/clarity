@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  defineAsyncComponent,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -8,7 +9,6 @@ import {
   watch,
 } from "vue";
 import AppIcon from "./AppIcon.vue";
-import SqlCodeEditor from "./SqlCodeEditor.vue";
 import type {
   BusyState,
   ObjectDetailTabDefinition,
@@ -100,7 +100,8 @@ const props = defineProps<{
   isLikelyNumeric: (value: string) => boolean;
 }>();
 
-const queryEditorRef = ref<InstanceType<typeof SqlCodeEditor> | null>(null);
+const SqlCodeEditor = defineAsyncComponent(() => import("./SqlCodeEditor.vue"));
+const queryEditorRef = ref<{ getSelectedText?: () => string } | null>(null);
 const dataDraftRows = ref<string[][]>([]);
 const dataDraftSourceIndexes = ref<Array<number | null>>([]);
 const committingDataChanges = ref(false);
@@ -757,23 +758,27 @@ watch(
 </script>
 
 <template>
-  <header class="workspace-toolbar">
-    <div class="toolbar-title">SQL Worksheet</div>
-    <div class="toolbar-trailing">
-      <div class="toolbar-status">{{ props.statusMessage }}</div>
-      <button
-        class="btn toolbar-settings-btn"
-        title="Open settings"
-        aria-label="Open settings"
-        @click="props.onOpenSettings"
-      >
-        <AppIcon name="settings" class="btn-icon" aria-hidden="true" />
-      </button>
-    </div>
-  </header>
+  <section class="workspace-sheet" @keydown.capture="handleSheetKeydown">
+    <header class="workspace-toolbar">
+      <div>
+        <div class="toolbar-eyebrow">Workbench</div>
+        <div class="toolbar-title">SQL workspace</div>
+      </div>
+      <div class="toolbar-trailing">
+        <div class="toolbar-status">{{ props.statusMessage }}</div>
+        <button
+          class="btn toolbar-settings-btn"
+          title="Open settings"
+          aria-label="Open settings"
+          @click="props.onOpenSettings"
+        >
+          <AppIcon name="settings" class="btn-icon" aria-hidden="true" />
+        </button>
+      </div>
+    </header>
 
-  <section class="sheet-pane" @keydown.capture="handleSheetKeydown">
-    <div class="sheet-tabs">
+    <section class="sheet-pane">
+      <div class="sheet-tabs">
       <div
         v-for="tab in props.queryTabs"
         :key="tab.id"
@@ -1405,6 +1410,7 @@ watch(
         </table>
       </div>
     </section>
+    </section>
   </section>
 </template>
 
@@ -1420,10 +1426,10 @@ input,
 select,
 textarea {
   border: 1px solid var(--control-border);
-  border-radius: 6px;
+  border-radius: 0.95rem;
   background: var(--control-bg);
   color: var(--text-primary);
-  padding: 0.38rem 0.45rem;
+  padding: 0.72rem 0.85rem;
 }
 
 button {
@@ -1439,22 +1445,25 @@ button:focus-visible {
 
 .btn {
   border: 1px solid var(--control-border);
-  border-radius: 6px;
+  border-radius: 999px;
   background: var(--control-bg);
-  padding: 0.26rem 0.52rem;
-  font-size: 0.73rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.74rem;
+  font-weight: 600;
   cursor: pointer;
   transition:
     background-color 0.12s ease,
-    border-color 0.12s ease;
+    border-color 0.12s ease,
+    transform 0.12s ease;
   display: inline-flex;
   align-items: center;
-  gap: 0.34rem;
+  gap: 0.4rem;
 }
 
 .btn:hover:not(:disabled) {
   background: var(--control-hover);
   border-color: var(--control-border);
+  transform: translateY(-1px);
 }
 
 .btn:disabled {
@@ -1479,20 +1488,45 @@ button:focus-visible {
   flex: 0 0 auto;
 }
 
+.workspace-sheet {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 1.8rem;
+  background: color-mix(in srgb, var(--bg-surface) 92%, white);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
 .workspace-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  height: var(--pane-header-height);
-  padding: 0 0.68rem;
+  justify-content: space-between;
+  gap: 0.9rem;
+  min-height: var(--pane-header-height);
+  padding: 1rem 1.2rem;
   border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-soft) 45%, white) 0%,
+      color-mix(in srgb, var(--bg-surface-muted) 86%, white) 100%
+    );
+}
+
+.toolbar-eyebrow {
+  font-size: 0.67rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-subtle);
+  margin-bottom: 0.18rem;
 }
 
 .toolbar-title {
-  font-size: 0.77rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .toolbar-trailing {
@@ -1504,64 +1538,69 @@ button:focus-visible {
 }
 
 .toolbar-status {
-  font-size: 0.71rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
   max-width: min(56vw, 42rem);
-  white-space: nowrap;
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .toolbar-settings-btn {
   flex: 0 0 auto;
-  min-width: 1.7rem;
-  min-height: 1.7rem;
+  min-width: 2.7rem;
+  min-height: 2.7rem;
   padding: 0;
   justify-content: center;
 }
 
 .sheet-pane {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-  background: var(--bg-surface);
-  overflow-y: auto;
-  overflow-x: hidden;
+  background: transparent;
+  overflow: hidden;
 }
 
 .query-sheet-pane {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
+  padding: 0 1rem 1rem;
+  gap: 0.9rem;
 }
 
 .sheet-tabs {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
-  gap: 0.22rem;
-  padding: 0.18rem 0.32rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 1rem;
   min-width: 0;
+  border-bottom: 1px solid var(--panel-separator);
+  background: color-mix(in srgb, var(--bg-surface-muted) 80%, white);
+  overflow: auto;
 }
 
 .sheet-tab-wrap {
   display: flex;
   align-items: center;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   border: 1px solid transparent;
+  background: transparent;
 }
 
 .sheet-tab {
   border: 0;
-  border-radius: 5px;
+  border-radius: 999px;
   background: transparent;
-  padding: 0.24rem 0.48rem;
-  font-size: 0.73rem;
+  padding: 0.62rem 0.85rem;
+  font-size: 0.74rem;
   cursor: pointer;
-  max-width: 12rem;
+  max-width: 14rem;
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
@@ -1572,6 +1611,15 @@ button:focus-visible {
 .sheet-tab:hover {
   background: var(--control-hover);
   color: var(--text-primary);
+}
+
+.sheet-tab:focus-visible,
+.sheet-tab-add:focus-visible,
+.sheet-tab-close:focus-visible,
+.object-detail-tab:focus-visible,
+.source-result-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .sheet-tab-label {
@@ -1598,9 +1646,9 @@ button:focus-visible {
 
 .sheet-tab.active,
 .sheet-tab-wrap.active {
-  border-color: transparent;
+  border-color: var(--tab-active-border);
   background: var(--tab-active-bg);
-  box-shadow: inset 0 -1px 0 var(--accent);
+  box-shadow: 0 10px 24px rgba(89, 70, 80, 0.08);
 }
 
 .sheet-tab-wrap.active .sheet-tab {
@@ -1610,9 +1658,9 @@ button:focus-visible {
 
 .sheet-tab-add {
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 999px;
   background: transparent;
-  padding: 0.23rem 0.45rem;
+  padding: 0.58rem 0.72rem;
   font-size: 0.74rem;
   cursor: pointer;
   color: var(--accent);
@@ -1628,7 +1676,7 @@ button:focus-visible {
 .sheet-tab-close {
   border: 0;
   background: transparent;
-  padding: 0.24rem 0.25rem;
+  padding: 0.42rem 0.42rem;
   font-size: 0.72rem;
   cursor: pointer;
   color: var(--text-subtle);
@@ -1652,15 +1700,19 @@ button:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  font-size: 0.68rem;
+  font-size: 0.69rem;
   color: var(--text-secondary);
   letter-spacing: 0.01em;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
 }
 
 .query-limit-control input {
-  width: 4.3rem;
-  padding: 0.2rem 0.3rem;
-  font-size: 0.7rem;
+  width: 4.8rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.72rem;
 }
 
 .sheet-tab-icon {
@@ -1669,19 +1721,20 @@ button:focus-visible {
 }
 
 .sheet-tabs > .btn {
-  margin-left: 0.2rem;
+  margin-left: 0.05rem;
 }
 
 .schema-chip {
-  margin-left: 0.34rem;
-  margin-right: 0;
-  font-size: 0.68rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.28rem 0.72rem;
+  border-radius: 999px;
+  border: 1px solid var(--schema-chip-border);
+  background: var(--schema-chip-bg);
   color: var(--schema-chip-text);
-  background: transparent;
-  border: 0;
-  padding: 0;
-  border-radius: 0;
-  letter-spacing: 0.01em;
+  font-size: 0.69rem;
+  font-weight: 600;
 }
 
 .transaction-chip {
@@ -1689,25 +1742,26 @@ button:focus-visible {
 }
 
 .transaction-chip.active {
-  color: var(--danger);
+  color: var(--accent-strong);
 }
 
 .ai-suggestion-banner {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.45rem 0.55rem;
-  border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
+  gap: 0.7rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 88%, white);
 }
 
 .ai-suggestion-banner.warning {
-  border-left: 3px solid #c28e31;
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
 }
 
 .ai-suggestion-banner.error {
-  border-left: 3px solid var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
 }
 
 .ai-suggestion-body {
@@ -1716,7 +1770,7 @@ button:focus-visible {
 
 .ai-suggestion-text {
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.77rem;
   white-space: pre-wrap;
 }
 
@@ -1743,23 +1797,29 @@ button:focus-visible {
   height: 100%;
   min-height: 0;
   background: var(--editor-surface);
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  overflow: hidden;
 }
 
 .source-search-pane {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  padding: 0 1rem 1rem;
+  gap: 0.9rem;
 }
 
 .source-search-toolbar {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  padding: 0.45rem 0.55rem;
-  border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
+  gap: 0.6rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 86%, white);
 }
 
 .source-search-input {
@@ -1770,8 +1830,8 @@ button:focus-visible {
 .search-scope-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.22rem;
-  font-size: 0.69rem;
+  gap: 0.32rem;
+  font-size: 0.71rem;
   color: var(--text-secondary);
 }
 
@@ -1784,6 +1844,9 @@ button:focus-visible {
   overflow: auto;
   min-height: 0;
   font-family: Consolas, "Courier New", monospace;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  background: var(--bg-surface);
 }
 
 .source-search-table {
@@ -1797,7 +1860,7 @@ button:focus-visible {
   border: 0;
   border-bottom: 1px solid var(--table-divider);
   text-align: left;
-  padding: 0.28rem 0.4rem;
+  padding: 0.7rem 0.85rem;
 }
 
 .source-search-table th {
@@ -1844,7 +1907,7 @@ button:focus-visible {
     color-mix(in srgb, var(--table-divider) 70%, transparent);
   color: var(--text-primary);
   text-align: left;
-  padding: 0.28rem 0.4rem;
+  padding: 0.62rem 0.8rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1866,12 +1929,12 @@ button:focus-visible {
 }
 
 .results-row-actions-col {
-  width: 7.4rem;
+  width: 8rem;
 }
 
 .results-row-actions-header {
   text-align: center;
-  min-width: 7.4rem;
+  min-width: 8rem;
 }
 
 .results-table tbody tr.results-row-alt {
@@ -1943,13 +2006,13 @@ button:focus-visible {
 }
 
 .object-detail-hint {
-  margin-top: -0.18rem;
+  margin-top: -0.1rem;
 }
 
 .cell-editor {
   width: 100%;
   min-width: 0;
-  padding: 0.2rem 0.28rem;
+  padding: 0.3rem 0.36rem;
   font-size: 0.72rem;
   font-family: inherit;
   color: var(--text-primary);
@@ -1968,7 +2031,7 @@ button:focus-visible {
 .row-delete-btn {
   min-width: 5.2rem;
   justify-content: center;
-  padding: 0.17rem 0.38rem;
+  padding: 0.45rem 0.7rem;
   font-size: 0.68rem;
 }
 
@@ -1978,8 +2041,8 @@ button:focus-visible {
 
 .row-action-btn {
   margin-right: 0.28rem;
-  padding: 0.19rem 0.4rem;
-  font-size: 0.69rem;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.71rem;
 }
 
 .row-action-btn:last-child {
@@ -1994,7 +2057,7 @@ button:focus-visible {
   background: var(--bg-surface);
   border-top: 1px solid var(--panel-separator);
   margin-top: 0.35rem;
-  padding: 0.45rem 0 0.2rem;
+  padding: 0.85rem 0 0.2rem;
 }
 
 .object-detail-edit-leading {
@@ -2011,9 +2074,11 @@ button:focus-visible {
 
 .ddl-pane {
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  padding: 0 1rem 1rem;
+  gap: 0.9rem;
 }
 
 .ddl-header {
@@ -2021,26 +2086,25 @@ button:focus-visible {
   justify-content: space-between;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.44rem 0.55rem;
-  border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 86%, white);
 }
 
 .object-detail-tabs {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0.2rem 0.42rem;
-  border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
+  gap: 0.4rem;
+  padding: 0.2rem 0;
 }
 
 .object-detail-tab {
-  border: 1px solid transparent;
-  border-radius: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   background: transparent;
-  padding: 0.24rem 0.5rem;
-  font-size: 0.72rem;
+  padding: 0.62rem 0.9rem;
+  font-size: 0.73rem;
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -2051,27 +2115,31 @@ button:focus-visible {
 }
 
 .object-detail-tab.active {
-  border-color: transparent;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
   background: var(--tab-active-bg);
   color: var(--text-primary);
   font-weight: 600;
-  box-shadow: inset 0 -1px 0 var(--accent);
+  box-shadow: 0 12px 24px rgba(89, 70, 80, 0.08);
 }
 
 .object-detail-grid-pane {
   min-height: 0;
   overflow: hidden;
-  padding: 0.55rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  background: var(--bg-surface);
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.6rem;
 }
 
 .object-loading-panel {
   min-height: 0;
   padding: 0.85rem 0.9rem;
   background: color-mix(in srgb, var(--bg-surface-muted) 70%, transparent);
-  border-top: 1px solid color-mix(in srgb, var(--panel-separator) 70%, transparent);
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--panel-separator) 70%, transparent);
 }
 
 .object-loading-title {
@@ -2115,6 +2183,29 @@ button:focus-visible {
 .muted {
   color: var(--text-secondary);
   font-size: 0.76rem;
+}
+
+@media (max-width: 980px) {
+  .workspace-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .toolbar-trailing {
+    width: 100%;
+  }
+
+  .sheet-tabs,
+  .source-search-toolbar,
+  .ddl-header {
+    padding: 0.9rem;
+  }
+
+  .query-sheet-pane,
+  .source-search-pane,
+  .ddl-pane {
+    padding: 0 0.85rem 0.85rem;
+  }
 }
 
 @keyframes sheet-tab-loading-pulse {

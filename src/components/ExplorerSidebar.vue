@@ -31,6 +31,8 @@ const props = defineProps<{
   isConnected: boolean;
   session: OracleSessionSummary | null;
   connectedSchema: string;
+  selectedProviderLabel: string;
+  highlightedSection: "connections" | "explorer";
   objectTree: ObjectTreeNode[];
   selectedObject: OracleObjectEntry | null;
   isObjectTypeExpanded: (objectType: string) => boolean;
@@ -209,196 +211,75 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <aside class="explorer-sidebar">
-    <header class="sidebar-header">Object Explorer</header>
-
-    <section class="connect-box">
-      <div class="connect-heading">
-        <div class="connect-title-wrap">
-          <div class="connect-title">Database Connection</div>
-          <div class="session-line">
+  <div class="explorer-sidebar">
+    <section
+      class="sidebar-card connect-box"
+      :class="{ spotlight: props.highlightedSection === 'connections' }"
+    >
+      <header class="card-header">
+        <div class="card-heading">
+          <p class="card-kicker">Connection Studio</p>
+          <h2 class="card-title">Profiles and session</h2>
+          <p class="card-description">
             {{ props.session ? props.session.displayName : "No active connection" }}
-          </div>
+          </p>
         </div>
         <span class="connect-state-pill" :class="{ connected: props.isConnected }">
           {{ props.isConnected ? "Connected" : "Offline" }}
         </span>
+      </header>
+
+      <div class="connection-summary">
+        <div class="summary-tile">
+          <span class="summary-label">Provider</span>
+          <span class="summary-value">{{ props.selectedProviderLabel }}</span>
+        </div>
+        <div class="summary-tile">
+          <span class="summary-label">Schema</span>
+          <span class="summary-value">{{ props.connectedSchema || props.connection.schema || "Pending" }}</span>
+        </div>
+        <div class="summary-tile">
+          <span class="summary-label">Session</span>
+          <span class="summary-value">{{ props.session ? "Live" : "Draft" }}</span>
+        </div>
       </div>
 
-      <div class="connect-body">
-        <div class="connect-actions">
-          <button
-            class="btn primary btn-connect"
-            :disabled="props.busy.connecting"
-            @click="props.isConnected ? props.onDisconnect() : props.onConnect()"
-          >
-            <AppIcon :name="props.isConnected ? 'plug-off' : 'plug'" class="btn-icon" aria-hidden="true" />
-            {{
-              props.busy.connecting
-                ? "Connecting..."
-                : props.isConnected
-                  ? "Disconnect"
-                  : "Connect"
-            }}
-          </button>
-          <button class="btn" :disabled="!props.isConnected || props.busy.loadingObjects" @click="props.onRefreshObjects">
-            <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
-            {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
-          </button>
-        </div>
-
-        <div class="connection-core-fields">
-          <div class="field-grid">
-            <label>
-              Host
-              <input
-                v-model.trim="props.connection.host"
-                placeholder="db.example.com"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                data-gramm="false"
-              />
-            </label>
-
-            <label>
-              Service
-              <input
-                v-model.trim="props.connection.serviceName"
-                placeholder="XEPDB1"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                data-gramm="false"
-              />
-            </label>
-
-            <label>
-              Username
-              <input
-                v-model.trim="props.connection.username"
-                placeholder="hr"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                data-gramm="false"
-              />
-            </label>
-
-            <label>
-              Schema
-              <input
-                v-model.trim="props.connection.schema"
-                placeholder="HR"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                data-gramm="false"
-              />
-            </label>
-
-            <label>
-              Password
-              <input
-                v-model="props.connection.password"
-                type="password"
-                placeholder="********"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                data-gramm="false"
-              />
-            </label>
-          </div>
-        </div>
-
-        <div class="profile-inline">
-          <label class="profile-select">
-            Profile
-            <select
-              v-model="selectedProfileId"
-              :disabled="props.busy.loadingProfiles || props.busy.loadingProfileSecret"
-              @change="onSelectedProfileChange"
-            >
-              <option value="">(Select profile)</option>
-              <option v-for="profile in props.connectionProfiles" :key="profile.id" :value="profile.id">
-                {{ profile.name }}
-              </option>
-            </select>
-          </label>
-          <details class="profile-details">
-            <summary class="btn profile-manage-toggle">
-              <AppIcon
-                name="chevron-right"
-                class="connect-toggle-icon"
-                aria-hidden="true"
-              />
-              Manage profiles
-            </summary>
-
-            <div class="profile-controls">
-              <label>
-                Profile Name
-                <input
-                  v-model.trim="profileName"
-                  placeholder="Local Oracle Dev"
-                  spellcheck="false"
-                  autocomplete="off"
-                  autocorrect="off"
-                  autocapitalize="off"
-                  data-gramm="false"
-                />
-              </label>
-              <div class="profile-save-row">
-                <label class="profile-password-toggle">
-                  <input v-model="saveProfilePassword" type="checkbox" />
-                  Save password in OS keychain
-                </label>
-                <div class="profile-actions">
-                  <button class="btn" :disabled="props.busy.savingProfile" @click="props.onSaveConnectionProfile">
-                    {{ props.busy.savingProfile ? "Saving..." : "Save" }}
-                  </button>
-                  <button
-                    class="btn"
-                    :disabled="!props.selectedProfile || props.busy.deletingProfile"
-                    @click="props.onDeleteSelectedProfile"
-                  >
-                    {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </details>
-        </div>
-
+      <div class="connect-actions">
         <button
-          class="btn connect-advanced-toggle"
-          type="button"
-          :aria-expanded="showAdvancedConnectionOptions"
-          @click="showAdvancedConnectionOptions = !showAdvancedConnectionOptions"
+          class="btn primary btn-connect"
+          :disabled="props.busy.connecting"
+          @click="props.isConnected ? props.onDisconnect() : props.onConnect()"
         >
           <AppIcon
-            name="chevron-right"
-            class="connect-toggle-icon"
-            :class="{ expanded: showAdvancedConnectionOptions }"
+            :name="props.isConnected ? 'plug-off' : 'plug'"
+            class="btn-icon"
             aria-hidden="true"
           />
-          {{ showAdvancedConnectionOptions ? "Hide advanced options" : "Show advanced options" }}
+          {{
+            props.busy.connecting
+              ? "Connecting..."
+              : props.isConnected
+                ? "Disconnect"
+                : "Connect"
+          }}
         </button>
+        <button
+          class="btn"
+          :disabled="!props.isConnected || props.busy.loadingObjects"
+          @click="props.onRefreshObjects"
+        >
+          <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
+          {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
+        </button>
+      </div>
 
-        <div v-show="showAdvancedConnectionOptions" class="field-grid advanced-grid">
+      <div class="connection-core-fields">
+        <div class="field-grid">
           <label>
-            Port
+            Host
             <input
-              v-model.number="props.connection.port"
-              type="number"
-              min="1"
-              max="65535"
+              v-model.trim="props.connection.host"
+              placeholder="db.example.com"
               spellcheck="false"
               autocomplete="off"
               autocorrect="off"
@@ -407,66 +288,295 @@ onBeforeUnmount(() => {
             />
           </label>
 
-          <label v-if="props.connection.provider === 'oracle'">
-            Auth Mode
-            <select v-model="props.connection.oracleAuthMode">
-              <option value="normal">Normal</option>
-              <option value="sysdba">SYSDBA</option>
-            </select>
+          <label>
+            Service
+            <input
+              v-model.trim="props.connection.serviceName"
+              placeholder="XEPDB1"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+
+          <label>
+            Username
+            <input
+              v-model.trim="props.connection.username"
+              placeholder="hr"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+
+          <label>
+            Schema
+            <input
+              v-model.trim="props.connection.schema"
+              placeholder="HR"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+
+          <label class="field-span">
+            Password
+            <input
+              v-model="props.connection.password"
+              type="password"
+              placeholder="********"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
           </label>
         </div>
-        <p v-if="props.connectionError" class="connect-error">{{ props.connectionError }}</p>
       </div>
+
+      <div class="profile-inline">
+        <label class="profile-select">
+          Profile
+          <select
+            v-model="selectedProfileId"
+            :disabled="
+              props.busy.loadingProfiles || props.busy.loadingProfileSecret
+            "
+            @change="onSelectedProfileChange"
+          >
+            <option value="">(Select profile)</option>
+            <option
+              v-for="profile in props.connectionProfiles"
+              :key="profile.id"
+              :value="profile.id"
+            >
+              {{ profile.name }}
+            </option>
+          </select>
+        </label>
+
+        <details class="profile-details">
+          <summary class="btn profile-manage-toggle">
+            <AppIcon
+              name="chevron-right"
+              class="connect-toggle-icon"
+              aria-hidden="true"
+            />
+            Manage profiles
+          </summary>
+
+          <div class="profile-controls">
+            <label>
+              Profile Name
+              <input
+                v-model.trim="profileName"
+                placeholder="Local Oracle Dev"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+            <div class="profile-save-row">
+              <label class="profile-password-toggle">
+                <input v-model="saveProfilePassword" type="checkbox" />
+                Save password in OS keychain
+              </label>
+              <div class="profile-actions">
+                <button
+                  class="btn"
+                  :disabled="props.busy.savingProfile"
+                  @click="props.onSaveConnectionProfile"
+                >
+                  {{ props.busy.savingProfile ? "Saving..." : "Save" }}
+                </button>
+                <button
+                  class="btn"
+                  :disabled="!props.selectedProfile || props.busy.deletingProfile"
+                  @click="props.onDeleteSelectedProfile"
+                >
+                  {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <button
+        class="btn connect-advanced-toggle"
+        type="button"
+        :aria-expanded="showAdvancedConnectionOptions"
+        @click="showAdvancedConnectionOptions = !showAdvancedConnectionOptions"
+      >
+        <AppIcon
+          name="chevron-right"
+          class="connect-toggle-icon"
+          :class="{ expanded: showAdvancedConnectionOptions }"
+          aria-hidden="true"
+        />
+        {{
+          showAdvancedConnectionOptions
+            ? "Hide advanced options"
+            : "Show advanced options"
+        }}
+      </button>
+
+      <div v-show="showAdvancedConnectionOptions" class="field-grid advanced-grid">
+        <label>
+          Port
+          <input
+            v-model.number="props.connection.port"
+            type="number"
+            min="1"
+            max="65535"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            data-gramm="false"
+          />
+        </label>
+
+        <label v-if="props.connection.provider === 'oracle'">
+          Auth Mode
+          <select v-model="props.connection.oracleAuthMode">
+            <option value="normal">Normal</option>
+            <option value="sysdba">SYSDBA</option>
+          </select>
+        </label>
+      </div>
+      <p v-if="props.connectionError" class="connect-error">
+        {{ props.connectionError }}
+      </p>
     </section>
 
-    <section class="tree-area" @contextmenu="(event) => void openExplorerContextMenu(event, null)">
-      <div class="tree-caption">{{ props.connectedSchema }} Objects</div>
-      <p v-if="!props.objectTree.length" class="muted">No objects loaded.</p>
-      <ul v-else class="tree-root" role="tree" aria-label="Database object explorer">
-        <li
-          v-for="typeNode in props.objectTree"
-          :key="typeNode.objectType"
-          class="tree-branch"
-          role="treeitem"
-          :aria-expanded="props.isObjectTypeExpanded(typeNode.objectType)"
+    <section
+      class="sidebar-card tree-area"
+      :class="{ spotlight: props.highlightedSection === 'explorer' }"
+      @contextmenu="(event) => void openExplorerContextMenu(event, null)"
+    >
+      <header class="card-header">
+        <div class="card-heading">
+          <p class="card-kicker">Schema Explorer</p>
+          <h2 class="card-title">
+            {{ props.connectedSchema || props.connection.schema || "Object tree" }}
+          </h2>
+          <p class="card-description">
+            {{
+              props.selectedObject
+                ? `${props.selectedObject.objectName} selected`
+                : "Browse objects and open their workspace tabs."
+            }}
+          </p>
+        </div>
+        <button
+          class="btn explorer-refresh-btn"
+          :disabled="!props.isConnected || props.busy.loadingObjects"
+          @click.stop="props.onRefreshObjects"
         >
-          <button
-            class="tree-row tree-type"
-            :class="{ expanded: props.isObjectTypeExpanded(typeNode.objectType) }"
-            @click="props.onToggleObjectType(typeNode.objectType)"
-            @contextmenu="(event) => void openExplorerContextMenu(event, typeNode.objectType)"
-          >
-            <AppIcon name="chevron-right" class="tree-caret-icon" aria-hidden="true" />
-            <span class="tree-type-label">
-              {{ typeNode.objectType }} <span class="tree-count">({{ typeNode.entries.length }})</span>
-            </span>
-          </button>
+          <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
+          Refresh
+        </button>
+      </header>
 
-          <ul v-show="props.isObjectTypeExpanded(typeNode.objectType)" class="tree-children" role="group">
-            <li
-              v-for="entry in typeNode.entries"
-              :key="`${entry.schema}-${entry.objectType}-${entry.objectName}`"
-              class="tree-leaf"
-              role="treeitem"
+      <div class="explorer-meta-row">
+        <span class="meta-pill">
+          {{ props.objectTree.length }} type{{ props.objectTree.length === 1 ? "" : "s" }}
+        </span>
+        <span class="meta-pill">
+          {{
+            props.selectedObject
+              ? props.selectedObject.objectType
+              : props.isConnected
+                ? "Connected"
+                : "Offline"
+          }}
+        </span>
+      </div>
+
+      <p v-if="!props.objectTree.length" class="muted empty-copy">
+        Connect and refresh to load objects for this schema.
+      </p>
+
+      <div v-else class="tree-scroll">
+        <ul
+          class="tree-root"
+          role="tree"
+          aria-label="Database object explorer"
+        >
+          <li
+            v-for="typeNode in props.objectTree"
+            :key="typeNode.objectType"
+            class="tree-branch"
+            role="treeitem"
+            :aria-expanded="props.isObjectTypeExpanded(typeNode.objectType)"
+          >
+            <button
+              class="tree-row tree-type"
+              :class="{ expanded: props.isObjectTypeExpanded(typeNode.objectType) }"
+              @click="props.onToggleObjectType(typeNode.objectType)"
+              @contextmenu="
+                (event) => void openExplorerContextMenu(event, typeNode.objectType)
+              "
             >
-              <button
-                class="tree-row tree-node"
-                :class="{
-                  selected:
-                    props.selectedObject?.schema === entry.schema &&
-                    props.selectedObject?.objectName === entry.objectName &&
-                    props.selectedObject?.objectType === entry.objectType,
-                }"
-                @click="props.onOpenObjectFromExplorer(entry)"
-                @contextmenu="(event) => void openExplorerContextMenu(event, entry.objectType)"
+              <AppIcon
+                name="chevron-right"
+                class="tree-caret-icon"
+                aria-hidden="true"
+              />
+              <span class="tree-type-label">
+                {{ typeNode.objectType }}
+                <span class="tree-count">{{ typeNode.entries.length }}</span>
+              </span>
+            </button>
+
+            <ul
+              v-show="props.isObjectTypeExpanded(typeNode.objectType)"
+              class="tree-children"
+              role="group"
+            >
+              <li
+                v-for="entry in typeNode.entries"
+                :key="`${entry.schema}-${entry.objectType}-${entry.objectName}`"
+                class="tree-leaf"
+                role="treeitem"
               >
-                <AppIcon name="object" class="tree-leaf-icon" aria-hidden="true" />
-                <span>{{ entry.objectName }}</span>
-              </button>
-            </li>
-          </ul>
-        </li>
-      </ul>
+                <button
+                  class="tree-row tree-node"
+                  :class="{
+                    selected:
+                      props.selectedObject?.schema === entry.schema &&
+                      props.selectedObject?.objectName === entry.objectName &&
+                      props.selectedObject?.objectType === entry.objectType,
+                  }"
+                  @click="props.onOpenObjectFromExplorer(entry)"
+                  @contextmenu="
+                    (event) => void openExplorerContextMenu(event, entry.objectType)
+                  "
+                >
+                  <AppIcon
+                    name="object"
+                    class="tree-leaf-icon"
+                    aria-hidden="true"
+                  />
+                  <span>{{ entry.objectName }}</span>
+                </button>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </div>
     </section>
 
     <div
@@ -501,59 +611,91 @@ onBeforeUnmount(() => {
         {{ refreshContextMenuLabel }}
       </button>
     </div>
-  </aside>
+  </div>
 </template>
 
 <style scoped>
 .explorer-sidebar {
-  border-right: 1px solid var(--panel-separator);
-  background: var(--bg-sidebar);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 1rem;
   min-width: 0;
   min-height: 0;
+  padding: 1.35rem 1.35rem 1.35rem 0;
   overflow: hidden;
 }
 
-.sidebar-header {
-  height: var(--pane-header-height);
-  padding: 0 0.68rem;
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--panel-separator);
-  font-size: 0.77rem;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  background: var(--bg-surface-muted);
+.sidebar-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 1.75rem;
+  background: color-mix(in srgb, var(--bg-surface) 92%, white);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.sidebar-card.spotlight {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
+  box-shadow:
+    var(--card-shadow),
+    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .connect-box {
-  padding: 0.5rem 0.55rem;
-  border-bottom: 1px solid var(--panel-separator);
+  display: grid;
+  gap: 1rem;
+  padding: 1.15rem;
 }
 
-.connect-title {
-  font-size: 0.76rem;
-  font-weight: 500;
+.tree-area {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 0.9rem;
+  min-height: 0;
+  padding: 1.15rem;
 }
 
-.connect-title-wrap {
-  min-width: 0;
-}
-
-.connect-heading {
+.card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.45rem;
+  gap: 0.9rem;
+}
+
+.card-heading {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.card-kicker {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.card-title {
+  margin: 0;
+  font-size: 1.02rem;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.card-description {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .connect-state-pill {
   border-radius: 999px;
-  border: 1px solid var(--control-border);
+  border: 1px solid var(--border);
   background: var(--bg-surface-muted);
   color: var(--text-secondary);
-  padding: 0.08rem 0.45rem;
+  padding: 0.35rem 0.7rem;
   font-size: 0.66rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -562,8 +704,41 @@ onBeforeUnmount(() => {
 }
 
 .connect-state-pill.connected {
-  border-color: var(--success, #3fb980);
-  color: var(--success, #3fb980);
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, white);
+}
+
+.connection-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.summary-tile {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 0.85rem;
+  border-radius: 1rem;
+  background: var(--bg-surface-muted);
+  border: 1px solid var(--panel-separator);
+}
+
+.summary-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+}
+
+.summary-value {
+  min-width: 0;
+  font-size: 0.83rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .connect-toggle-icon {
@@ -577,22 +752,16 @@ onBeforeUnmount(() => {
   transform: rotate(90deg);
 }
 
-.connect-body {
-  margin-top: 0.45rem;
-  display: grid;
-  gap: 0.48rem;
-}
-
 .connection-core-fields {
-  padding: 0.42rem;
-  border-radius: 8px;
+  padding: 0.8rem;
+  border-radius: 1.1rem;
   background: var(--bg-surface-muted);
   border: 1px solid var(--panel-separator);
 }
 
 .profile-inline {
   display: grid;
-  gap: 0.34rem;
+  gap: 0.45rem;
 }
 
 .profile-select {
@@ -617,9 +786,9 @@ onBeforeUnmount(() => {
 
 .profile-controls {
   display: grid;
-  gap: 0.38rem;
-  padding: 0.42rem;
-  border-radius: 8px;
+  gap: 0.45rem;
+  padding: 0.75rem;
+  border-radius: 1rem;
   background: var(--bg-surface-muted);
   border: 1px solid var(--panel-separator);
 }
@@ -663,14 +832,18 @@ onBeforeUnmount(() => {
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.4rem;
+  gap: 0.7rem;
+}
+
+.field-span {
+  grid-column: 1 / -1;
 }
 
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.71rem;
+  gap: 0.32rem;
+  font-size: 0.72rem;
   color: var(--text-secondary);
 }
 
@@ -685,10 +858,10 @@ input,
 select,
 textarea {
   border: 1px solid var(--control-border);
-  border-radius: 6px;
+  border-radius: 0.95rem;
   background: var(--control-bg);
   color: var(--text-primary);
-  padding: 0.27rem 0.36rem;
+  padding: 0.72rem 0.8rem;
 }
 
 button {
@@ -704,7 +877,7 @@ button:focus-visible {
 
 .connect-actions {
   display: flex;
-  gap: 0.34rem;
+  gap: 0.6rem;
 }
 
 .btn-connect {
@@ -717,13 +890,13 @@ button:focus-visible {
 }
 
 .advanced-grid {
-  padding-top: 0.1rem;
+  padding: 0.25rem 0 0.1rem;
 }
 
 .connect-error {
   margin: 0;
   color: var(--danger);
-  font-size: 0.69rem;
+  font-size: 0.72rem;
   line-height: 1.28;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -731,20 +904,32 @@ button:focus-visible {
 
 .btn {
   border: 1px solid var(--control-border);
-  border-radius: 6px;
+  border-radius: 999px;
   background: var(--control-bg);
-  padding: 0.24rem 0.46rem;
-  font-size: 0.71rem;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.74rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.12s ease;
   display: inline-flex;
   align-items: center;
-  gap: 0.34rem;
+  gap: 0.4rem;
 }
 
 .btn:hover:not(:disabled) {
   background: var(--control-hover);
   border-color: var(--control-border);
+  transform: translateY(-1px);
+}
+
+.btn:focus-visible,
+.tree-row:focus-visible,
+.explorer-context-menu-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 .btn:disabled {
@@ -769,27 +954,36 @@ button:focus-visible {
   flex: 0 0 auto;
 }
 
-.session-line {
-  margin-top: 0.12rem;
-  font-size: 0.69rem;
-  color: var(--text-secondary);
+.explorer-refresh-btn {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.tree-area {
-  flex: 1;
+.explorer-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.9rem;
+  padding: 0.22rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--schema-chip-border);
+  background: var(--schema-chip-bg);
+  color: var(--schema-chip-text);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.tree-scroll {
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 0.48rem 0.52rem;
-}
-
-.tree-caption {
-  font-size: 0.71rem;
-  color: var(--text-secondary);
-  margin-bottom: 0.45rem;
+  overflow: auto;
+  padding-top: 0.25rem;
+  padding-right: 0.2rem;
+  border-top: 1px solid color-mix(in srgb, var(--panel-separator) 70%, transparent);
 }
 
 .tree-root,
@@ -800,7 +994,7 @@ button:focus-visible {
 }
 
 .tree-children {
-  padding-left: 0.8rem;
+  padding-left: 1rem;
 }
 
 .tree-row {
@@ -810,11 +1004,15 @@ button:focus-visible {
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 0.26rem;
-  padding: 0.2rem 0.28rem;
-  border-radius: 5px;
-  font-size: 0.71rem;
+  gap: 0.42rem;
+  padding: 0.52rem 0.64rem;
+  border-radius: 0.95rem;
+  font-size: 0.75rem;
   cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.12s ease;
 }
 
 .tree-type {
@@ -840,11 +1038,21 @@ button:focus-visible {
 }
 
 .tree-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--bg-surface-muted);
   color: var(--text-secondary);
   font-weight: 500;
+  margin-left: 0.35rem;
 }
 
 .tree-type-label {
+  display: inline-flex;
+  align-items: center;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -856,12 +1064,14 @@ button:focus-visible {
 
 .tree-node:hover {
   background: var(--control-hover);
+  transform: translateX(1px);
 }
 
 .tree-node.selected {
   background: var(--tab-active-bg);
   border-color: var(--tab-active-border);
   color: var(--tree-selected-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .tree-leaf-icon {
@@ -879,16 +1089,21 @@ button:focus-visible {
 
 .muted {
   color: var(--text-secondary);
-  font-size: 0.71rem;
+  font-size: 0.74rem;
+}
+
+.empty-copy {
+  margin: 0;
+  padding: 0.35rem 0;
 }
 
 .explorer-context-menu {
   position: fixed;
   z-index: 90;
-  min-width: 12.5rem;
-  padding: 0.26rem;
-  border-radius: 8px;
-  border: 1px solid var(--control-border);
+  min-width: 13rem;
+  padding: 0.35rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
   background: var(--bg-surface);
   box-shadow: var(--dialog-shadow);
   display: grid;
@@ -897,12 +1112,12 @@ button:focus-visible {
 
 .explorer-context-menu-item {
   border: 0;
-  border-radius: 5px;
+  border-radius: 0.85rem;
   background: transparent;
   color: var(--text-primary);
-  font-size: 0.73rem;
+  font-size: 0.74rem;
   text-align: left;
-  padding: 0.32rem 0.45rem;
+  padding: 0.5rem 0.7rem;
   cursor: pointer;
 }
 
@@ -925,8 +1140,7 @@ button:focus-visible {
 
 @media (max-width: 980px) {
   .explorer-sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--panel-separator);
+    padding: 0 1rem 1rem;
   }
 
   .profile-save-row {
@@ -934,8 +1148,13 @@ button:focus-visible {
     align-items: stretch;
   }
 
+  .connection-summary,
   .field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .tree-area {
+    min-height: 20rem;
   }
 }
 </style>

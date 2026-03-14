@@ -807,7 +807,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div ref="resultsContentEl" class="results-content" @scroll="onResultsScroll">
-      <p v-if="!activePane || !activePane.queryResult" class="muted">{{ props.emptyStateMessage }}</p>
+      <div v-if="!activePane || !activePane.queryResult" class="results-empty-state">
+        <div class="results-empty-label">No results yet</div>
+        <p class="muted">{{ props.emptyStateMessage }}</p>
+      </div>
 
       <template v-else>
         <div v-if="activePane.queryResult.columns.length" class="results-toolbar">
@@ -866,91 +869,92 @@ onBeforeUnmount(() => {
           Showing matches from loaded rows only.
         </p>
 
-        <table
-          v-if="activePane.queryResult.columns.length"
-          class="results-table"
-          :class="{ 'is-resizing': !!resizeState }"
-        >
-          <colgroup>
-            <col
-              v-for="(column, columnIndex) in activePane.queryResult.columns"
-              :key="`col-${column}-${columnIndex}`"
-              :style="{ width: `${getColumnWidth(columnIndex)}px` }"
-            />
-          </colgroup>
-          <thead>
-            <tr>
-              <th
+        <div v-if="activePane.queryResult.columns.length" class="results-grid-shell">
+          <table
+            class="results-table"
+            :class="{ 'is-resizing': !!resizeState }"
+          >
+            <colgroup>
+              <col
                 v-for="(column, columnIndex) in activePane.queryResult.columns"
-                :key="`${column}-${columnIndex}`"
-                :class="{
-                  'results-sort-active':
-                    currentSortState?.columnIndex === columnIndex,
-                }"
-              >
-                <button
-                  class="results-col-sort-button"
-                  type="button"
-                  :aria-label="getColumnSortLabel(column, columnIndex)"
-                  @click="toggleColumnSort(columnIndex)"
+                :key="`col-${column}-${columnIndex}`"
+                :style="{ width: `${getColumnWidth(columnIndex)}px` }"
+              />
+            </colgroup>
+            <thead>
+              <tr>
+                <th
+                  v-for="(column, columnIndex) in activePane.queryResult.columns"
+                  :key="`${column}-${columnIndex}`"
+                  :class="{
+                    'results-sort-active':
+                      currentSortState?.columnIndex === columnIndex,
+                  }"
                 >
-                  <span class="results-cell-text" :title="column">{{ column }}</span>
-                  <span class="results-sort-indicator" aria-hidden="true">
-                    {{ getColumnSortIndicator(columnIndex) }}
-                  </span>
-                </button>
-                <button
-                  class="results-col-resize-handle"
-                  type="button"
-                  tabindex="-1"
-                  aria-hidden="true"
-                  @mousedown="startColumnResize(columnIndex, $event)"
-                ></button>
-              </th>
-            </tr>
-            <tr class="results-filter-row">
-              <th
-                v-for="(column, columnIndex) in activePane.queryResult.columns"
-                :key="`filter-${column}-${columnIndex}`"
+                  <button
+                    class="results-col-sort-button"
+                    type="button"
+                    :aria-label="getColumnSortLabel(column, columnIndex)"
+                    @click="toggleColumnSort(columnIndex)"
+                  >
+                    <span class="results-cell-text" :title="column">{{ column }}</span>
+                    <span class="results-sort-indicator" aria-hidden="true">
+                      {{ getColumnSortIndicator(columnIndex) }}
+                    </span>
+                  </button>
+                  <button
+                    class="results-col-resize-handle"
+                    type="button"
+                    tabindex="-1"
+                    aria-hidden="true"
+                    @mousedown="startColumnResize(columnIndex, $event)"
+                  ></button>
+                </th>
+              </tr>
+              <tr class="results-filter-row">
+                <th
+                  v-for="(column, columnIndex) in activePane.queryResult.columns"
+                  :key="`filter-${column}-${columnIndex}`"
+                >
+                  <input
+                    class="results-filter-input"
+                    :value="currentColumnFilters[columnIndex] ?? ''"
+                    :placeholder="`Filter ${column}`"
+                    type="search"
+                    spellcheck="false"
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    data-gramm="false"
+                    @input="onColumnFilterInput(columnIndex, $event)"
+                  />
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="topSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
+                <td :colspan="visibleColumnCount" :style="{ height: `${topSpacerHeight}px` }"></td>
+              </tr>
+              <tr
+                v-for="{ row, rowIndex, sourceRowIndex } in visibleRows"
+                :key="`row-${sourceRowIndex}-${rowIndex}`"
+                :data-result-row="rowIndex"
+                :class="{ 'results-row-alt': rowIndex % 2 === 1 }"
               >
-                <input
-                  class="results-filter-input"
-                  :value="currentColumnFilters[columnIndex] ?? ''"
-                  :placeholder="`Filter ${column}`"
-                  type="search"
-                  spellcheck="false"
-                  autocomplete="off"
-                  autocorrect="off"
-                  autocapitalize="off"
-                  data-gramm="false"
-                  @input="onColumnFilterInput(columnIndex, $event)"
-                />
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="topSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
-              <td :colspan="visibleColumnCount" :style="{ height: `${topSpacerHeight}px` }"></td>
-            </tr>
-            <tr
-              v-for="{ row, rowIndex, sourceRowIndex } in visibleRows"
-              :key="`row-${sourceRowIndex}-${rowIndex}`"
-              :data-result-row="rowIndex"
-              :class="{ 'results-row-alt': rowIndex % 2 === 1 }"
-            >
-              <td
-                v-for="(value, colIndex) in row"
-                :key="`col-${rowIndex}-${colIndex}`"
-                :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
-              >
-                <span class="results-cell-text" :title="value">{{ value }}</span>
-              </td>
-            </tr>
-            <tr v-if="bottomSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
-              <td :colspan="visibleColumnCount" :style="{ height: `${bottomSpacerHeight}px` }"></td>
-            </tr>
-          </tbody>
-        </table>
+                <td
+                  v-for="(value, colIndex) in row"
+                  :key="`col-${rowIndex}-${colIndex}`"
+                  :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
+                >
+                  <span class="results-cell-text" :title="value">{{ value }}</span>
+                </td>
+              </tr>
+              <tr v-if="bottomSpacerHeight > 0" class="results-spacer-row" aria-hidden="true">
+                <td :colspan="visibleColumnCount" :style="{ height: `${bottomSpacerHeight}px` }"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </template>
     </div>
   </section>
@@ -959,23 +963,33 @@ onBeforeUnmount(() => {
 <style scoped>
 .results-pane {
   display: grid;
-  grid-template-rows: 30px 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 1.8rem;
+  background: color-mix(in srgb, var(--bg-surface) 92%, white);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
 .results-header {
   display: flex;
   align-items: center;
-  padding: 0 0.48rem;
+  gap: 0.8rem;
+  min-height: 3.8rem;
+  padding: 1rem 1.15rem;
   border-bottom: 1px solid var(--panel-separator);
-  background: var(--table-header-bg);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent-soft) 36%, white) 0%,
+      color-mix(in srgb, var(--table-header-bg) 88%, white) 100%
+    );
 }
 
 .results-title {
-  font-size: 0.73rem;
-  font-weight: 500;
+  font-size: 0.92rem;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
@@ -984,17 +998,18 @@ onBeforeUnmount(() => {
   align-items: stretch;
   min-width: 0;
   height: 100%;
+  gap: 0.35rem;
 }
 
 .results-tab {
-  height: 100%;
-  border: 0;
-  border-right: 1px solid var(--panel-separator);
+  min-height: 2.35rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.69rem;
-  font-weight: 500;
-  padding: 0 0.58rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0 0.9rem;
   cursor: pointer;
 }
 
@@ -1005,11 +1020,13 @@ onBeforeUnmount(() => {
 .results-tab.active {
   background: var(--tab-active-bg);
   color: var(--text-primary);
+  border-color: var(--tab-active-border);
+  box-shadow: 0 10px 24px rgba(89, 70, 80, 0.08);
 }
 
 .error-inline {
   margin-left: auto;
-  font-size: 0.69rem;
+  font-size: 0.72rem;
   color: var(--danger);
   white-space: nowrap;
   overflow: hidden;
@@ -1019,24 +1036,43 @@ onBeforeUnmount(() => {
 .results-content {
   min-height: 0;
   overflow: auto;
-  padding: 0;
+  padding: 1rem;
   margin: 0;
   font-family: Consolas, "Courier New", monospace;
+}
+
+.results-empty-state {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+  padding: 1rem 1.1rem;
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 1.2rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 76%, white);
+}
+
+.results-empty-label {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
 }
 
 .results-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.42rem;
-  padding: 0.33rem 0.42rem;
-  border-bottom: 1px solid var(--panel-separator);
-  background: var(--bg-surface-muted);
+  gap: 0.55rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 86%, white);
+  margin-bottom: 0.85rem;
 }
 
 .results-search-input,
 .results-filter-input {
   border: 1px solid var(--control-border);
-  border-radius: 5px;
+  border-radius: 0.9rem;
   background: var(--control-bg);
   color: var(--text-primary);
   font-family: inherit;
@@ -1045,23 +1081,24 @@ onBeforeUnmount(() => {
 .results-search-input {
   flex: 1 1 14rem;
   min-width: 11rem;
-  padding: 0.2rem 0.32rem;
-  font-size: 0.69rem;
+  padding: 0.62rem 0.75rem;
+  font-size: 0.72rem;
 }
 
 .results-filter-input {
   width: 100%;
-  padding: 0.16rem 0.25rem;
-  font-size: 0.67rem;
+  padding: 0.48rem 0.58rem;
+  font-size: 0.68rem;
 }
 
 .results-toolbar-btn {
   border: 1px solid var(--control-border);
-  border-radius: 5px;
+  border-radius: 999px;
   background: var(--control-bg);
   color: var(--text-primary);
-  font-size: 0.67rem;
-  padding: 0.15rem 0.34rem;
+  font-size: 0.69rem;
+  font-weight: 600;
+  padding: 0.56rem 0.82rem;
   cursor: pointer;
 }
 
@@ -1087,6 +1124,15 @@ onBeforeUnmount(() => {
   table-layout: fixed;
   font-size: 0.73rem;
   margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 1.2rem;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.results-grid-shell {
+  border-radius: 1.2rem;
+  overflow: hidden;
 }
 
 .results-table th,
@@ -1096,7 +1142,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
   color: var(--text-primary);
   text-align: left;
-  padding: 0.26rem 0.38rem;
+  padding: 0.62rem 0.8rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1108,7 +1154,7 @@ onBeforeUnmount(() => {
   top: 0;
   font-weight: 600;
   z-index: 2;
-  padding-right: 0.5rem;
+  padding-right: 0.8rem;
   overflow: visible;
 }
 
@@ -1157,7 +1203,7 @@ onBeforeUnmount(() => {
   top: auto;
   z-index: 1;
   background: var(--bg-surface-muted);
-  padding: 0.24rem 0.28rem;
+  padding: 0.45rem 0.58rem;
 }
 
 .results-spacer-row td {
@@ -1214,26 +1260,41 @@ onBeforeUnmount(() => {
 
 .muted {
   color: var(--text-secondary);
-  font-size: 0.71rem;
+  font-size: 0.73rem;
 }
 
 .results-message {
-  margin-bottom: 0.32rem;
+  margin: 0 0 0.45rem;
 }
 
 .results-empty-filtered {
-  margin-bottom: 0.32rem;
+  margin-bottom: 0.45rem;
 }
 
 .results-filter-fallback {
-  margin-bottom: 0.32rem;
+  margin-bottom: 0.45rem;
 }
 
 .results-error {
   color: var(--danger);
-  font-size: 0.72rem;
-  margin: 0 0 0.32rem;
+  font-size: 0.73rem;
+  margin: 0 0 0.45rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 980px) {
+  .results-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .results-content {
+    padding: 0.85rem;
+  }
+
+  .results-toolbar {
+    flex-wrap: wrap;
+  }
 }
 </style>
