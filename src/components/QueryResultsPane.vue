@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { invoke } from "@tauri-apps/api/core";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { OracleQueryResult, WorkspaceQueryResultPane } from "../types/clarity";
+import type { DbQueryResult, WorkspaceQueryResultPane } from "../types/clarity";
 
 const props = defineProps<{
   resultPanes: WorkspaceQueryResultPane[];
@@ -41,7 +41,7 @@ type SortState = {
   direction: SortDirection;
 };
 
-interface OracleFilteredQueryRequest {
+interface DbFilteredQueryRequest {
   sessionId: number;
   sql: string;
   rowLimit?: number;
@@ -54,16 +54,16 @@ const resizeState = ref<ColumnResizeState | null>(null);
 const paneSearchTerms = ref<Record<string, string>>({});
 const paneColumnFilters = ref<Record<string, string[]>>({});
 const paneSortStates = ref<Record<string, SortState | null>>({});
-const paneFilteredResults = ref<Record<string, OracleQueryResult | null>>({});
+const paneFilteredResults = ref<Record<string, DbQueryResult | null>>({});
 const paneFilterLoading = ref<Record<string, boolean>>({});
 const paneFilterError = ref<Record<string, string>>({});
 const activePaneId = computed<string>(() => activePane.value?.id ?? "");
-const activeBaseResult = computed<OracleQueryResult | null>(
+const activeBaseResult = computed<DbQueryResult | null>(
   () => activePane.value?.queryResult ?? null,
 );
 const baseColumns = computed<string[]>(() => activeBaseResult.value?.columns ?? []);
 const baseRows = computed<string[][]>(() => activeBaseResult.value?.rows ?? []);
-const activeRemoteFilteredResult = computed<OracleQueryResult | null>(() => {
+const activeRemoteFilteredResult = computed<DbQueryResult | null>(() => {
   if (!activePaneId.value) {
     return null;
   }
@@ -240,7 +240,7 @@ async function refreshServerFilteredRows(): Promise<void> {
   paneFilterError.value[paneId] = "";
   paneFilteredResults.value[paneId] = null;
 
-  const request: OracleFilteredQueryRequest = {
+  const request: DbFilteredQueryRequest = {
     sessionId: pane.sourceSessionId,
     sql: pane.sourceSql,
     rowLimit: pane.sourceRowLimit ?? undefined,
@@ -249,7 +249,7 @@ async function refreshServerFilteredRows(): Promise<void> {
   };
 
   try {
-    const result = await invoke<OracleQueryResult>("db_run_query_filtered", {
+    const result = await invoke<DbQueryResult>("db_run_query_filtered", {
       request,
     });
     if (requestToken !== filterRefreshRequestToken) {

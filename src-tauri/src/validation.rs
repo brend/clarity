@@ -1,31 +1,52 @@
 use crate::types::{
-    DatabaseProvider, DbAiSuggestQueryRequest, DbConnectRequest, SaveConnectionProfileRequest,
+    DbAiSuggestQueryRequest, DbConnectConnection, DbConnectRequest, DbConnectionProfile,
+    SaveConnectionProfileRequest,
 };
 
 pub(crate) fn validate_connect_request(request: &DbConnectRequest) -> Result<(), String> {
-    if request.provider == DatabaseProvider::Sqlite {
-        return Ok(());
-    }
+    match &request.connection {
+        DbConnectConnection::Oracle(connection) => {
+            if connection.host.trim().is_empty() {
+                return Err("Host is required".to_string());
+            }
 
-    if request.host.trim().is_empty() {
-        return Err("Host is required".to_string());
-    }
+            if connection.username.trim().is_empty() {
+                return Err("Username is required".to_string());
+            }
 
-    if request.username.trim().is_empty() {
-        return Err("Username is required".to_string());
-    }
+            if connection.password.is_empty() {
+                return Err("Password is required".to_string());
+            }
 
-    if request.password.is_empty() {
-        return Err("Password is required".to_string());
-    }
+            if connection.service_name.trim().is_empty() {
+                return Err("Service name is required".to_string());
+            }
 
-    if request.provider == DatabaseProvider::Oracle {
-        if request.service_name.trim().is_empty() {
-            return Err("Service name is required".to_string());
+            if connection.schema.trim().is_empty() {
+                return Err("Schema is required".to_string());
+            }
         }
+        DbConnectConnection::Postgres(connection) | DbConnectConnection::Mysql(connection) => {
+            if connection.host.trim().is_empty() {
+                return Err("Host is required".to_string());
+            }
 
-        if request.schema.trim().is_empty() {
-            return Err("Schema is required".to_string());
+            if connection.username.trim().is_empty() {
+                return Err("Username is required".to_string());
+            }
+
+            if connection.password.is_empty() {
+                return Err("Password is required".to_string());
+            }
+
+            if connection.database.trim().is_empty() {
+                return Err("Database is required".to_string());
+            }
+        }
+        DbConnectConnection::Sqlite(connection) => {
+            if connection.file_path.trim().is_empty() {
+                return Err("File path is required".to_string());
+            }
         }
     }
 
@@ -39,25 +60,41 @@ pub(crate) fn validate_profile_request(
         return Err("Profile name is required".to_string());
     }
 
-    if request.provider == DatabaseProvider::Sqlite {
-        return Ok(());
-    }
+    match &request.connection {
+        DbConnectionProfile::Oracle(connection) => {
+            if connection.host.trim().is_empty() {
+                return Err("Host is required".to_string());
+            }
 
-    if request.host.trim().is_empty() {
-        return Err("Host is required".to_string());
-    }
+            if connection.username.trim().is_empty() {
+                return Err("Username is required".to_string());
+            }
 
-    if request.username.trim().is_empty() {
-        return Err("Username is required".to_string());
-    }
+            if connection.service_name.trim().is_empty() {
+                return Err("Service name is required".to_string());
+            }
 
-    if request.provider == DatabaseProvider::Oracle {
-        if request.service_name.trim().is_empty() {
-            return Err("Service name is required".to_string());
+            if connection.schema.trim().is_empty() {
+                return Err("Schema is required".to_string());
+            }
         }
+        DbConnectionProfile::Postgres(connection) | DbConnectionProfile::Mysql(connection) => {
+            if connection.host.trim().is_empty() {
+                return Err("Host is required".to_string());
+            }
 
-        if request.schema.trim().is_empty() {
-            return Err("Schema is required".to_string());
+            if connection.username.trim().is_empty() {
+                return Err("Username is required".to_string());
+            }
+
+            if connection.database.trim().is_empty() {
+                return Err("Database is required".to_string());
+            }
+        }
+        DbConnectionProfile::Sqlite(connection) => {
+            if connection.file_path.trim().is_empty() {
+                return Err("File path is required".to_string());
+            }
         }
     }
 

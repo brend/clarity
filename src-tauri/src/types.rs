@@ -28,10 +28,21 @@ pub(crate) enum OracleAuthMode {
     Sysdba,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DbConnectRequest {
-    pub(crate) provider: DatabaseProvider,
+pub(crate) struct OracleConnectionOptions {
+    pub(crate) host: String,
+    pub(crate) port: Option<u16>,
+    pub(crate) service_name: String,
+    pub(crate) username: String,
+    pub(crate) schema: String,
+    #[serde(default)]
+    pub(crate) oracle_auth_mode: OracleAuthMode,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OracleConnectOptions {
     pub(crate) host: String,
     pub(crate) port: Option<u16>,
     pub(crate) service_name: String,
@@ -49,9 +60,69 @@ pub(crate) struct SessionRequest {
     pub(crate) session_id: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetworkConnectionOptions {
+    pub(crate) host: String,
+    pub(crate) port: Option<u16>,
+    pub(crate) database: String,
+    pub(crate) username: String,
+    pub(crate) schema: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NetworkConnectOptions {
+    pub(crate) host: String,
+    pub(crate) port: Option<u16>,
+    pub(crate) database: String,
+    pub(crate) username: String,
+    pub(crate) password: String,
+    pub(crate) schema: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SqliteConnectionOptions {
+    pub(crate) file_path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DbConnectRequest {
+    #[serde(flatten)]
+    pub(crate) connection: DbConnectConnection,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "provider", content = "connection", rename_all = "lowercase")]
+pub(crate) enum DbConnectConnection {
+    Oracle(OracleConnectOptions),
+    Postgres(NetworkConnectOptions),
+    Mysql(NetworkConnectOptions),
+    Sqlite(SqliteConnectionOptions),
+}
+
+impl DbConnectRequest {
+    pub(crate) fn provider(&self) -> DatabaseProvider {
+        self.connection.provider()
+    }
+}
+
+impl DbConnectConnection {
+    pub(crate) fn provider(&self) -> DatabaseProvider {
+        match self {
+            DbConnectConnection::Oracle(_) => DatabaseProvider::Oracle,
+            DbConnectConnection::Postgres(_) => DatabaseProvider::Postgres,
+            DbConnectConnection::Mysql(_) => DatabaseProvider::Mysql,
+            DbConnectConnection::Sqlite(_) => DatabaseProvider::Sqlite,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleQueryRequest {
+pub(crate) struct DbQueryRequest {
     pub(crate) session_id: u64,
     pub(crate) sql: String,
     pub(crate) row_limit: Option<u32>,
@@ -59,7 +130,7 @@ pub(crate) struct OracleQueryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleFilteredQueryRequest {
+pub(crate) struct DbFilteredQueryRequest {
     pub(crate) session_id: u64,
     pub(crate) sql: String,
     pub(crate) row_limit: Option<u32>,
@@ -80,7 +151,7 @@ pub(crate) struct DbSchemaSearchRequest {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleObjectRef {
+pub(crate) struct DbObjectRef {
     pub(crate) session_id: u64,
     pub(crate) schema: String,
     pub(crate) object_type: String,
@@ -89,7 +160,7 @@ pub(crate) struct OracleObjectRef {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleDdlUpdateRequest {
+pub(crate) struct DbObjectDdlUpdateRequest {
     pub(crate) session_id: u64,
     pub(crate) schema: String,
     pub(crate) object_type: String,
@@ -135,14 +206,8 @@ pub(crate) struct ConnectionProfileRef {
 pub(crate) struct SaveConnectionProfileRequest {
     pub(crate) id: Option<String>,
     pub(crate) name: String,
-    pub(crate) provider: DatabaseProvider,
-    pub(crate) host: String,
-    pub(crate) port: Option<u16>,
-    pub(crate) service_name: String,
-    pub(crate) username: String,
-    pub(crate) schema: String,
-    #[serde(default)]
-    pub(crate) oracle_auth_mode: OracleAuthMode,
+    #[serde(flatten)]
+    pub(crate) connection: DbConnectionProfile,
     pub(crate) save_password: bool,
     pub(crate) password: Option<String>,
 }
@@ -161,14 +226,8 @@ pub(crate) struct DbSessionSummary {
 pub(crate) struct ConnectionProfile {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) provider: DatabaseProvider,
-    pub(crate) host: String,
-    pub(crate) port: Option<u16>,
-    pub(crate) service_name: String,
-    pub(crate) username: String,
-    pub(crate) schema: String,
-    #[serde(default)]
-    pub(crate) oracle_auth_mode: OracleAuthMode,
+    #[serde(flatten)]
+    pub(crate) connection: DbConnectionProfile,
     pub(crate) has_password: bool,
 }
 
@@ -177,19 +236,22 @@ pub(crate) struct ConnectionProfile {
 pub(crate) struct StoredConnectionProfile {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) provider: DatabaseProvider,
-    pub(crate) host: String,
-    pub(crate) port: Option<u16>,
-    pub(crate) service_name: String,
-    pub(crate) username: String,
-    pub(crate) schema: String,
-    #[serde(default)]
-    pub(crate) oracle_auth_mode: OracleAuthMode,
+    #[serde(flatten)]
+    pub(crate) connection: DbConnectionProfile,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "provider", content = "connection", rename_all = "lowercase")]
+pub(crate) enum DbConnectionProfile {
+    Oracle(OracleConnectionOptions),
+    Postgres(NetworkConnectionOptions),
+    Mysql(NetworkConnectionOptions),
+    Sqlite(SqliteConnectionOptions),
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleObjectEntry {
+pub(crate) struct DbObjectEntry {
     pub(crate) schema: String,
     pub(crate) object_type: String,
     pub(crate) object_name: String,
@@ -197,7 +259,7 @@ pub(crate) struct OracleObjectEntry {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleObjectColumnEntry {
+pub(crate) struct DbObjectColumnEntry {
     pub(crate) schema: String,
     pub(crate) object_name: String,
     pub(crate) column_name: String,
@@ -207,7 +269,7 @@ pub(crate) struct OracleObjectColumnEntry {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OracleQueryResult {
+pub(crate) struct DbQueryResult {
     pub(crate) columns: Vec<String>,
     pub(crate) rows: Vec<Vec<String>>,
     pub(crate) rows_affected: Option<u64>,

@@ -5,11 +5,12 @@ use crate::providers::{AppSession, ProviderRegistry};
 use crate::state::AppState;
 use crate::types::{
     ConnectionProfile, ConnectionProfileRef, DbAiApiKeyPresence, DbAiSuggestQueryRequest,
-    DbAiSuggestQueryResult, DbConnectRequest, DbExportSchemaRequest, DbSaveQuerySheetRequest,
-    DbSaveQuerySheetsRequest, DbSaveQuerySheetsResult, DbSchemaExportResult, DbSchemaSearchRequest,
-    DbSchemaSearchResult, DbSessionSummary, DbTransactionState, OracleDdlUpdateRequest,
-    OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef, OracleQueryRequest,
-    OracleQueryResult, SaveConnectionProfileRequest, SessionRequest, StoredConnectionProfile,
+    DbAiSuggestQueryResult, DbConnectRequest, DbConnectionProfile, DbExportSchemaRequest,
+    DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry, DbObjectRef, DbQueryRequest,
+    DbQueryResult, DbSaveQuerySheetRequest, DbSaveQuerySheetsRequest, DbSaveQuerySheetsResult,
+    DbSchemaExportResult, DbSchemaSearchRequest, DbSchemaSearchResult, DbSessionSummary,
+    DbTransactionState, NetworkConnectionOptions, OracleConnectionOptions,
+    SaveConnectionProfileRequest, SessionRequest, StoredConnectionProfile,
 };
 use crate::validation::{
     validate_ai_suggest_request, validate_connect_request, validate_profile_request,
@@ -29,7 +30,7 @@ pub(crate) fn db_connect(
         session_id,
         display_name,
         schema,
-        provider: request.provider,
+        provider: request.provider(),
     };
 
     let mut sessions = state
@@ -61,7 +62,7 @@ pub(crate) fn db_disconnect(
 pub(crate) fn db_list_objects(
     request: SessionRequest,
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<OracleObjectEntry>, String> {
+) -> Result<Vec<DbObjectEntry>, String> {
     with_session(&state, request.session_id, ProviderRegistry::list_objects)
 }
 
@@ -69,7 +70,7 @@ pub(crate) fn db_list_objects(
 pub(crate) fn db_list_object_columns(
     request: SessionRequest,
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<OracleObjectColumnEntry>, String> {
+) -> Result<Vec<DbObjectColumnEntry>, String> {
     with_session(
         &state,
         request.session_id,
@@ -79,7 +80,7 @@ pub(crate) fn db_list_object_columns(
 
 #[tauri::command]
 pub(crate) fn db_get_object_ddl(
-    request: OracleObjectRef,
+    request: DbObjectRef,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     with_session(&state, request.session_id, |session| {
@@ -89,7 +90,7 @@ pub(crate) fn db_get_object_ddl(
 
 #[tauri::command]
 pub(crate) fn db_update_object_ddl(
-    request: OracleDdlUpdateRequest,
+    request: DbObjectDdlUpdateRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<String, String> {
     with_session_mut(&state, request.session_id, |session| {
@@ -99,9 +100,9 @@ pub(crate) fn db_update_object_ddl(
 
 #[tauri::command]
 pub(crate) fn db_run_query(
-    request: OracleQueryRequest,
+    request: DbQueryRequest,
     state: tauri::State<'_, AppState>,
-) -> Result<OracleQueryResult, String> {
+) -> Result<DbQueryResult, String> {
     with_session_mut(&state, request.session_id, |session| {
         ProviderRegistry::run_query(session, &request)
     })
@@ -109,9 +110,9 @@ pub(crate) fn db_run_query(
 
 #[tauri::command]
 pub(crate) fn db_run_query_filtered(
-    request: crate::types::OracleFilteredQueryRequest,
+    request: crate::types::DbFilteredQueryRequest,
     state: tauri::State<'_, AppState>,
-) -> Result<OracleQueryResult, String> {
+) -> Result<DbQueryResult, String> {
     with_session_mut(&state, request.session_id, |session| {
         ProviderRegistry::run_filtered_query(session, &request)
     })
@@ -238,13 +239,7 @@ pub(crate) fn db_save_connection_profile(
     let updated = StoredConnectionProfile {
         id: id.clone(),
         name: request.name.trim().to_string(),
-        provider: request.provider,
-        host: request.host.trim().to_string(),
-        port: request.port,
-        service_name: request.service_name.trim().to_string(),
-        username: request.username.trim().to_string(),
-        schema: request.schema.trim().to_uppercase(),
-        oracle_auth_mode: request.oracle_auth_mode,
+        connection: normalize_profile_connection(&request.connection),
     };
 
     if let Some(position) = profiles_list.iter().position(|profile| profile.id == id) {
@@ -376,4 +371,41 @@ fn next_profile_id(
         );
     }
     candidate
+}
+
+fn normalize_profile_connection(connection: &DbConnectionProfile) -> DbConnectionProfile {
+    match connection {
+        DbConnectionProfile::Oracle(details) => {
+            DbConnectionProfile::Oracle(OracleConnectionOptions {
+                host: details.host.trim().to_string(),
+                port: details.port,
+                service_name: details.service_name.trim().to_string(),
+                username: details.username.trim().to_string(),
+                schema: details.schema.trim().to_uppercase(),
+                oracle_auth_mode: details.oracle_auth_mode,
+            })
+        }
+        DbConnectionProfile::Postgres(details) => {
+            DbConnectionProfile::Postgres(normalize_network_connection(details))
+        }
+        DbConnectionProfile::Mysql(details) => {
+            DbConnectionProfile::Mysql(normalize_network_connection(details))
+        }
+        DbConnectionProfile::Sqlite(details) => DbConnectionProfile::Sqlite(details.clone()),
+    }
+}
+
+fn normalize_network_connection(details: &NetworkConnectionOptions) -> NetworkConnectionOptions {
+    NetworkConnectionOptions {
+        host: details.host.trim().to_string(),
+        port: details.port,
+        database: details.database.trim().to_string(),
+        username: details.username.trim().to_string(),
+        schema: details
+            .schema
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    }
 }

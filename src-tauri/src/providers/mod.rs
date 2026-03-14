@@ -1,9 +1,9 @@
 pub(crate) mod oracle;
 
 use crate::types::{
-    DatabaseProvider, DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult,
-    OracleDdlUpdateRequest, OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry,
-    OracleObjectRef, OracleQueryRequest, OracleQueryResult,
+    DatabaseProvider, DbConnectConnection, DbConnectRequest, DbFilteredQueryRequest,
+    DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry, DbObjectRef, DbQueryRequest,
+    DbQueryResult, DbSchemaSearchRequest, DbSchemaSearchResult,
 };
 
 pub(crate) struct AppSession {
@@ -21,9 +21,9 @@ impl ProviderRegistry {
     pub(crate) fn connect(
         request: &DbConnectRequest,
     ) -> Result<(AppSession, String, String), String> {
-        match request.provider {
-            DatabaseProvider::Oracle => {
-                let (session, display_name, schema) = oracle::connect(request)?;
+        match &request.connection {
+            DbConnectConnection::Oracle(connection) => {
+                let (session, display_name, schema) = oracle::connect(connection)?;
                 Ok((
                     AppSession {
                         provider: DatabaseProvider::Oracle,
@@ -33,13 +33,13 @@ impl ProviderRegistry {
                     schema,
                 ))
             }
-            DatabaseProvider::Postgres | DatabaseProvider::Mysql | DatabaseProvider::Sqlite => {
-                Err(not_implemented_error(request.provider))
-            }
+            DbConnectConnection::Postgres(_)
+            | DbConnectConnection::Mysql(_)
+            | DbConnectConnection::Sqlite(_) => Err(not_implemented_error(request.provider())),
         }
     }
 
-    pub(crate) fn list_objects(session: &AppSession) -> Result<Vec<OracleObjectEntry>, String> {
+    pub(crate) fn list_objects(session: &AppSession) -> Result<Vec<DbObjectEntry>, String> {
         match (session.provider, &session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::list_objects(oracle_session)
@@ -50,7 +50,7 @@ impl ProviderRegistry {
 
     pub(crate) fn list_object_columns(
         session: &AppSession,
-    ) -> Result<Vec<OracleObjectColumnEntry>, String> {
+    ) -> Result<Vec<DbObjectColumnEntry>, String> {
         match (session.provider, &session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::list_object_columns(oracle_session)
@@ -61,7 +61,7 @@ impl ProviderRegistry {
 
     pub(crate) fn get_object_ddl(
         session: &AppSession,
-        request: &OracleObjectRef,
+        request: &DbObjectRef,
     ) -> Result<String, String> {
         match (session.provider, &session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
@@ -73,7 +73,7 @@ impl ProviderRegistry {
 
     pub(crate) fn update_object_ddl(
         session: &mut AppSession,
-        request: &OracleDdlUpdateRequest,
+        request: &DbObjectDdlUpdateRequest,
     ) -> Result<String, String> {
         match (session.provider, &mut session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
@@ -85,8 +85,8 @@ impl ProviderRegistry {
 
     pub(crate) fn run_query(
         session: &mut AppSession,
-        request: &OracleQueryRequest,
-    ) -> Result<OracleQueryResult, String> {
+        request: &DbQueryRequest,
+    ) -> Result<DbQueryResult, String> {
         match (session.provider, &mut session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::run_query(oracle_session, request)
@@ -97,8 +97,8 @@ impl ProviderRegistry {
 
     pub(crate) fn run_filtered_query(
         session: &mut AppSession,
-        request: &OracleFilteredQueryRequest,
-    ) -> Result<OracleQueryResult, String> {
+        request: &DbFilteredQueryRequest,
+    ) -> Result<DbQueryResult, String> {
         match (session.provider, &mut session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::run_filtered_query(oracle_session, request)

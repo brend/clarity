@@ -1,8 +1,8 @@
 use crate::menu::EVENT_SCHEMA_EXPORT_PROGRESS;
 use crate::providers::{AppSession, ProviderRegistry};
 use crate::types::{
-    DbExportSchemaRequest, DbSaveQuerySheetRequest, DbSaveQuerySheetsRequest,
-    DbSaveQuerySheetsResult, DbSchemaExportProgress, DbSchemaExportResult, OracleObjectRef,
+    DbExportSchemaRequest, DbObjectRef, DbSaveQuerySheetRequest, DbSaveQuerySheetsRequest,
+    DbSaveQuerySheetsResult, DbSchemaExportProgress, DbSchemaExportResult,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -121,7 +121,7 @@ fn export_schema_blocking(
             "{} {}.{}",
             object.object_type, object.schema, object.object_name
         );
-        let object_ref = OracleObjectRef {
+        let object_ref = DbObjectRef {
             session_id: request.session_id,
             schema: object.schema.clone(),
             object_type: object.object_type.clone(),

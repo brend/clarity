@@ -1,5 +1,9 @@
-use crate::types::{ConnectionProfile, StoredConnectionProfile};
+use crate::types::{
+    ConnectionProfile, DatabaseProvider, DbConnectionProfile, OracleAuthMode,
+    OracleConnectionOptions, StoredConnectionProfile,
+};
 use keyring::{Entry, Error as KeyringError};
+use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -20,7 +24,13 @@ pub(crate) fn read_profiles(app: &AppHandle) -> Result<Vec<StoredConnectionProfi
         return Ok(Vec::new());
     }
 
-    serde_json::from_str::<Vec<StoredConnectionProfile>>(&content)
+    serde_json::from_str::<Vec<StoredConnectionProfileRecord>>(&content)
+        .map(|profiles| {
+            profiles
+                .into_iter()
+                .map(StoredConnectionProfileRecord::into_current)
+                .collect()
+        })
         .map_err(|error| format!("Failed to parse profiles file: {error}"))
 }
 
@@ -42,14 +52,83 @@ pub(crate) fn to_connection_profile(profile: StoredConnectionProfile) -> Connect
     ConnectionProfile {
         id: profile.id,
         name: profile.name,
-        provider: profile.provider,
-        host: profile.host,
-        port: profile.port,
-        service_name: profile.service_name,
-        username: profile.username,
-        schema: profile.schema,
-        oracle_auth_mode: profile.oracle_auth_mode,
+        connection: profile.connection,
         has_password,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StoredConnectionProfileRecord {
+    Current(StoredConnectionProfile),
+    Legacy(LegacyStoredConnectionProfile),
+}
+
+impl StoredConnectionProfileRecord {
+    fn into_current(self) -> StoredConnectionProfile {
+        match self {
+            StoredConnectionProfileRecord::Current(profile) => profile,
+            StoredConnectionProfileRecord::Legacy(profile) => profile.into_current(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyStoredConnectionProfile {
+    id: String,
+    name: String,
+    provider: DatabaseProvider,
+    host: String,
+    port: Option<u16>,
+    service_name: String,
+    username: String,
+    schema: String,
+    #[serde(default)]
+    oracle_auth_mode: OracleAuthMode,
+}
+
+impl LegacyStoredConnectionProfile {
+    fn into_current(self) -> StoredConnectionProfile {
+        let connection = match self.provider {
+            DatabaseProvider::Oracle => DbConnectionProfile::Oracle(OracleConnectionOptions {
+                host: self.host,
+                port: self.port,
+                service_name: self.service_name,
+                username: self.username,
+                schema: self.schema,
+                oracle_auth_mode: self.oracle_auth_mode,
+            }),
+            DatabaseProvider::Postgres => {
+                DbConnectionProfile::Postgres(crate::types::NetworkConnectionOptions {
+                    host: self.host,
+                    port: self.port,
+                    database: self.service_name,
+                    username: self.username,
+                    schema: Some(self.schema),
+                })
+            }
+            DatabaseProvider::Mysql => {
+                DbConnectionProfile::Mysql(crate::types::NetworkConnectionOptions {
+                    host: self.host,
+                    port: self.port,
+                    database: self.service_name,
+                    username: self.username,
+                    schema: Some(self.schema),
+                })
+            }
+            DatabaseProvider::Sqlite => {
+                DbConnectionProfile::Sqlite(crate::types::SqliteConnectionOptions {
+                    file_path: self.service_name,
+                })
+            }
+        };
+
+        StoredConnectionProfile {
+            id: self.id,
+            name: self.name,
+            connection,
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::types::{
-    DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleAuthMode,
-    OracleDdlUpdateRequest, OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry,
-    OracleObjectRef, OracleQueryRequest, OracleQueryResult,
+    DbFilteredQueryRequest, DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry,
+    DbObjectRef, DbQueryRequest, DbQueryResult, DbSchemaSearchRequest, DbSchemaSearchResult,
+    OracleAuthMode, OracleConnectOptions,
 };
 use oracle::{Connection, Connector, Error as OracleError, InitParams, Privilege, SqlValue};
 use std::env;
@@ -23,7 +23,7 @@ pub(crate) struct OracleSession {
 }
 
 pub(crate) fn connect(
-    request: &DbConnectRequest,
+    request: &OracleConnectOptions,
 ) -> Result<(OracleSession, String, String), String> {
     ensure_oracle_client_initialized(request.oracle_client_lib_dir.as_deref())?;
 
@@ -85,7 +85,7 @@ fn format_oracle_user_label(username: &str, auth_mode: OracleAuthMode) -> String
     }
 }
 
-pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<OracleObjectEntry>, String> {
+pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<DbObjectEntry>, String> {
     let sql = r#"
         SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
         FROM (
@@ -115,7 +115,7 @@ pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<OracleObjectEn
     let mut objects = Vec::new();
     for row_result in rows {
         let row = row_result.map_err(map_oracle_error)?;
-        objects.push(OracleObjectEntry {
+        objects.push(DbObjectEntry {
             schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
             object_type: row.get::<usize, String>(1).map_err(map_oracle_error)?,
             object_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
@@ -127,7 +127,7 @@ pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<OracleObjectEn
 
 pub(crate) fn list_object_columns(
     session: &OracleSession,
-) -> Result<Vec<OracleObjectColumnEntry>, String> {
+) -> Result<Vec<DbObjectColumnEntry>, String> {
     let sql = r#"
         SELECT OWNER, TABLE_NAME, COLUMN_NAME, DATA_TYPE, NULLABLE
         FROM ALL_TAB_COLUMNS
@@ -143,7 +143,7 @@ pub(crate) fn list_object_columns(
     let mut columns = Vec::new();
     for row_result in rows {
         let row = row_result.map_err(map_oracle_error)?;
-        columns.push(OracleObjectColumnEntry {
+        columns.push(DbObjectColumnEntry {
             schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
             object_name: row.get::<usize, String>(1).map_err(map_oracle_error)?,
             column_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
@@ -157,7 +157,7 @@ pub(crate) fn list_object_columns(
 
 pub(crate) fn get_object_ddl(
     session: &OracleSession,
-    request: &OracleObjectRef,
+    request: &DbObjectRef,
 ) -> Result<String, String> {
     let schema = normalize_schema_name(&request.schema)?;
     ensure_schema_is_in_scope(&schema, session)?;
@@ -409,7 +409,7 @@ fn search_ddl_text(
 
 pub(crate) fn update_object_ddl(
     session: &mut OracleSession,
-    request: &OracleDdlUpdateRequest,
+    request: &DbObjectDdlUpdateRequest,
 ) -> Result<String, String> {
     let mut ddl = request.ddl.trim().to_string();
     if ddl.is_empty() {
@@ -437,8 +437,8 @@ pub(crate) fn update_object_ddl(
 
 pub(crate) fn run_query(
     session: &mut OracleSession,
-    request: &OracleQueryRequest,
-) -> Result<OracleQueryResult, String> {
+    request: &DbQueryRequest,
+) -> Result<DbQueryResult, String> {
     let sql = request.sql.trim();
     if sql.is_empty() {
         return Err("Query cannot be empty".to_string());
@@ -490,7 +490,7 @@ pub(crate) fn run_query(
             message.push_str(&format!(" Results truncated at {} rows.", row_limit));
         }
 
-        return Ok(OracleQueryResult {
+        return Ok(DbQueryResult {
             columns,
             rows,
             rows_affected: None,
@@ -522,7 +522,7 @@ pub(crate) fn run_query(
         "Statement executed.".to_string()
     };
 
-    Ok(OracleQueryResult {
+    Ok(DbQueryResult {
         columns: Vec::new(),
         rows: Vec::new(),
         rows_affected: Some(rows_affected),
@@ -532,14 +532,14 @@ pub(crate) fn run_query(
 
 pub(crate) fn run_filtered_query(
     session: &mut OracleSession,
-    request: &OracleFilteredQueryRequest,
-) -> Result<OracleQueryResult, String> {
+    request: &DbFilteredQueryRequest,
+) -> Result<DbQueryResult, String> {
     let sql = request.sql.trim();
     if sql.is_empty() {
         return Err("Query cannot be empty".to_string());
     }
 
-    let query_request = OracleQueryRequest {
+    let query_request = DbQueryRequest {
         session_id: request.session_id,
         sql: request.sql.clone(),
         row_limit: request.row_limit,
@@ -630,7 +630,7 @@ pub(crate) fn run_filtered_query(
         message.push_str(&format!(" Results truncated at {} rows.", row_limit));
     }
 
-    Ok(OracleQueryResult {
+    Ok(DbQueryResult {
         columns,
         rows,
         rows_affected: None,
@@ -720,8 +720,8 @@ fn apply_transaction_control(session: &mut OracleSession, control: TransactionCo
 
 fn try_run_show_command(
     session: &OracleSession,
-    request: &OracleQueryRequest,
-) -> Option<Result<OracleQueryResult, String>> {
+    request: &DbQueryRequest,
+) -> Option<Result<DbQueryResult, String>> {
     let sql = request.sql.trim();
     let trimmed = sql.trim().trim_end_matches(';').trim();
     if trimmed.is_empty() {
@@ -775,7 +775,7 @@ fn try_run_show_command(
     Some(result)
 }
 
-fn run_show_con_name(session: &OracleSession) -> Result<OracleQueryResult, String> {
+fn run_show_con_name(session: &OracleSession) -> Result<DbQueryResult, String> {
     let sql = "SELECT SYS_CONTEXT('USERENV', 'CON_NAME') FROM DUAL";
     let con_name = session
         .connection
@@ -783,7 +783,7 @@ fn run_show_con_name(session: &OracleSession) -> Result<OracleQueryResult, Strin
         .map_err(map_oracle_error)?
         .unwrap_or_default();
 
-    Ok(OracleQueryResult {
+    Ok(DbQueryResult {
         columns: vec!["CON_NAME".to_string()],
         rows: vec![vec![con_name]],
         rows_affected: None,
@@ -791,7 +791,7 @@ fn run_show_con_name(session: &OracleSession) -> Result<OracleQueryResult, Strin
     })
 }
 
-fn run_show_user(session: &OracleSession) -> Result<OracleQueryResult, String> {
+fn run_show_user(session: &OracleSession) -> Result<DbQueryResult, String> {
     let sql = "SELECT USER FROM DUAL";
     let user_name = session
         .connection
@@ -799,7 +799,7 @@ fn run_show_user(session: &OracleSession) -> Result<OracleQueryResult, String> {
         .map_err(map_oracle_error)?
         .unwrap_or_default();
 
-    Ok(OracleQueryResult {
+    Ok(DbQueryResult {
         columns: vec!["USER".to_string()],
         rows: vec![vec![user_name]],
         rows_affected: None,
@@ -807,7 +807,7 @@ fn run_show_user(session: &OracleSession) -> Result<OracleQueryResult, String> {
     })
 }
 
-fn run_show_pdbs(session: &OracleSession, row_limit: usize) -> Result<OracleQueryResult, String> {
+fn run_show_pdbs(session: &OracleSession, row_limit: usize) -> Result<DbQueryResult, String> {
     let sql = r#"
         SELECT CON_ID, NAME AS CON_NAME, OPEN_MODE, RESTRICTED
         FROM V$PDBS
@@ -846,7 +846,7 @@ fn run_show_pdbs(session: &OracleSession, row_limit: usize) -> Result<OracleQuer
         message.push_str(&format!(" Results truncated at {} rows.", row_limit));
     }
 
-    Ok(OracleQueryResult {
+    Ok(DbQueryResult {
         columns,
         rows,
         rows_affected: None,
@@ -858,7 +858,7 @@ fn run_show_parameter(
     session: &OracleSession,
     filter: &str,
     row_limit: usize,
-) -> Result<OracleQueryResult, String> {
+) -> Result<DbQueryResult, String> {
     let normalized_filter = normalize_show_parameter_filter(filter);
     let sql = r#"
         SELECT NAME, TYPE, VALUE, ISDEFAULT, ISSES_MODIFIABLE, ISSYS_MODIFIABLE
@@ -899,7 +899,7 @@ fn run_show_parameter(
         message.push_str(&format!(" Results truncated at {} rows.", row_limit));
     }
 
-    Ok(OracleQueryResult {
+    Ok(DbQueryResult {
         columns,
         rows,
         rows_affected: None,
@@ -920,7 +920,7 @@ fn normalize_show_parameter_filter(filter: &str) -> String {
     format!("%{}%", normalized)
 }
 
-fn effective_query_row_limit(request: &OracleQueryRequest) -> usize {
+fn effective_query_row_limit(request: &DbQueryRequest) -> usize {
     request
         .row_limit
         .unwrap_or(DEFAULT_QUERY_ROW_LIMIT)

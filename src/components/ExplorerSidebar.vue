@@ -13,9 +13,10 @@ import type {
   BusyState,
   ConnectionProfile,
   ObjectTreeNode,
-  OracleConnectRequest,
-  OracleObjectEntry,
-  OracleSessionSummary,
+  DbObjectEntry,
+  DbSessionSummary,
+  OracleConnectionProfile,
+  OracleDbConnectRequest,
 } from "../types/clarity";
 
 const selectedProfileId = defineModel<string>("selectedProfileId", { required: true });
@@ -23,16 +24,16 @@ const profileName = defineModel<string>("profileName", { required: true });
 const saveProfilePassword = defineModel<boolean>("saveProfilePassword", { required: true });
 
 const props = defineProps<{
-  connection: OracleConnectRequest;
+  connection: OracleDbConnectRequest;
   connectionError: string;
   connectionProfiles: ConnectionProfile[];
-  selectedProfile: ConnectionProfile | null;
+  selectedProfile: OracleConnectionProfile | null;
   busy: BusyState;
   isConnected: boolean;
-  session: OracleSessionSummary | null;
+  session: DbSessionSummary | null;
   connectedSchema: string;
   objectTree: ObjectTreeNode[];
-  selectedObject: OracleObjectEntry | null;
+  selectedObject: DbObjectEntry | null;
   isObjectTypeExpanded: (objectType: string) => boolean;
   onSyncSelectedProfileUi: () => void;
   onApplySelectedProfile: () => void;
@@ -42,7 +43,7 @@ const props = defineProps<{
   onDisconnect: () => void;
   onRefreshObjects: () => void;
   onToggleObjectType: (objectType: string) => void;
-  onOpenObjectFromExplorer: (object: OracleObjectEntry) => void;
+  onOpenObjectFromExplorer: (object: DbObjectEntry) => void;
   createObjectTypes: CreateObjectTypeOption[];
   onRequestCreateObject: (objectType: string) => void;
 }>();
@@ -252,7 +253,7 @@ onBeforeUnmount(() => {
             <label>
               Host
               <input
-                v-model.trim="props.connection.host"
+                v-model.trim="props.connection.connection.host"
                 placeholder="db.example.com"
                 spellcheck="false"
                 autocomplete="off"
@@ -265,7 +266,7 @@ onBeforeUnmount(() => {
             <label>
               Service
               <input
-                v-model.trim="props.connection.serviceName"
+                v-model.trim="props.connection.connection.serviceName"
                 placeholder="XEPDB1"
                 spellcheck="false"
                 autocomplete="off"
@@ -278,7 +279,7 @@ onBeforeUnmount(() => {
             <label>
               Username
               <input
-                v-model.trim="props.connection.username"
+                v-model.trim="props.connection.connection.username"
                 placeholder="hr"
                 spellcheck="false"
                 autocomplete="off"
@@ -291,7 +292,7 @@ onBeforeUnmount(() => {
             <label>
               Schema
               <input
-                v-model.trim="props.connection.schema"
+                v-model.trim="props.connection.connection.schema"
                 placeholder="HR"
                 spellcheck="false"
                 autocomplete="off"
@@ -304,7 +305,7 @@ onBeforeUnmount(() => {
             <label>
               Password
               <input
-                v-model="props.connection.password"
+                v-model="props.connection.connection.password"
                 type="password"
                 placeholder="********"
                 spellcheck="false"
@@ -395,7 +396,7 @@ onBeforeUnmount(() => {
           <label>
             Port
             <input
-              v-model.number="props.connection.port"
+              v-model.number="props.connection.connection.port"
               type="number"
               min="1"
               max="65535"
@@ -409,7 +410,7 @@ onBeforeUnmount(() => {
 
           <label v-if="props.connection.provider === 'oracle'">
             Auth Mode
-            <select v-model="props.connection.oracleAuthMode">
+            <select v-model="props.connection.connection.oracleAuthMode">
               <option value="normal">Normal</option>
               <option value="sysdba">SYSDBA</option>
             </select>

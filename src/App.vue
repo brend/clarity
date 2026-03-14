@@ -17,7 +17,7 @@ import type {
   AiQuerySuggestionRequest,
   AiQuerySuggestionResponse,
   AiSchemaContextObject,
-  OracleObjectColumnEntry,
+  DbObjectColumnEntry,
   SqlCompletionSchema,
 } from "./types/clarity";
 import type { ThemeSetting } from "./types/settings";
@@ -429,7 +429,7 @@ function extractSqlIdentifierHints(sql: string): Set<string> {
 
 function buildAiSchemaContext(
   completionSchema: SqlCompletionSchema,
-  columns: OracleObjectColumnEntry[],
+  columns: DbObjectColumnEntry[],
   currentSql: string,
 ): AiSchemaContextObject[] {
   const referencedNames = extractReferencedTables(currentSql);

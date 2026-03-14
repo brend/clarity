@@ -11,12 +11,14 @@ import type {
   DbTransactionState,
   ObjectDetailTabDefinition,
   ObjectDetailTabId,
-  OracleConnectRequest,
-  OracleObjectColumnEntry,
-  OracleObjectEntry,
-  OracleQueryResult,
-  OracleSchemaSearchResult,
-  OracleSessionSummary,
+  DbObjectColumnEntry,
+  DbObjectEntry,
+  DbQueryResult,
+  DbSchemaSearchResult,
+  DbSessionSummary,
+  OracleConnectionProfile,
+  OracleDbConnectRequest,
+  SaveConnectionProfileRequest,
   SchemaExportResult,
   SchemaExportTarget,
   WorkspaceDdlTab,
@@ -56,7 +58,7 @@ interface PersistedQuerySheetState {
 }
 
 interface ScriptLineLocation {
-  object: OracleObjectEntry;
+  object: DbObjectEntry;
   line: number | null;
 }
 
@@ -477,37 +479,41 @@ function writeStoredQuerySheetState(state: PersistedQuerySheetState): void {
 }
 
 export function useClarityWorkspace() {
-  const connection = reactive<OracleConnectRequest>({
+  const connection = reactive<OracleDbConnectRequest>({
     provider: "oracle",
-    host: readDebugConnectionString(
-      import.meta.env.VITE_ORACLE_HOST,
-      "localhost",
-    ),
-    port: readDebugConnectionPort(import.meta.env.VITE_ORACLE_PORT, 1521),
-    serviceName: readDebugConnectionString(
-      import.meta.env.VITE_ORACLE_SERVICE_NAME,
-      "XEPDB1",
-    ),
-    username: readDebugConnectionString(
-      import.meta.env.VITE_ORACLE_USERNAME,
-      "hr",
-    ),
-    password: import.meta.env.DEV
-      ? (import.meta.env.VITE_ORACLE_PASSWORD ?? "")
-      : "",
-    schema: readDebugConnectionString(import.meta.env.VITE_ORACLE_SCHEMA, "HR"),
-    oracleAuthMode: "normal",
+    connection: {
+      host: readDebugConnectionString(
+        import.meta.env.VITE_ORACLE_HOST,
+        "localhost",
+      ),
+      port: readDebugConnectionPort(import.meta.env.VITE_ORACLE_PORT, 1521),
+      serviceName: readDebugConnectionString(
+        import.meta.env.VITE_ORACLE_SERVICE_NAME,
+        "XEPDB1",
+      ),
+      username: readDebugConnectionString(
+        import.meta.env.VITE_ORACLE_USERNAME,
+        "hr",
+      ),
+      password: import.meta.env.DEV
+        ? (import.meta.env.VITE_ORACLE_PASSWORD ?? "")
+        : "",
+      schema: readDebugConnectionString(import.meta.env.VITE_ORACLE_SCHEMA, "HR"),
+      oracleAuthMode: "normal",
+    },
   });
   const profileName = ref("");
   const selectedProfileId = ref("");
   const saveProfilePassword = ref(true);
-  const initialQuerySheetState = readStoredQuerySheetState(connection.schema);
+  const initialQuerySheetState = readStoredQuerySheetState(
+    connection.connection.schema,
+  );
 
-  const session = ref<OracleSessionSummary | null>(null);
+  const session = ref<DbSessionSummary | null>(null);
   const connectionProfiles = ref<ConnectionProfile[]>([]);
-  const objects = ref<OracleObjectEntry[]>([]);
-  const objectColumns = ref<OracleObjectColumnEntry[]>([]);
-  const selectedObject = ref<OracleObjectEntry | null>(null);
+  const objects = ref<DbObjectEntry[]>([]);
+  const objectColumns = ref<DbObjectColumnEntry[]>([]);
+  const selectedObject = ref<DbObjectEntry | null>(null);
   const ddlTabs = ref<WorkspaceDdlTab[]>([]);
   const queryTabs = ref<WorkspaceQueryTab[]>(
     initialQuerySheetState.queryTabs.map((tab) =>
@@ -530,7 +536,7 @@ export function useClarityWorkspace() {
       ),
     ),
   );
-  const schemaSearchResults = ref<OracleSchemaSearchResult[]>([]);
+  const schemaSearchResults = ref<DbSchemaSearchResult[]>([]);
   const schemaSearchPerformed = ref(false);
   const transactionActive = ref(false);
   const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
@@ -563,18 +569,22 @@ export function useClarityWorkspace() {
 
   const isConnected = computed(() => session.value !== null);
   const connectedSchema = computed(
-    () => session.value?.schema ?? connection.schema.toUpperCase(),
+    () => session.value?.schema ?? connection.connection.schema.toUpperCase(),
   );
   const selectedProviderLabel = computed(() => {
     const provider = session.value?.provider ?? connection.provider;
     return provider.toUpperCase();
   });
-  const selectedProfile = computed(
-    () =>
-      connectionProfiles.value.find(
-        (profile) => profile.id === selectedProfileId.value,
-      ) ?? null,
-  );
+  const selectedProfile = computed<OracleConnectionProfile | null>(() => {
+    const profile = connectionProfiles.value.find(
+      (candidate) => candidate.id === selectedProfileId.value,
+    );
+    if (!profile || profile.provider !== "oracle") {
+      return null;
+    }
+
+    return profile;
+  });
   const schemaExportTargets = computed<SchemaExportTarget[]>(() => {
     if (!session.value) {
       return [];
@@ -656,7 +666,7 @@ export function useClarityWorkspace() {
   const activeObjectDetailTabId = computed<ObjectDetailTabId | null>(
     () => activeDdlTab.value?.activeDetailTabId ?? null,
   );
-  const activeObjectDetailRawResult = computed<OracleQueryResult | null>(() => {
+  const activeObjectDetailRawResult = computed<DbQueryResult | null>(() => {
     if (!activeDdlTab.value) {
       return null;
     }
@@ -671,7 +681,7 @@ export function useClarityWorkspace() {
 
     return null;
   });
-  const activeObjectDetailResult = computed<OracleQueryResult | null>(() => {
+  const activeObjectDetailResult = computed<DbQueryResult | null>(() => {
     const result = activeObjectDetailRawResult.value;
     if (
       !activeDdlTab.value ||
@@ -726,7 +736,7 @@ export function useClarityWorkspace() {
     return false;
   });
   const objectTree = computed(() => {
-    const byType = new Map<string, OracleObjectEntry[]>();
+    const byType = new Map<string, DbObjectEntry[]>();
 
     for (const entry of objects.value) {
       let entries = byType.get(entry.objectType);
@@ -774,7 +784,7 @@ export function useClarityWorkspace() {
   }
 
   function getObjectDetailTabs(
-    object: OracleObjectEntry,
+    object: DbObjectEntry,
   ): ObjectDetailTabDefinition[] {
     const tabs: ObjectDetailTabDefinition[] = [];
     if (canPreviewObjectData(object.objectType)) {
@@ -786,13 +796,13 @@ export function useClarityWorkspace() {
   }
 
   function getDefaultObjectDetailTabId(
-    object: OracleObjectEntry,
+    object: DbObjectEntry,
   ): ObjectDetailTabId {
     return canPreviewObjectData(object.objectType) ? "data" : "ddl";
   }
 
   function isObjectDetailTabSupported(
-    object: OracleObjectEntry,
+    object: DbObjectEntry,
     tabId: ObjectDetailTabId,
   ): boolean {
     return getObjectDetailTabs(object).some((tab) => tab.id === tabId);
@@ -814,7 +824,7 @@ export function useClarityWorkspace() {
     return toSqlStringLiteral(value);
   }
 
-  function hasObjectDataRowIdColumn(result: OracleQueryResult): boolean {
+  function hasObjectDataRowIdColumn(result: DbQueryResult): boolean {
     const firstColumn = (result.columns[0] ?? "")
       .replace(/"/g, "")
       .trim()
@@ -823,7 +833,7 @@ export function useClarityWorkspace() {
     return firstColumn === expected || firstColumn === "ROWID";
   }
 
-  function buildObjectDataPreviewSql(object: OracleObjectEntry): string {
+  function buildObjectDataPreviewSql(object: DbObjectEntry): string {
     const owner = `${toQuotedIdentifier(object.schema)}.${toQuotedIdentifier(object.objectName)}`;
     if (!isTableObject(object.objectType)) {
       return `select * from ${owner} fetch first ${OBJECT_DATA_PREVIEW_LIMIT} rows only`;
@@ -832,7 +842,7 @@ export function useClarityWorkspace() {
     return `select rowidtochar(t.rowid) as ${toQuotedIdentifier(OBJECT_DATA_ROW_ID_COLUMN)}, t.* from ${owner} t fetch first ${OBJECT_DATA_PREVIEW_LIMIT} rows only`;
   }
 
-  function buildObjectMetadataSql(object: OracleObjectEntry): string {
+  function buildObjectMetadataSql(object: DbObjectEntry): string {
     const owner = toSqlStringLiteral(object.schema.trim());
     const objectName = toSqlStringLiteral(object.objectName.trim());
     const objectType = toSqlStringLiteral(object.objectType.trim());
@@ -843,12 +853,12 @@ export function useClarityWorkspace() {
     return `select owner, object_name, object_type, status, created, last_ddl_time from all_objects where owner = ${owner} and object_name = ${objectName} and object_type = ${objectType}`;
   }
 
-  function buildDdlTabId(object: OracleObjectEntry): string {
+  function buildDdlTabId(object: DbObjectEntry): string {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
   }
 
   function createWorkspaceDdlTab(
-    object: OracleObjectEntry,
+    object: DbObjectEntry,
     {
       focusLine = null,
       activeDetailTabId = null,
@@ -886,7 +896,7 @@ export function useClarityWorkspace() {
     return Math.max(1, Math.trunc(value));
   }
 
-  function cloneObjectRef(object: OracleObjectEntry): OracleObjectEntry {
+  function cloneObjectRef(object: DbObjectEntry): DbObjectEntry {
     return {
       schema: object.schema,
       objectType: object.objectType,
@@ -895,7 +905,7 @@ export function useClarityWorkspace() {
   }
 
   function createScriptLineLocation(
-    object: OracleObjectEntry,
+    object: DbObjectEntry,
     line: number | null,
   ): ScriptLineLocation {
     return {
@@ -950,8 +960,8 @@ export function useClarityWorkspace() {
     sessionId: number,
     sql: string,
     rowLimit?: number,
-  ): Promise<OracleQueryResult> {
-    const result = await invoke<OracleQueryResult>("db_run_query", {
+  ): Promise<DbQueryResult> {
+    const result = await invoke<DbQueryResult>("db_run_query", {
       request: {
         sessionId,
         sql,
@@ -998,7 +1008,7 @@ export function useClarityWorkspace() {
 
     const tab = createQueryTab(
       tabNumber,
-      session.value?.schema ?? connection.schema,
+      session.value?.schema ?? connection.connection.schema,
     );
 
     queryTabs.value.push(tab);
@@ -1018,7 +1028,7 @@ export function useClarityWorkspace() {
     const normalizedName = normalizeCreateObjectName(normalizedType, objectName);
     const schemaName =
       connectedSchema.value.trim().toUpperCase() ||
-      connection.schema.trim().toUpperCase() ||
+      connection.connection.schema.trim().toUpperCase() ||
       "APP";
     const template = buildCreateObjectTemplate({
       schema: schemaName,
@@ -1120,7 +1130,7 @@ export function useClarityWorkspace() {
     }
   }
 
-  function openObjectFromExplorer(object: OracleObjectEntry): void {
+  function openObjectFromExplorer(object: DbObjectEntry): void {
     selectedObject.value = object;
     const tabId = buildDdlTabId(object);
     const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
@@ -1220,7 +1230,7 @@ export function useClarityWorkspace() {
     tab.loadingData = true;
 
     try {
-      tab.dataResult = await invoke<OracleQueryResult>("db_run_query", {
+      tab.dataResult = await invoke<DbQueryResult>("db_run_query", {
         request: {
           sessionId: session.value.sessionId,
           sql: buildObjectDataPreviewSql(tab.object),
@@ -1250,7 +1260,7 @@ export function useClarityWorkspace() {
     tab.loadingMetadata = true;
 
     try {
-      tab.metadataResult = await invoke<OracleQueryResult>("db_run_query", {
+      tab.metadataResult = await invoke<DbQueryResult>("db_run_query", {
         request: {
           sessionId: session.value.sessionId,
           sql: buildObjectMetadataSql(tab.object),
@@ -1592,13 +1602,13 @@ export function useClarityWorkspace() {
     const profile = selectedProfile.value;
     errorMessage.value = "";
     connection.provider = profile.provider;
-    connection.host = profile.host;
-    connection.port = profile.port;
-    connection.serviceName = profile.serviceName;
-    connection.username = profile.username;
-    connection.schema = profile.schema;
-    connection.oracleAuthMode = profile.oracleAuthMode;
-    connection.password = "";
+    connection.connection.host = profile.connection.host;
+    connection.connection.port = profile.connection.port;
+    connection.connection.serviceName = profile.connection.serviceName;
+    connection.connection.username = profile.connection.username;
+    connection.connection.schema = profile.connection.schema;
+    connection.connection.oracleAuthMode = profile.connection.oracleAuthMode;
+    connection.connection.password = "";
     syncSelectedProfileUi();
 
     if (!profile.hasPassword) {
@@ -1614,7 +1624,7 @@ export function useClarityWorkspace() {
           request: { profileId: profile.id },
         },
       );
-      connection.password = password ?? "";
+      connection.connection.password = password ?? "";
       statusMessage.value = `Loaded profile: ${profile.name}`;
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
@@ -1634,22 +1644,27 @@ export function useClarityWorkspace() {
     busy.savingProfile = true;
 
     try {
+      const request: SaveConnectionProfileRequest = {
+        id: selectedProfileId.value || null,
+        name: normalizedName,
+        provider: connection.provider,
+        connection: {
+          host: connection.connection.host,
+          port: connection.connection.port,
+          serviceName: connection.connection.serviceName,
+          username: connection.connection.username,
+          schema: connection.connection.schema,
+          oracleAuthMode: connection.connection.oracleAuthMode,
+        },
+        savePassword: saveProfilePassword.value,
+        password: saveProfilePassword.value
+          ? connection.connection.password
+          : null,
+      };
       const savedProfile = await invoke<ConnectionProfile>(
         "db_save_connection_profile",
         {
-          request: {
-            id: selectedProfileId.value || null,
-            name: normalizedName,
-            provider: connection.provider,
-            host: connection.host,
-            port: connection.port,
-            serviceName: connection.serviceName,
-            username: connection.username,
-            schema: connection.schema,
-            oracleAuthMode: connection.oracleAuthMode,
-            savePassword: saveProfilePassword.value,
-            password: saveProfilePassword.value ? connection.password : null,
-          },
+          request,
         },
       );
 
@@ -1703,10 +1718,10 @@ export function useClarityWorkspace() {
 
     try {
       const [nextObjects, nextObjectColumns] = await Promise.all([
-        invoke<OracleObjectEntry[]>("db_list_objects", {
+        invoke<DbObjectEntry[]>("db_list_objects", {
           request: { sessionId: session.value.sessionId },
         }),
-        invoke<OracleObjectColumnEntry[]>("db_list_object_columns", {
+        invoke<DbObjectColumnEntry[]>("db_list_object_columns", {
           request: { sessionId: session.value.sessionId },
         }),
       ]);
@@ -1727,11 +1742,14 @@ export function useClarityWorkspace() {
 
     try {
       const oracleClientLibDir = oracleClientLibDirOverride?.trim();
-      const connectRequest: OracleConnectRequest = {
-        ...connection,
-        ...(oracleClientLibDir ? { oracleClientLibDir } : {}),
+      const connectRequest: OracleDbConnectRequest = {
+        provider: connection.provider,
+        connection: {
+          ...connection.connection,
+          ...(oracleClientLibDir ? { oracleClientLibDir } : {}),
+        },
       };
-      const summary = await invoke<OracleSessionSummary>("db_connect", {
+      const summary = await invoke<DbSessionSummary>("db_connect", {
         request: connectRequest,
       });
 
@@ -1744,7 +1762,7 @@ export function useClarityWorkspace() {
         queryTabs.value.length === 1 &&
         firstQueryTab.id === FIRST_QUERY_TAB_ID &&
         firstQueryTab.queryText.trim() ===
-          buildDefaultSchemaQuery(connection.schema).trim()
+          buildDefaultSchemaQuery(connection.connection.schema).trim()
       ) {
         firstQueryTab.queryText = buildDefaultSchemaQuery(summary.schema);
       }
@@ -1855,7 +1873,7 @@ export function useClarityWorkspace() {
   }
 
   async function loadDdl(
-    object: OracleObjectEntry,
+    object: DbObjectEntry,
     targetLine: number | null = null,
   ): Promise<boolean> {
     if (!session.value) {
@@ -2153,7 +2171,7 @@ export function useClarityWorkspace() {
     schemaSearchPerformed.value = true;
 
     try {
-      schemaSearchResults.value = await invoke<OracleSchemaSearchResult[]>(
+      schemaSearchResults.value = await invoke<DbSchemaSearchResult[]>(
         "db_search_schema_text",
         {
           request: {
@@ -2175,7 +2193,7 @@ export function useClarityWorkspace() {
   }
 
   async function openSchemaSearchResult(
-    match: OracleSchemaSearchResult,
+    match: DbSchemaSearchResult,
   ): Promise<void> {
     const currentLocation = getActiveScriptLineLocation();
     const targetLocation = createScriptLineLocation(

@@ -1,19 +1,48 @@
 export type DatabaseProvider = "oracle" | "postgres" | "mysql" | "sqlite";
 export type OracleAuthMode = "normal" | "sysdba";
 
-export interface OracleConnectRequest {
-  provider: DatabaseProvider;
+export interface OracleConnectionOptions {
   host: string;
   port?: number;
   serviceName: string;
   username: string;
-  password: string;
   schema: string;
   oracleAuthMode: OracleAuthMode;
+}
+
+export interface OracleConnectOptions extends OracleConnectionOptions {
+  password: string;
   oracleClientLibDir?: string;
 }
 
-export interface OracleSessionSummary {
+export interface NetworkConnectionOptions {
+  host: string;
+  port?: number;
+  database: string;
+  username: string;
+  schema?: string;
+}
+
+export interface NetworkConnectOptions extends NetworkConnectionOptions {
+  password: string;
+}
+
+export interface SqliteConnectionOptions {
+  filePath: string;
+}
+
+export type DbConnectRequest =
+  | { provider: "oracle"; connection: OracleConnectOptions }
+  | { provider: "postgres"; connection: NetworkConnectOptions }
+  | { provider: "mysql"; connection: NetworkConnectOptions }
+  | { provider: "sqlite"; connection: SqliteConnectionOptions };
+
+export type OracleDbConnectRequest = Extract<
+  DbConnectRequest,
+  { provider: "oracle" }
+>;
+
+export interface DbSessionSummary {
   sessionId: number;
   displayName: string;
   schema: string;
@@ -39,26 +68,37 @@ export interface DbTransactionState {
   active: boolean;
 }
 
-export interface ConnectionProfile {
+export type DbConnectionProfile =
+  | { provider: "oracle"; connection: OracleConnectionOptions }
+  | { provider: "postgres"; connection: NetworkConnectionOptions }
+  | { provider: "mysql"; connection: NetworkConnectionOptions }
+  | { provider: "sqlite"; connection: SqliteConnectionOptions };
+
+export type ConnectionProfile = {
   id: string;
   name: string;
-  provider: DatabaseProvider;
-  host: string;
-  port?: number;
-  serviceName: string;
-  username: string;
-  schema: string;
-  oracleAuthMode: OracleAuthMode;
   hasPassword: boolean;
-}
+} & DbConnectionProfile;
 
-export interface OracleObjectEntry {
+export type OracleConnectionProfile = Extract<
+  ConnectionProfile,
+  { provider: "oracle" }
+>;
+
+export type SaveConnectionProfileRequest = {
+  id?: string | null;
+  name: string;
+  savePassword: boolean;
+  password?: string | null;
+} & DbConnectionProfile;
+
+export interface DbObjectEntry {
   schema: string;
   objectType: string;
   objectName: string;
 }
 
-export interface OracleObjectColumnEntry {
+export interface DbObjectColumnEntry {
   schema: string;
   objectName: string;
   columnName: string;
@@ -91,7 +131,7 @@ export interface AiQuerySuggestionResponse {
   isPotentiallyMutating: boolean;
 }
 
-export interface OracleQueryResult {
+export interface DbQueryResult {
   columns: string[];
   rows: string[][];
   rowsAffected: number | null;
@@ -100,7 +140,7 @@ export interface OracleQueryResult {
 
 export type SchemaSearchMatchScope = "object_name" | "source" | "ddl";
 
-export interface OracleSchemaSearchResult {
+export interface DbSchemaSearchResult {
   schema: string;
   objectType: string;
   objectName: string;
@@ -118,13 +158,13 @@ export interface ObjectDetailTabDefinition {
 
 export interface WorkspaceDdlTab {
   id: string;
-  object: OracleObjectEntry;
+  object: DbObjectEntry;
   ddlText: string;
   focusLine: number | null;
   focusToken: number;
   activeDetailTabId: ObjectDetailTabId;
-  dataResult: OracleQueryResult | null;
-  metadataResult: OracleQueryResult | null;
+  dataResult: DbQueryResult | null;
+  metadataResult: DbQueryResult | null;
   loadingDdl: boolean;
   loadingData: boolean;
   loadingMetadata: boolean;
@@ -142,7 +182,7 @@ export interface WorkspaceQueryTab {
 export interface WorkspaceQueryResultPane {
   id: string;
   title: string;
-  queryResult: OracleQueryResult | null;
+  queryResult: DbQueryResult | null;
   errorMessage: string;
   sourceSql: string | null;
   sourceSessionId: number | null;
@@ -167,5 +207,5 @@ export interface BusyState {
 
 export interface ObjectTreeNode {
   objectType: string;
-  entries: OracleObjectEntry[];
+  entries: DbObjectEntry[];
 }

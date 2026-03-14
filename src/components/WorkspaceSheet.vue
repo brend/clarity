@@ -13,9 +13,9 @@ import type {
   BusyState,
   ObjectDetailTabDefinition,
   ObjectDetailTabId,
-  OracleObjectEntry,
-  OracleQueryResult,
-  OracleSchemaSearchResult,
+  DbObjectEntry,
+  DbQueryResult,
+  DbSchemaSearchResult,
   SqlCompletionSchema,
   WorkspaceDdlTab,
   WorkspaceQueryTab,
@@ -52,18 +52,18 @@ const props = defineProps<{
   busy: BusyState;
   activeQueryTab: WorkspaceQueryTab | null;
   activeDdlTab: WorkspaceDdlTab | null;
-  activeDdlObject: OracleObjectEntry | null;
+  activeDdlObject: DbObjectEntry | null;
   activeObjectDetailTabs: ObjectDetailTabDefinition[];
   activeObjectDetailTabId: ObjectDetailTabId | null;
   activeObjectDetailLoading: boolean;
-  activeObjectDetailResult: OracleQueryResult | null;
+  activeObjectDetailResult: DbQueryResult | null;
   isActiveObjectDataEditable: boolean;
   selectedProviderLabel: string;
   connectedSchema: string;
   sqlCompletionSchema: SqlCompletionSchema;
   sqlCompletionDefaultSchema: string;
   isQueryTabActive: boolean;
-  schemaSearchResults: OracleSchemaSearchResult[];
+  schemaSearchResults: DbSchemaSearchResult[];
   schemaSearchPerformed: boolean;
   aiSuggestionText: string;
   aiSuggestionRationale: string;
@@ -93,7 +93,7 @@ const props = defineProps<{
   onDeleteActiveObjectDataRow: (rowIndex: number) => Promise<boolean>;
   onActivateObjectDetailTab: (tabId: ObjectDetailTabId) => void;
   onRunSchemaSearch: () => void;
-  onOpenSchemaSearchResult: (result: OracleSchemaSearchResult) => void;
+  onOpenSchemaSearchResult: (result: DbSchemaSearchResult) => void;
   onRequestAiSuggestion: () => void;
   onApplyAiSuggestion: () => void;
   onDismissAiSuggestion: () => void;
@@ -683,7 +683,7 @@ function focusSchemaSearchInput(selectText: boolean): void {
 }
 
 function formatSearchScopeLabel(
-  scope: OracleSchemaSearchResult["matchScope"],
+  scope: DbSchemaSearchResult["matchScope"],
 ): string {
   if (scope === "object_name") {
     return "Object Name";
