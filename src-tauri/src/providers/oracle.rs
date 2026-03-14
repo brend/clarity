@@ -1,6 +1,6 @@
-use crate::{
-    DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleAuthMode, OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry,
+use crate::types::{
+    DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleAuthMode,
+    OracleDdlUpdateRequest, OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry,
     OracleObjectRef, OracleQueryRequest, OracleQueryResult,
 };
 use oracle::{Connection, Connector, Error as OracleError, InitParams, Privilege, SqlValue};
@@ -814,7 +814,10 @@ fn run_show_pdbs(session: &OracleSession, row_limit: usize) -> Result<OracleQuer
         ORDER BY CON_ID
     "#;
 
-    let result_set = session.connection.query(sql, &[]).map_err(map_oracle_error)?;
+    let result_set = session
+        .connection
+        .query(sql, &[])
+        .map_err(map_oracle_error)?;
     let columns = result_set
         .column_info()
         .iter()

@@ -1,20 +1,10 @@
 pub(crate) mod oracle;
 
-use crate::{
-    DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult, OracleDdlUpdateRequest,
-    OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry, OracleObjectRef,
-    OracleQueryRequest, OracleQueryResult,
+use crate::types::{
+    DatabaseProvider, DbConnectRequest, DbSchemaSearchRequest, DbSchemaSearchResult,
+    OracleDdlUpdateRequest, OracleFilteredQueryRequest, OracleObjectColumnEntry, OracleObjectEntry,
+    OracleObjectRef, OracleQueryRequest, OracleQueryResult,
 };
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum DatabaseProvider {
-    Oracle,
-    Postgres,
-    Mysql,
-    Sqlite,
-}
 
 pub(crate) struct AppSession {
     pub(crate) provider: DatabaseProvider,
@@ -162,17 +152,6 @@ impl ProviderRegistry {
                 Ok(oracle::transaction_active(oracle_session))
             }
             (provider, _) => Err(not_implemented_error(provider)),
-        }
-    }
-}
-
-impl DatabaseProvider {
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            DatabaseProvider::Oracle => "oracle",
-            DatabaseProvider::Postgres => "postgres",
-            DatabaseProvider::Mysql => "mysql",
-            DatabaseProvider::Sqlite => "sqlite",
         }
     }
 }
