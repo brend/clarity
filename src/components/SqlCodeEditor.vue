@@ -63,23 +63,28 @@ function buildEditorTheme(theme: ThemeSetting): Extension {
         background: "var(--editor-surface)",
       },
       ".cm-scroller": {
+        height: "100%",
+        minHeight: "0",
+        overflow: "auto",
         fontFamily: 'Consolas, "Courier New", monospace',
-        fontSize: "0.8rem",
-        lineHeight: "1.38",
+        fontSize: "0.92rem",
+        lineHeight: "1.5",
         color: "var(--editor-text)",
       },
       ".cm-content": {
-        padding: "0.44rem 0",
+        minHeight: "100%",
+        padding: "0.7rem 0 1.2rem",
         caretColor: "var(--editor-caret)",
       },
       ".cm-line": {
-        padding: "0 0.5rem",
+        padding: "0 0.85rem",
         color: "var(--editor-text)",
       },
       ".cm-gutters": {
         borderRight: "1px solid var(--editor-gutter-border)",
         background: "var(--editor-gutter-bg)",
         color: "var(--editor-gutter-text)",
+        minWidth: "2.5rem",
       },
       ".cm-activeLine": {
         backgroundColor: "var(--editor-active-line)",

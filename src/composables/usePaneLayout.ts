@@ -1,10 +1,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 
 const PANEL_SPLITTER_SIZE = 6;
-const MIN_SIDEBAR_WIDTH = 360;
+const MIN_SIDEBAR_WIDTH = 300;
 const MIN_WORKSPACE_WIDTH = 560;
-const MIN_SHEET_HEIGHT = 220;
-const MIN_RESULTS_HEIGHT = 180;
+const MIN_SHEET_HEIGHT = 320;
+const MIN_RESULTS_HEIGHT = 170;
 
 type ResizeState =
   | {
@@ -28,8 +28,9 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 export function usePaneLayout(options: PaneLayoutOptions) {
-  const sidebarWidth = ref(330);
-  const resultsPaneHeight = ref(320);
+  const sidebarWidth = ref(350);
+  const resultsPaneHeight = ref(250);
+  const hasManualResultsResize = ref(false);
   const activeResize = ref<ResizeState | null>(null);
 
   const desktopShellStyle = computed<Record<string, string>>(() => ({
@@ -55,7 +56,23 @@ export function usePaneLayout(options: PaneLayoutOptions) {
 
   function applyLayoutBounds(): void {
     sidebarWidth.value = clamp(sidebarWidth.value, MIN_SIDEBAR_WIDTH, maxSidebarWidth());
-    resultsPaneHeight.value = clamp(resultsPaneHeight.value, MIN_RESULTS_HEIGHT, maxResultsPaneHeight());
+
+    if (!hasManualResultsResize.value && options.workspaceEl.value) {
+      const workspaceHeight = options.workspaceEl.value.clientHeight;
+      const preferredHeight = Math.round(workspaceHeight * 0.3);
+      resultsPaneHeight.value = clamp(
+        preferredHeight,
+        MIN_RESULTS_HEIGHT,
+        maxResultsPaneHeight(),
+      );
+      return;
+    }
+
+    resultsPaneHeight.value = clamp(
+      resultsPaneHeight.value,
+      MIN_RESULTS_HEIGHT,
+      maxResultsPaneHeight(),
+    );
   }
 
   function beginSidebarResize(event: PointerEvent): void {
@@ -75,6 +92,7 @@ export function usePaneLayout(options: PaneLayoutOptions) {
 
   function beginResultsResize(event: PointerEvent): void {
     event.preventDefault();
+    hasManualResultsResize.value = true;
     activeResize.value = {
       axis: "results",
       startPointer: event.clientY,

@@ -965,9 +965,13 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 1.8rem;
-  background: color-mix(in srgb, var(--bg-surface) 92%, white);
+  border-radius: 20px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface-muted) 44%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 94%, transparent) 100%
+    );
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
@@ -975,20 +979,19 @@ onBeforeUnmount(() => {
 .results-header {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  min-height: 3.8rem;
-  padding: 1rem 1.15rem;
-  border-bottom: 1px solid var(--panel-separator);
+  gap: 0.5rem;
+  min-height: 3.1rem;
+  padding: 0.75rem 0.85rem;
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--accent-soft) 36%, white) 0%,
-      color-mix(in srgb, var(--table-header-bg) 88%, white) 100%
+      color-mix(in srgb, var(--bg-surface-muted) 88%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 42%, transparent) 100%
     );
 }
 
 .results-title {
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -1002,14 +1005,14 @@ onBeforeUnmount(() => {
 }
 
 .results-tab {
-  min-height: 2.35rem;
-  border: 1px solid transparent;
-  border-radius: 999px;
+  min-height: 1.8rem;
+  border: 0;
+  border-radius: 8px 8px 4px 4px;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 0.72rem;
+  font-size: 0.71rem;
   font-weight: 600;
-  padding: 0 0.9rem;
+  padding: 0 0.62rem;
   cursor: pointer;
 }
 
@@ -1018,10 +1021,9 @@ onBeforeUnmount(() => {
 }
 
 .results-tab.active {
-  background: var(--tab-active-bg);
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--tab-active-bg));
   color: var(--text-primary);
-  border-color: var(--tab-active-border);
-  box-shadow: 0 10px 24px rgba(89, 70, 80, 0.08);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .error-inline {
@@ -1036,7 +1038,7 @@ onBeforeUnmount(() => {
 .results-content {
   min-height: 0;
   overflow: auto;
-  padding: 1rem;
+  padding: 0.8rem;
   margin: 0;
   font-family: Consolas, "Courier New", monospace;
 }
@@ -1044,15 +1046,15 @@ onBeforeUnmount(() => {
 .results-empty-state {
   display: grid;
   gap: 0.35rem;
-  align-content: start;
+  min-height: 100%;
+  align-content: center;
   padding: 1rem 1.1rem;
-  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 1.2rem;
-  background: color-mix(in srgb, var(--bg-surface-muted) 76%, white);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
 }
 
 .results-empty-label {
-  font-size: 0.74rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-subtle);
@@ -1061,18 +1063,17 @@ onBeforeUnmount(() => {
 .results-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: 1.2rem;
-  background: color-mix(in srgb, var(--bg-surface-muted) 86%, white);
-  margin-bottom: 0.85rem;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
+  margin-bottom: 0.8rem;
 }
 
 .results-search-input,
 .results-filter-input {
-  border: 1px solid var(--control-border);
-  border-radius: 0.9rem;
+  border: 0;
+  border-radius: 6px;
   background: var(--control-bg);
   color: var(--text-primary);
   font-family: inherit;
@@ -1081,24 +1082,24 @@ onBeforeUnmount(() => {
 .results-search-input {
   flex: 1 1 14rem;
   min-width: 11rem;
-  padding: 0.62rem 0.75rem;
-  font-size: 0.72rem;
+  padding: 0.34rem 0.46rem;
+  font-size: 0.68rem;
 }
 
 .results-filter-input {
   width: 100%;
-  padding: 0.48rem 0.58rem;
-  font-size: 0.68rem;
+  padding: 0.26rem 0.36rem;
+  font-size: 0.67rem;
 }
 
 .results-toolbar-btn {
-  border: 1px solid var(--control-border);
-  border-radius: 999px;
-  background: var(--control-bg);
+  border: 0;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
-  font-size: 0.69rem;
+  font-size: 0.66rem;
   font-weight: 600;
-  padding: 0.56rem 0.82rem;
+  padding: 0.3rem 0.44rem;
   cursor: pointer;
 }
 
@@ -1124,25 +1125,23 @@ onBeforeUnmount(() => {
   table-layout: fixed;
   font-size: 0.73rem;
   margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 1.2rem;
+  border-radius: 16px;
   overflow: hidden;
   background: var(--bg-surface);
 }
 
 .results-grid-shell {
-  border-radius: 1.2rem;
+  border-radius: 16px;
   overflow: hidden;
 }
 
 .results-table th,
 .results-table td {
   border: 0;
-  border-right: 1px solid color-mix(in srgb, var(--table-divider) 65%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
   color: var(--text-primary);
   text-align: left;
-  padding: 0.62rem 0.8rem;
+  padding: 0.46rem 0.62rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1154,13 +1153,8 @@ onBeforeUnmount(() => {
   top: 0;
   font-weight: 600;
   z-index: 2;
-  padding-right: 0.8rem;
+  padding-right: 0.62rem;
   overflow: visible;
-}
-
-.results-table th:last-child,
-.results-table td:last-child {
-  border-right: 0;
 }
 
 .results-table tbody tr.results-row-alt {
@@ -1172,7 +1166,7 @@ onBeforeUnmount(() => {
 }
 
 .results-sort-active {
-  background: color-mix(in srgb, var(--table-header-bg) 80%, var(--accent) 20%);
+  background: color-mix(in srgb, var(--table-header-bg) 85%, var(--accent-soft));
 }
 
 .results-col-sort-button {
@@ -1202,8 +1196,8 @@ onBeforeUnmount(() => {
   position: static;
   top: auto;
   z-index: 1;
-  background: var(--bg-surface-muted);
-  padding: 0.45rem 0.58rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 80%, transparent);
+  padding: 0.32rem 0.42rem;
 }
 
 .results-spacer-row td {
@@ -1290,7 +1284,7 @@ onBeforeUnmount(() => {
   }
 
   .results-content {
-    padding: 0.85rem;
+    padding: 0.75rem;
   }
 
   .results-toolbar {

@@ -25,31 +25,26 @@ const navItems = [
   {
     id: "connections" as const,
     label: "Connections",
-    caption: "Profiles and auth",
     icon: "plug" as const,
   },
   {
     id: "explorer" as const,
     label: "Explorer",
-    caption: "Schema objects",
     icon: "object" as const,
   },
   {
     id: "query" as const,
     label: "Workspace",
-    caption: "SQL and search",
     icon: "play" as const,
   },
   {
     id: "object" as const,
     label: "Object",
-    caption: "DDL and data",
     icon: "save" as const,
   },
   {
     id: "settings" as const,
     label: "Settings",
-    caption: "App preferences",
     icon: "settings" as const,
   },
 ];
@@ -69,10 +64,7 @@ const sessionSummary = computed<string>(() => {
       <div class="brand-mark">
         <AppIcon name="database" :size="20" :stroke-width="1.7" />
       </div>
-      <div class="brand-copy">
-        <div class="brand-name">Clarity</div>
-        <div class="brand-subtitle">Workbench</div>
-      </div>
+      <div class="brand-name">Clarity</div>
     </div>
 
     <nav class="nav-list" aria-label="Primary navigation">
@@ -89,16 +81,13 @@ const sessionSummary = computed<string>(() => {
           <AppIcon :name="item.icon" :size="16" />
         </span>
         <span class="nav-label">{{ item.label }}</span>
-        <span class="nav-caption">{{ item.caption }}</span>
       </button>
     </nav>
 
     <section class="nav-context">
-      <div class="nav-context-label">Session</div>
+      <div class="nav-context-label">Connection</div>
       <div class="nav-context-value">{{ sessionSummary }}</div>
-      <div class="nav-context-meta">
-        {{ props.isConnected ? props.providerLabel : "Connect to explore" }}
-      </div>
+      <div class="nav-context-meta">{{ props.providerLabel }}</div>
       <div
         v-if="props.selectedObjectLabel"
         class="nav-context-meta nav-context-object"
@@ -113,87 +102,69 @@ const sessionSummary = computed<string>(() => {
 .sidebar-nav {
   display: grid;
   grid-template-rows: auto 1fr auto;
-  gap: 1rem;
+  gap: 0.75rem;
   min-height: 0;
-  padding: 1.4rem 0 1.4rem 1.4rem;
+  padding: 0.85rem 0 0.85rem 0.85rem;
 }
 
 .sidebar-brand {
-  display: grid;
-  gap: 0.75rem;
-  justify-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  padding-right: 0.85rem;
 }
 
 .brand-mark {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 1.1rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--accent-strong);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-soft) 70%, white) 0%,
-    color-mix(in srgb, var(--accent-soft) 35%, white) 100%
-  );
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, white);
-  box-shadow: 0 12px 24px rgba(189, 120, 141, 0.14);
-}
-
-.brand-copy {
-  display: grid;
-  gap: 0.18rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
 }
 
 .brand-name {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 0.72rem;
+  font-weight: 600;
   color: var(--text-primary);
-}
-
-.brand-subtitle {
-  font-size: 0.74rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-subtle);
+  text-align: center;
 }
 
 .nav-list {
   display: grid;
   align-content: start;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  padding-right: 0.85rem;
 }
 
 .nav-item {
-  border: 0;
-  background: transparent;
+  border: 1px solid transparent;
+  background: var(--bg-sidebar);
   color: var(--text-secondary);
-  border-radius: 1.1rem;
-  padding: 0.9rem 0.8rem;
-  display: grid;
-  justify-items: start;
-  gap: 0.18rem;
+  border-radius: 6px;
+  padding: 0.55rem 0.45rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
   cursor: pointer;
-  text-align: left;
-  transition:
-    background-color 0.18s ease,
-    color 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+  text-align: center;
 }
 
 .nav-item:hover {
-  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  background: var(--bg-surface);
   color: var(--text-primary);
-  transform: translateY(-1px);
+  border-color: var(--border);
 }
 
 .nav-item.active {
   background: var(--bg-surface);
   color: var(--text-primary);
-  box-shadow: var(--card-shadow);
+  border-color: var(--tab-active-border);
 }
 
 .nav-item:focus-visible {
@@ -202,58 +173,51 @@ const sessionSummary = computed<string>(() => {
 }
 
 .nav-icon {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.8rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--accent-soft) 22%, white);
-  color: var(--accent-strong);
-}
-
-.nav-item.active .nav-icon {
-  background: color-mix(in srgb, var(--accent-soft) 60%, white);
-}
-
-.nav-item.active .nav-caption {
+  background: var(--bg-surface-muted);
   color: var(--text-secondary);
 }
 
+.nav-item.active .nav-icon {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
 .nav-label {
-  font-size: 0.78rem;
+  font-size: 0.67rem;
   font-weight: 600;
 }
 
-.nav-caption {
-  font-size: 0.68rem;
-  color: var(--text-subtle);
-}
-
 .nav-context {
-  border-radius: 1.25rem;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
-  padding: 0.9rem 0.85rem;
+  background: var(--bg-surface);
+  padding: 0.65rem;
   display: grid;
-  gap: 0.22rem;
+  gap: 0.2rem;
+  margin-right: 0.85rem;
 }
 
 .nav-context-label {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-subtle);
 }
 
 .nav-context-value {
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .nav-context-meta {
-  font-size: 0.71rem;
+  font-size: 0.68rem;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }

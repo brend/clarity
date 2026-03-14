@@ -4,9 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import ExplorerSidebar from "./components/ExplorerSidebar.vue";
 import QueryResultsPane from "./components/QueryResultsPane.vue";
-import WorkbenchHeader from "./components/WorkbenchHeader.vue";
-import WorkbenchSidebarNav from "./components/WorkbenchSidebarNav.vue";
-import WorkbenchSummaryCards from "./components/WorkbenchSummaryCards.vue";
 import WorkspaceSheet from "./components/WorkspaceSheet.vue";
 import {
   CREATE_OBJECT_TYPE_OPTIONS,
@@ -115,23 +112,6 @@ const SQL_IDENTIFIER_STOP_WORDS = new Set([
   "DESCRIBE",
   "EXPLAIN",
 ]);
-
-type SidebarSection =
-  | "connections"
-  | "explorer"
-  | "query"
-  | "object"
-  | "settings";
-
-type SummaryCardTone = "default" | "accent" | "muted";
-
-interface WorkbenchSummaryCard {
-  key: string;
-  label: string;
-  value: string;
-  meta: string;
-  tone?: SummaryCardTone;
-}
 
 const desktopShellEl = ref<HTMLElement | null>(null);
 const workspaceEl = ref<HTMLElement | null>(null);
@@ -300,163 +280,6 @@ const queryResultsEmptyStateMessage = computed<string>(() =>
     ? "Run a query to see results."
     : "Select a query sheet to see results.",
 );
-const connectionLabel = computed<string>(() => {
-  return (
-    session.value?.displayName ||
-    selectedProfile.value?.name ||
-    profileName.value.trim() ||
-    "No active connection"
-  );
-});
-const activeWorkspaceLabel = computed<string>(() => {
-  if (activeDdlObject.value) {
-    return `${activeDdlObject.value.objectName} details`;
-  }
-
-  if (isSearchTabActive.value) {
-    return "Schema search";
-  }
-
-  if (activeQueryTab.value) {
-    return activeQueryTab.value.title;
-  }
-
-  return "Query workspace";
-});
-const selectedObjectLabel = computed<string>(() => {
-  const object = activeDdlObject.value ?? selectedObject.value;
-  if (!object) {
-    return "";
-  }
-
-  return `${object.schema}.${object.objectName}`;
-});
-const executionSummary = computed<{ value: string; meta: string }>(() => {
-  if (busy.runningQuery) {
-    return {
-      value: "Running query",
-      meta: "Statement execution is in progress.",
-    };
-  }
-
-  if (busy.savingDdl) {
-    return {
-      value: "Saving DDL",
-      meta: "Persisting the active object definition.",
-    };
-  }
-
-  if (busy.updatingData) {
-    return {
-      value: "Committing data",
-      meta: "Applying pending row edits in the detail panel.",
-    };
-  }
-
-  if (busy.searchingSchema) {
-    return {
-      value: "Searching schema",
-      meta: "Scanning object names, source, and DDL.",
-    };
-  }
-
-  if (errorMessage.value.trim()) {
-    return {
-      value: "Needs attention",
-      meta: errorMessage.value,
-    };
-  }
-
-  const activePane =
-    activeQueryResultPanes.value.find(
-      (pane) => pane.id === activeQueryResultPaneId.value,
-    ) ?? activeQueryResultPanes.value[0];
-  if (activePane?.errorMessage) {
-    return {
-      value: "Query error",
-      meta: activePane.errorMessage,
-    };
-  }
-
-  if (activePane?.queryResult) {
-    if (activePane.queryResult.rowsAffected !== null) {
-      return {
-        value: `${activePane.queryResult.rowsAffected} rows affected`,
-        meta: activePane.queryResult.message || activePane.title,
-      };
-    }
-
-    return {
-      value: `${activePane.queryResult.rows.length} rows returned`,
-      meta: activePane.queryResult.message || activePane.title,
-    };
-  }
-
-  return {
-    value: statusMessage.value || "Ready",
-    meta: isConnected.value
-      ? "The workspace is ready for the next action."
-      : "Connect to start exploring objects and running SQL.",
-  };
-});
-const summaryCards = computed<WorkbenchSummaryCard[]>(() => [
-  {
-    key: "connection",
-    label: "Active Connection",
-    value: connectionLabel.value,
-    meta: isConnected.value
-      ? "Connected session and saved profile context."
-      : "Choose a profile or enter credentials to connect.",
-    tone: isConnected.value ? "accent" : "muted",
-  },
-  {
-    key: "provider",
-    label: "Provider",
-    value: selectedProviderLabel.value || connection.provider.toUpperCase(),
-    meta: selectedProfile.value
-      ? `Profile: ${selectedProfile.value.name}`
-      : "Provider-aware flow stays intact across the redesign.",
-  },
-  {
-    key: "schema",
-    label: "Schema",
-    value: connectedSchema.value || connection.connection.schema || "Not selected",
-    meta: isConnected.value
-      ? "Explorer, completions, and object tabs are scoped here."
-      : "This schema will be used when the next session connects.",
-  },
-  {
-    key: "object",
-    label: "Selected Object",
-    value: selectedObject.value?.objectName || "No object selected",
-    meta: selectedObject.value
-      ? `${selectedObject.value.schema} • ${selectedObject.value.objectType}`
-      : "Open a table, view, or package from the explorer.",
-    tone: selectedObject.value ? "default" : "muted",
-  },
-  {
-    key: "execution",
-    label: "Execution Status",
-    value: executionSummary.value.value,
-    meta: executionSummary.value.meta,
-    tone: busy.runningQuery ? "accent" : "default",
-  },
-]);
-const activeSidebarSection = computed<SidebarSection>(() => {
-  if (showSettingsDialog.value) {
-    return "settings";
-  }
-
-  if (activeDdlTab.value) {
-    return "object";
-  }
-
-  if (isQueryTabActive.value || isSearchTabActive.value) {
-    return "query";
-  }
-
-  return highlightedSidebarSection.value;
-});
 const exportProgressPercent = computed<number>(() => {
   if (exportProgressTotal.value <= 0) {
     return 0;
@@ -922,50 +745,6 @@ function submitCreateObjectDialog(): void {
   closeCreateObjectDialog();
 }
 
-function openQueryWorkspace(): void {
-  if (activeQueryTab.value) {
-    activateWorkspaceTab(activeQueryTab.value.id);
-    return;
-  }
-
-  addQueryTab();
-}
-
-function openObjectWorkspace(): void {
-  if (activeDdlTab.value) {
-    activateWorkspaceTab(activeDdlTab.value.id);
-    return;
-  }
-
-  if (!selectedObject.value) {
-    highlightedSidebarSection.value = "explorer";
-    return;
-  }
-
-  openObjectFromExplorer(selectedObject.value);
-}
-
-async function handleSidebarNavigate(section: SidebarSection): Promise<void> {
-  if (section === "connections" || section === "explorer") {
-    highlightedSidebarSection.value = section;
-    return;
-  }
-
-  if (section === "query") {
-    highlightedSidebarSection.value = "explorer";
-    openQueryWorkspace();
-    return;
-  }
-
-  if (section === "object") {
-    highlightedSidebarSection.value = "explorer";
-    openObjectWorkspace();
-    return;
-  }
-
-  await openSettingsDialog();
-}
-
 async function openSettingsDialog(): Promise<void> {
   settingsDialogTheme.value = theme.value;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
@@ -1186,15 +965,6 @@ onBeforeUnmount(() => {
 <template>
   <main ref="desktopShellEl" class="desktop-shell" :style="desktopShellStyle">
     <aside class="sidebar-shell">
-      <WorkbenchSidebarNav
-        :active-section="activeSidebarSection"
-        :is-connected="isConnected"
-        :provider-label="selectedProviderLabel"
-        :connected-schema="connectedSchema"
-        :selected-object-label="selectedObjectLabel"
-        @navigate="(section) => void handleSidebarNavigate(section)"
-      />
-
       <ExplorerSidebar
         v-model:selected-profile-id="selectedProfileId"
         v-model:profile-name="profileName"
@@ -1235,20 +1005,6 @@ onBeforeUnmount(() => {
     ></div>
 
     <section class="app-main">
-      <WorkbenchHeader
-        :workspace-label="activeWorkspaceLabel"
-        :status-message="statusMessage"
-        :is-connected="isConnected"
-        :connection-label="connectionLabel"
-        :provider-label="selectedProviderLabel"
-        :connected-schema="connectedSchema"
-        :transaction-active="transactionActive"
-        @open-settings="openSettingsDialog"
-        @open-export="openExportDialogFromMenu"
-      />
-
-      <WorkbenchSummaryCards :cards="summaryCards" />
-
       <section ref="workspaceEl" class="workspace" :style="workspaceStyle">
       <WorkspaceSheet
         class="workspace-card"
@@ -1643,75 +1399,79 @@ onBeforeUnmount(() => {
 <style>
 :root,
 :root[data-theme="light"] {
-  --font-ui: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
-  --bg-canvas: #f4efef;
-  --bg-shell: #f7f2f3;
-  --bg-sidebar: #f2ecee;
+  --font-ui:
+    "SF Pro Display", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --bg-canvas: #f1edf8;
+  --bg-shell: rgba(255, 255, 255, 0.88);
+  --bg-sidebar: rgba(248, 244, 253, 0.92);
   --bg-surface: rgba(255, 255, 255, 0.92);
-  --bg-surface-muted: #fbf7f7;
-  --bg-hover: #f6eef1;
-  --bg-active: #f2e4e9;
-  --bg-selected: #eed9e1;
-  --border: #e3d7dc;
-  --border-strong: #d7c6ce;
-  --panel-separator: #e7dde1;
-  --text-primary: #2b2530;
-  --text-secondary: #675a66;
-  --text-subtle: #8a7f88;
-  --accent: #c97d92;
-  --accent-soft: #f0dce3;
-  --accent-strong: #b85e78;
-  --accent-contrast: #fff9fb;
-  --success: #4f8c74;
-  --danger: #b35b67;
-  --warning: #a97a3e;
-  --focus-ring: rgba(201, 125, 146, 0.24);
-  --dialog-backdrop: rgba(78, 61, 68, 0.22);
-  --dialog-shadow: 0 32px 80px rgba(88, 68, 77, 0.18);
-  --card-shadow: 0 18px 36px rgba(89, 70, 80, 0.08);
-  --shell-shadow: 0 28px 60px rgba(89, 70, 80, 0.1);
-  --splitter-hover: rgba(201, 125, 146, 0.28);
+  --bg-surface-muted: #f3edf9;
+  --bg-hover: #ece5f6;
+  --bg-active: #e4daf4;
+  --bg-selected: #e9e0fb;
+  --border: rgba(118, 92, 171, 0.1);
+  --border-strong: rgba(118, 92, 171, 0.22);
+  --panel-separator: rgba(118, 92, 171, 0.1);
+  --text-primary: #21182f;
+  --text-secondary: #64567d;
+  --text-subtle: #8b7fa2;
+  --accent: #7d5bd6;
+  --accent-soft: rgba(125, 91, 214, 0.14);
+  --accent-strong: #6b47c6;
+  --accent-contrast: #ffffff;
+  --success: #2c9b63;
+  --danger: #c45073;
+  --warning: #c18932;
+  --focus-ring: rgba(125, 91, 214, 0.22);
+  --dialog-backdrop: rgba(31, 24, 47, 0.32);
+  --dialog-shadow: 0 22px 60px rgba(58, 39, 101, 0.16);
+  --card-shadow: 0 18px 45px rgba(109, 84, 160, 0.08);
+  --shell-shadow: 0 30px 70px rgba(74, 52, 121, 0.12);
+  --splitter-hover: rgba(125, 91, 214, 0.28);
   --control-bg: #ffffff;
-  --control-border: #dccfd5;
-  --control-hover: #f7eef1;
-  --tab-active-bg: #ffffff;
-  --tab-active-border: #e6d7de;
-  --table-divider: #ece3e7;
-  --table-header-bg: #fbf7f8;
-  --table-row-alt: rgba(248, 242, 244, 0.58);
-  --schema-chip-bg: #f5e7ec;
-  --schema-chip-border: #ead2da;
-  --schema-chip-text: #8a5f6e;
-  --link-hover: #8f4259;
-  --row-new-bg: rgba(138, 188, 170, 0.16);
-  --row-dirty-bg: rgba(201, 125, 146, 0.16);
-  --tree-selected-text: #6f3448;
+  --control-border: rgba(118, 92, 171, 0.14);
+  --control-hover: #f5f0fb;
+  --tab-active-bg: rgba(255, 255, 255, 0.96);
+  --tab-active-border: rgba(125, 91, 214, 0.38);
+  --table-divider: rgba(118, 92, 171, 0.12);
+  --table-header-bg: #f4eefb;
+  --table-row-alt: rgba(125, 91, 214, 0.035);
+  --schema-chip-bg: rgba(125, 91, 214, 0.12);
+  --schema-chip-border: rgba(125, 91, 214, 0.28);
+  --schema-chip-text: #6b47c6;
+  --link-hover: #5933b8;
+  --row-new-bg: rgba(44, 155, 99, 0.1);
+  --row-dirty-bg: rgba(193, 137, 50, 0.14);
+  --tree-selected-text: #2c1a4d;
   --editor-surface: #ffffff;
-  --editor-gutter-bg: #fbf6f7;
-  --editor-gutter-border: #eee4e8;
-  --editor-gutter-text: #9c8f98;
-  --editor-focus-outline: #e8c8d3;
-  --editor-text: #302834;
-  --editor-caret: #c97d92;
-  --editor-active-line: rgba(201, 125, 146, 0.08);
-  --editor-active-gutter: rgba(201, 125, 146, 0.14);
-  --editor-selection: rgba(201, 125, 146, 0.18);
-  --editor-selection-focused: rgba(201, 125, 146, 0.24);
-  --editor-placeholder: #a09099;
-  --editor-token-keyword: #b55373;
-  --editor-token-operator: #866878;
-  --editor-token-string: #aa6a30;
-  --editor-token-number: #2d7d8f;
-  --editor-token-comment: #8c7f89;
-  --editor-token-type: #855f8b;
-  --editor-token-variable: #302834;
-  --editor-token-property: #302834;
-  --editor-token-function: #8f4259;
-  --resizer-line: #eadde3;
-  --resizer-line-hover: #c97d92;
-  --scrollbar-thumb: rgba(139, 117, 128, 0.32);
-  --scrollbar-thumb-hover: rgba(139, 117, 128, 0.46);
-  --pane-header-height: 58px;
+  --editor-gutter-bg: #f6f1fb;
+  --editor-gutter-border: rgba(118, 92, 171, 0.12);
+  --editor-gutter-text: #998cb0;
+  --editor-focus-outline: rgba(125, 91, 214, 0.45);
+  --editor-text: #241930;
+  --editor-caret: #7d5bd6;
+  --editor-active-line: rgba(125, 91, 214, 0.05);
+  --editor-active-gutter: rgba(125, 91, 214, 0.08);
+  --editor-selection: rgba(125, 91, 214, 0.12);
+  --editor-selection-focused: rgba(125, 91, 214, 0.18);
+  --editor-placeholder: #8d80a5;
+  --editor-token-keyword: #7d5bd6;
+  --editor-token-operator: #6c5b88;
+  --editor-token-string: #c0875f;
+  --editor-token-number: #2e8d93;
+  --editor-token-comment: #9689ad;
+  --editor-token-type: #5363d3;
+  --editor-token-variable: #241930;
+  --editor-token-property: #241930;
+  --editor-token-function: #6b47c6;
+  --resizer-line: rgba(118, 92, 171, 0.18);
+  --resizer-line-hover: rgba(125, 91, 214, 0.5);
+  --scrollbar-thumb: rgba(128, 104, 173, 0.34);
+  --scrollbar-thumb-hover: rgba(113, 86, 162, 0.5);
+  --pane-header-height: 46px;
+  --shell-border: rgba(118, 92, 171, 0.1);
+  --shell-inner-border: rgba(255, 255, 255, 0.28);
+  --grid-line: rgba(118, 92, 171, 0.08);
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -1719,73 +1479,76 @@ onBeforeUnmount(() => {
 }
 
 :root[data-theme="dark"] {
-  --bg-canvas: #171316;
-  --bg-shell: #1d171b;
-  --bg-sidebar: #241d22;
-  --bg-surface: rgba(39, 31, 37, 0.94);
-  --bg-surface-muted: #2b2328;
-  --bg-hover: #342a31;
-  --bg-active: #41313a;
-  --bg-selected: #4a3641;
-  --border: #453640;
-  --border-strong: #5b4752;
-  --panel-separator: #3b2f37;
-  --text-primary: #f1e6eb;
-  --text-secondary: #ccbfc7;
-  --text-subtle: #a994a0;
-  --accent: #d8879e;
-  --accent-soft: #4d3340;
-  --accent-strong: #e9a3b7;
-  --accent-contrast: #26161d;
-  --success: #75b79b;
-  --danger: #e39aa7;
-  --warning: #d6a26a;
-  --focus-ring: rgba(216, 135, 158, 0.34);
-  --dialog-backdrop: rgba(8, 5, 7, 0.7);
-  --dialog-shadow: 0 32px 80px rgba(0, 0, 0, 0.42);
-  --card-shadow: 0 20px 42px rgba(0, 0, 0, 0.24);
-  --shell-shadow: 0 30px 70px rgba(0, 0, 0, 0.32);
-  --splitter-hover: rgba(216, 135, 158, 0.36);
-  --control-bg: #2b2328;
-  --control-border: #58434f;
-  --control-hover: #382d34;
-  --tab-active-bg: #2a2126;
-  --tab-active-border: #604852;
-  --table-divider: #43343d;
-  --table-header-bg: #261d22;
+  --bg-canvas: #0e0c13;
+  --bg-shell: rgba(25, 31, 41, 0.92);
+  --bg-sidebar: rgba(30, 37, 49, 0.94);
+  --bg-surface: rgba(27, 34, 46, 0.9);
+  --bg-surface-muted: #242c3a;
+  --bg-hover: #303b4d;
+  --bg-active: #384658;
+  --bg-selected: #2d435b;
+  --border: rgba(148, 163, 184, 0.1);
+  --border-strong: rgba(148, 163, 184, 0.22);
+  --panel-separator: rgba(148, 163, 184, 0.09);
+  --text-primary: #e8eef7;
+  --text-secondary: #aeb9c8;
+  --text-subtle: #8190a4;
+  --accent: #5f8fcb;
+  --accent-soft: rgba(95, 143, 203, 0.16);
+  --accent-strong: #8db3e2;
+  --accent-contrast: #0f1722;
+  --success: #7fcea4;
+  --danger: #e78da2;
+  --warning: #e2b266;
+  --focus-ring: rgba(95, 143, 203, 0.35);
+  --dialog-backdrop: rgba(6, 4, 11, 0.74);
+  --dialog-shadow: 0 28px 80px rgba(3, 2, 8, 0.55);
+  --card-shadow: 0 24px 60px rgba(8, 5, 15, 0.28);
+  --shell-shadow: 0 40px 100px rgba(5, 3, 10, 0.4);
+  --splitter-hover: rgba(95, 143, 203, 0.34);
+  --control-bg: rgba(38, 47, 62, 0.92);
+  --control-border: rgba(148, 163, 184, 0.12);
+  --control-hover: #334156;
+  --tab-active-bg: rgba(37, 47, 64, 0.92);
+  --tab-active-border: rgba(95, 143, 203, 0.42);
+  --table-divider: rgba(148, 163, 184, 0.12);
+  --table-header-bg: #202835;
   --table-row-alt: rgba(255, 255, 255, 0.02);
-  --schema-chip-bg: #402b35;
-  --schema-chip-border: #6b4d59;
-  --schema-chip-text: #f0d6de;
-  --link-hover: #ffdce6;
-  --row-new-bg: rgba(117, 183, 155, 0.16);
-  --row-dirty-bg: rgba(216, 135, 158, 0.18);
-  --tree-selected-text: #ffe3ec;
-  --editor-surface: #231b20;
-  --editor-gutter-bg: #2a2227;
-  --editor-gutter-border: #43343d;
-  --editor-gutter-text: #a88f9b;
-  --editor-focus-outline: #7a5564;
-  --editor-text: #f2e7ec;
-  --editor-caret: #e9a3b7;
-  --editor-active-line: rgba(216, 135, 158, 0.18);
-  --editor-active-gutter: rgba(216, 135, 158, 0.24);
-  --editor-selection: rgba(216, 135, 158, 0.26);
-  --editor-selection-focused: rgba(216, 135, 158, 0.34);
-  --editor-placeholder: #a7909b;
-  --editor-token-keyword: #f0a8bc;
-  --editor-token-operator: #d3b6c0;
-  --editor-token-string: #efc48f;
-  --editor-token-number: #8bd7ea;
-  --editor-token-comment: #ad95a0;
-  --editor-token-type: #d7b0ea;
-  --editor-token-variable: #f2e7ec;
-  --editor-token-property: #f2e7ec;
-  --editor-token-function: #f4c1d0;
-  --resizer-line: #4a3943;
-  --resizer-line-hover: #d8879e;
-  --scrollbar-thumb: rgba(177, 153, 163, 0.28);
-  --scrollbar-thumb-hover: rgba(177, 153, 163, 0.4);
+  --schema-chip-bg: rgba(95, 143, 203, 0.15);
+  --schema-chip-border: rgba(141, 179, 226, 0.26);
+  --schema-chip-text: #bfd7f2;
+  --link-hover: #d0e3fa;
+  --row-new-bg: rgba(130, 212, 156, 0.12);
+  --row-dirty-bg: rgba(240, 189, 102, 0.12);
+  --tree-selected-text: #ffffff;
+  --editor-surface: #1b2230;
+  --editor-gutter-bg: #1d2532;
+  --editor-gutter-border: rgba(148, 163, 184, 0.1);
+  --editor-gutter-text: #708095;
+  --editor-focus-outline: rgba(141, 179, 226, 0.42);
+  --editor-text: #edf2f9;
+  --editor-caret: #8db3e2;
+  --editor-active-line: rgba(95, 143, 203, 0.07);
+  --editor-active-gutter: rgba(95, 143, 203, 0.11);
+  --editor-selection: rgba(95, 143, 203, 0.18);
+  --editor-selection-focused: rgba(95, 143, 203, 0.24);
+  --editor-placeholder: #708095;
+  --editor-token-keyword: #f0c28a;
+  --editor-token-operator: #d5deea;
+  --editor-token-string: #f0cf9e;
+  --editor-token-number: #88d0d0;
+  --editor-token-comment: #708095;
+  --editor-token-type: #9dc3ef;
+  --editor-token-variable: #edf2f9;
+  --editor-token-property: #9dc3ef;
+  --editor-token-function: #8db3e2;
+  --resizer-line: rgba(148, 163, 184, 0.12);
+  --resizer-line-hover: rgba(141, 179, 226, 0.5);
+  --scrollbar-thumb: rgba(121, 140, 165, 0.34);
+  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.5);
+  --shell-border: rgba(148, 163, 184, 0.08);
+  --shell-inner-border: rgba(255, 255, 255, 0.03);
+  --grid-line: rgba(148, 163, 184, 0.08);
   color-scheme: dark;
 }
 
@@ -1805,9 +1568,15 @@ body {
 body {
   font-family: var(--font-ui);
   background:
-    radial-gradient(circle at top left, rgba(221, 187, 197, 0.55), transparent 26%),
-    radial-gradient(circle at bottom right, rgba(231, 214, 219, 0.72), transparent 24%),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    radial-gradient(circle at top, rgba(155, 107, 255, 0.08), transparent 34%),
     var(--bg-canvas);
+  background-size:
+    12rem 12rem,
+    12rem 12rem,
+    auto,
+    auto;
 }
 
 #app {
@@ -1833,26 +1602,25 @@ body {
 }
 
 .desktop-shell {
-  --splitter-size: 8px;
+  --splitter-size: 5px;
   height: 100%;
   display: grid;
   grid-template-columns:
-    var(--sidebar-width, 28rem) var(--splitter-size)
+    var(--sidebar-width, 22rem) var(--splitter-size)
     minmax(0, 1fr);
   background: var(--bg-shell);
-  padding: 1rem;
+  box-shadow: var(--shell-shadow);
+  backdrop-filter: blur(18px);
+  border-radius: 28px;
+  padding: 0.35rem;
   overflow: hidden;
 }
 
 .sidebar-shell {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 108px minmax(0, 1fr);
-  border: 1px solid var(--border);
-  border-radius: 2rem;
-  background: color-mix(in srgb, var(--bg-surface) 88%, white);
-  box-shadow: var(--shell-shadow);
+  display: block;
+  background: var(--bg-sidebar);
   overflow: hidden;
 }
 
@@ -1860,16 +1628,16 @@ body {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 1rem;
-  padding: 0.1rem 0 0.1rem 1.2rem;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0.35rem;
+  padding: 0 0 0 0.35rem;
   overflow: hidden;
 }
 
 .workspace {
   display: grid;
   grid-template-rows:
-    minmax(16rem, 1fr) var(--splitter-size) minmax(12rem, var(--results-height, 38%));
+    minmax(20rem, 1fr) var(--splitter-size) minmax(11rem, var(--results-height, 30%));
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1888,20 +1656,18 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 1.2rem;
-  backdrop-filter: blur(8px);
+  padding: 1rem;
 }
 
 .dialog {
   width: min(40rem, 100%);
   background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 1.6rem;
+  border-radius: 18px;
   box-shadow: var(--dialog-shadow);
   display: grid;
   grid-template-rows: auto 1fr auto;
   max-height: min(85vh, 40rem);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(16px);
 }
 
 .create-object-dialog {
@@ -1909,28 +1675,27 @@ body {
 }
 
 .dialog-header {
-  padding: 1rem 1.15rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0.9rem;
   background: var(--bg-surface-muted);
 }
 
 .dialog-title {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .dialog-body {
-  padding: 1rem 1.15rem;
+  padding: 0.9rem;
   display: grid;
-  gap: 0.85rem;
+  gap: 0.75rem;
   overflow: auto;
 }
 
 .dialog-body label {
   display: grid;
-  gap: 0.35rem;
-  font-size: 0.78rem;
+  gap: 0.3rem;
+  font-size: 0.76rem;
   color: var(--text-secondary);
 }
 
@@ -1943,10 +1708,10 @@ body {
 
 .dialog-body input,
 .dialog-body select {
-  border: 1px solid var(--control-border);
-  border-radius: 0.9rem;
+  border: 0;
+  border-radius: 6px;
   background: var(--control-bg);
-  padding: 0.72rem 0.85rem;
+  padding: 0.5rem 0.6rem;
   font: inherit;
   color: var(--text-primary);
 }
@@ -1959,15 +1724,15 @@ body {
 
 .settings-group {
   margin: 0;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 1rem;
+  padding: 0.7rem;
+  border-radius: 6px;
   display: grid;
-  gap: 0.7rem;
+  gap: 0.55rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 72%, transparent);
 }
 
 .settings-group legend {
-  padding: 0 0.35rem;
+  padding: 0 0.25rem;
   color: var(--text-secondary);
   font-size: 0.74rem;
 }
@@ -1997,19 +1762,18 @@ body {
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 0.6rem;
-  padding: 1rem 1.15rem;
-  border-top: 1px solid var(--border);
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
   background: var(--bg-surface-muted);
 }
 
 .dialog .btn {
-  border: 1px solid var(--control-border);
-  border-radius: 999px;
+  border: 0;
+  border-radius: 6px;
   background: var(--control-bg);
-  padding: 0.72rem 1rem;
+  padding: 0.45rem 0.7rem;
   font-size: 0.76rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   color: var(--text-primary);
 }
@@ -2064,7 +1828,7 @@ body {
 }
 
 .settings-error {
-  margin: 0.75rem 1.15rem 0;
+  margin: 0.75rem 0.9rem 0;
   font-size: 0.76rem;
   color: var(--danger);
 }
@@ -2088,19 +1852,15 @@ body {
   top: 0;
   bottom: 0;
   left: 50%;
-  width: 2px;
+  width: 1px;
   transform: translateX(-50%);
   background: var(--resizer-line);
+  transition: background-color 0.12s ease;
   border-radius: 999px;
-  transition:
-    background-color 0.16s ease,
-    transform 0.16s ease;
-  opacity: 0.9;
 }
 
 .panel-resizer:hover::after {
   background: var(--resizer-line-hover);
-  transform: translateX(-50%) scaleY(0.86);
 }
 
 .panel-resizer.vertical {
@@ -2116,13 +1876,15 @@ body {
   right: 0;
   top: 50%;
   width: auto;
-  height: 2px;
+  height: 1px;
   transform: translateY(-50%);
 }
 
 @media (max-width: 1180px) {
-  .sidebar-shell {
-    grid-template-columns: 100px minmax(0, 1fr);
+  .desktop-shell {
+    grid-template-columns:
+      var(--sidebar-width, 20rem) var(--splitter-size)
+      minmax(0, 1fr);
   }
 }
 
@@ -2130,12 +1892,10 @@ body {
   .desktop-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto var(--splitter-size) minmax(0, 1fr);
-    padding: 0.85rem;
   }
 
   .sidebar-shell {
-    grid-template-columns: 1fr;
-    border-radius: 1.6rem;
+    min-height: 20rem;
   }
 
   .panel-resizer.vertical {
@@ -2147,17 +1907,17 @@ body {
     right: 0;
     top: 50%;
     width: auto;
-    height: 2px;
+    height: 1px;
     transform: translateY(-50%);
   }
 
   .app-main {
-    padding: 0.8rem 0 0;
+    padding: 0.4rem 0 0;
   }
 
   .workspace {
     grid-template-rows:
-      minmax(14rem, 1fr) var(--splitter-size) minmax(12rem, var(--results-height, 44%));
+      minmax(15rem, 1fr) var(--splitter-size) minmax(11rem, var(--results-height, 38%));
   }
 }
 </style>

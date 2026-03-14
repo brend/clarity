@@ -51,6 +51,7 @@ const props = defineProps<{
 }>();
 
 const showAdvancedConnectionOptions = ref(false);
+const isConnectionPaneCollapsed = ref(false);
 const explorerContextMenu = ref<{
   x: number;
   y: number;
@@ -91,12 +92,22 @@ const refreshContextMenuLabel = computed(() => {
 
 watch(
   () => props.isConnected,
-  (isConnected) => {
+  (isConnected, wasConnected) => {
     if (!isConnected) {
       closeExplorerContextMenu();
+      isConnectionPaneCollapsed.value = false;
+      return;
+    }
+
+    if (!wasConnected) {
+      isConnectionPaneCollapsed.value = true;
     }
   },
 );
+
+function toggleConnectionPaneCollapsed(): void {
+  isConnectionPaneCollapsed.value = !isConnectionPaneCollapsed.value;
+}
 
 function onSelectedProfileChange(): void {
   props.onSyncSelectedProfileUi();
@@ -219,15 +230,31 @@ onBeforeUnmount(() => {
     >
       <header class="card-header">
         <div class="card-heading">
-          <p class="card-kicker">Connection Studio</p>
-          <h2 class="card-title">Profiles and session</h2>
+          <p class="card-kicker">Connection Console</p>
+          <h2 class="card-title">Database Session</h2>
           <p class="card-description">
             {{ props.session ? props.session.displayName : "No active connection" }}
           </p>
         </div>
-        <span class="connect-state-pill" :class="{ connected: props.isConnected }">
-          {{ props.isConnected ? "Connected" : "Offline" }}
-        </span>
+        <div class="connect-header-actions">
+          <span class="connect-state-pill" :class="{ connected: props.isConnected }">
+            {{ props.isConnected ? "Connected" : "Offline" }}
+          </span>
+          <button
+            class="collapse-toggle"
+            type="button"
+            :aria-expanded="!isConnectionPaneCollapsed"
+            :title="isConnectionPaneCollapsed ? 'Expand connection pane' : 'Collapse connection pane'"
+            @click="toggleConnectionPaneCollapsed"
+          >
+            <AppIcon
+              name="chevron-right"
+              class="collapse-toggle-icon"
+              :class="{ expanded: !isConnectionPaneCollapsed }"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
       </header>
 
       <div class="connection-summary">
@@ -247,7 +274,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="connect-actions">
+      <div
+        v-if="!isConnectionPaneCollapsed"
+        class="connect-pane-body"
+      >
+        <div class="connect-actions">
         <button
           class="btn primary btn-connect"
           :disabled="props.busy.connecting"
@@ -274,10 +305,10 @@ onBeforeUnmount(() => {
           <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
           {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
         </button>
-      </div>
+        </div>
 
-      <div class="connection-core-fields">
-        <div class="field-grid">
+        <div class="connection-core-fields">
+          <div class="field-grid">
           <label>
             Host
             <input
@@ -343,125 +374,127 @@ onBeforeUnmount(() => {
               data-gramm="false"
             />
           </label>
+          </div>
         </div>
-      </div>
 
-      <div class="profile-inline">
-        <label class="profile-select">
-          Profile
-          <select
-            v-model="selectedProfileId"
-            :disabled="
-              props.busy.loadingProfiles || props.busy.loadingProfileSecret
-            "
-            @change="onSelectedProfileChange"
-          >
-            <option value="">(Select profile)</option>
-            <option
-              v-for="profile in props.connectionProfiles"
-              :key="profile.id"
-              :value="profile.id"
+        <div class="profile-inline">
+          <label class="profile-select">
+            Profile
+            <select
+              v-model="selectedProfileId"
+              :disabled="
+                props.busy.loadingProfiles || props.busy.loadingProfileSecret
+              "
+              @change="onSelectedProfileChange"
             >
-              {{ profile.name }}
-            </option>
-          </select>
-        </label>
+              <option value="">(Select profile)</option>
+              <option
+                v-for="profile in props.connectionProfiles"
+                :key="profile.id"
+                :value="profile.id"
+              >
+                {{ profile.name }}
+              </option>
+            </select>
+          </label>
 
-        <details class="profile-details">
-          <summary class="btn profile-manage-toggle">
-            <AppIcon
-              name="chevron-right"
-              class="connect-toggle-icon"
-              aria-hidden="true"
-            />
-            Manage profiles
-          </summary>
-
-          <div class="profile-controls">
-            <label>
-              Profile Name
-              <input
-                v-model.trim="profileName"
-                placeholder="Local Oracle Dev"
-                spellcheck="false"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                data-gramm="false"
+          <details class="profile-details">
+            <summary class="btn profile-manage-toggle">
+              <AppIcon
+                name="chevron-right"
+                class="connect-toggle-icon"
+                aria-hidden="true"
               />
-            </label>
-            <div class="profile-save-row">
-              <label class="profile-password-toggle">
-                <input v-model="saveProfilePassword" type="checkbox" />
-                Save password in OS keychain
+              Manage profiles
+            </summary>
+
+            <div class="profile-controls">
+              <label>
+                Profile Name
+                <input
+                  v-model.trim="profileName"
+                  placeholder="Local Oracle Dev"
+                  spellcheck="false"
+                  autocomplete="off"
+                  autocorrect="off"
+                  autocapitalize="off"
+                  data-gramm="false"
+                />
               </label>
-              <div class="profile-actions">
-                <button
-                  class="btn"
-                  :disabled="props.busy.savingProfile"
-                  @click="props.onSaveConnectionProfile"
-                >
-                  {{ props.busy.savingProfile ? "Saving..." : "Save" }}
-                </button>
-                <button
-                  class="btn"
-                  :disabled="!props.selectedProfile || props.busy.deletingProfile"
-                  @click="props.onDeleteSelectedProfile"
-                >
-                  {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
-                </button>
+              <div class="profile-save-row">
+                <label class="profile-password-toggle">
+                  <input v-model="saveProfilePassword" type="checkbox" />
+                  Save password in OS keychain
+                </label>
+                <div class="profile-actions">
+                  <button
+                    class="btn"
+                    :disabled="props.busy.savingProfile"
+                    @click="props.onSaveConnectionProfile"
+                  >
+                    {{ props.busy.savingProfile ? "Saving..." : "Save" }}
+                  </button>
+                  <button
+                    class="btn"
+                    :disabled="!props.selectedProfile || props.busy.deletingProfile"
+                    @click="props.onDeleteSelectedProfile"
+                  >
+                    {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </details>
-      </div>
+          </details>
+        </div>
 
-      <button
-        class="btn connect-advanced-toggle"
-        type="button"
-        :aria-expanded="showAdvancedConnectionOptions"
-        @click="showAdvancedConnectionOptions = !showAdvancedConnectionOptions"
-      >
-        <AppIcon
-          name="chevron-right"
-          class="connect-toggle-icon"
-          :class="{ expanded: showAdvancedConnectionOptions }"
-          aria-hidden="true"
-        />
-        {{
-          showAdvancedConnectionOptions
-            ? "Hide advanced options"
-            : "Show advanced options"
-        }}
-      </button>
-
-      <div v-show="showAdvancedConnectionOptions" class="field-grid advanced-grid">
-        <label>
-          Port
-          <input
-            v-model.number="props.connection.connection.port"
-            type="number"
-            min="1"
-            max="65535"
-            spellcheck="false"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            data-gramm="false"
+        <button
+          class="btn connect-advanced-toggle"
+          type="button"
+          :aria-expanded="showAdvancedConnectionOptions"
+          @click="showAdvancedConnectionOptions = !showAdvancedConnectionOptions"
+        >
+          <AppIcon
+            name="chevron-right"
+            class="connect-toggle-icon"
+            :class="{ expanded: showAdvancedConnectionOptions }"
+            aria-hidden="true"
           />
-        </label>
+          {{
+            showAdvancedConnectionOptions
+              ? "Hide advanced options"
+              : "Show advanced options"
+          }}
+        </button>
 
-        <label v-if="props.connection.provider === 'oracle'">
-          Auth Mode
-          <select v-model="props.connection.connection.oracleAuthMode">
-            <option value="normal">Normal</option>
-            <option value="sysdba">SYSDBA</option>
-          </select>
-        </label>
+        <div v-show="showAdvancedConnectionOptions" class="field-grid advanced-grid">
+          <label>
+            Port
+            <input
+              v-model.number="props.connection.connection.port"
+              type="number"
+              min="1"
+              max="65535"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+
+          <label v-if="props.connection.provider === 'oracle'">
+            Auth Mode
+            <select v-model="props.connection.connection.oracleAuthMode">
+              <option value="normal">Normal</option>
+              <option value="sysdba">SYSDBA</option>
+            </select>
+          </label>
+        </div>
+
+        <p v-if="props.connectionError" class="connect-error">
+          {{ props.connectionError }}
+        </p>
       </div>
-      <p v-if="props.connectionError" class="connect-error">
-        {{ props.connectionError }}
-      </p>
     </section>
 
     <section
@@ -471,7 +504,7 @@ onBeforeUnmount(() => {
     >
       <header class="card-header">
         <div class="card-heading">
-          <p class="card-kicker">Schema Explorer</p>
+          <p class="card-kicker">Database Explorer</p>
           <h2 class="card-title">
             {{
               props.connectedSchema ||
@@ -625,48 +658,58 @@ onBeforeUnmount(() => {
 .explorer-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 1rem;
+  gap: 0.6rem;
   min-width: 0;
   min-height: 0;
-  padding: 1.35rem 1.35rem 1.35rem 0;
+  padding: 0.7rem 0.7rem 0.7rem 0;
   overflow: hidden;
 }
 
 .sidebar-card {
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 1.75rem;
-  background: color-mix(in srgb, var(--bg-surface) 92%, white);
+  border-radius: 18px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface-muted) 58%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 94%, transparent) 100%
+    );
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
 .sidebar-card.spotlight {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--border));
-  box-shadow:
-    var(--card-shadow),
-    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent), var(--card-shadow);
 }
 
 .connect-box {
   display: grid;
-  gap: 1rem;
-  padding: 1.15rem;
+  gap: 0.65rem;
+  padding: 0.85rem;
 }
 
 .tree-area {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 0.9rem;
+  gap: 0.6rem;
   min-height: 0;
-  padding: 1.15rem;
+  padding: 0.85rem;
 }
 
 .card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.9rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.connect-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .card-heading {
@@ -677,7 +720,7 @@ onBeforeUnmount(() => {
 
 .card-kicker {
   margin: 0;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-subtle);
@@ -685,25 +728,25 @@ onBeforeUnmount(() => {
 
 .card-title {
   margin: 0;
-  font-size: 1.02rem;
-  letter-spacing: -0.02em;
+  font-size: 1rem;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
 .card-description {
   margin: 0;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .connect-state-pill {
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-surface-muted);
+  background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
   color: var(--text-secondary);
-  padding: 0.35rem 0.7rem;
-  font-size: 0.66rem;
+  padding: 0.34rem 0.72rem;
+  font-size: 0.62rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -711,28 +754,64 @@ onBeforeUnmount(() => {
 }
 
 .connect-state-pill.connected {
-  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
   color: var(--success);
   background: color-mix(in srgb, var(--success) 10%, white);
 }
 
+.collapse-toggle {
+  border: 0;
+  background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
+  color: var(--text-secondary);
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.collapse-toggle:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+.collapse-toggle-icon {
+  width: 0.78rem;
+  height: 0.78rem;
+  transition: transform 0.12s ease;
+}
+
+.collapse-toggle-icon.expanded {
+  transform: rotate(90deg);
+}
+
 .connection-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.45rem;
+}
+
+.connect-pane-body {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.summary-tile:last-child {
+  grid-column: auto;
 }
 
 .summary-tile {
   display: grid;
   gap: 0.2rem;
-  padding: 0.8rem 0.85rem;
-  border-radius: 1rem;
-  background: var(--bg-surface-muted);
-  border: 1px solid var(--panel-separator);
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
 .summary-label {
-  font-size: 0.66rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-subtle);
@@ -740,12 +819,12 @@ onBeforeUnmount(() => {
 
 .summary-value {
   min-width: 0;
-  font-size: 0.83rem;
-  font-weight: 700;
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .connect-toggle-icon {
@@ -760,10 +839,9 @@ onBeforeUnmount(() => {
 }
 
 .connection-core-fields {
-  padding: 0.8rem;
-  border-radius: 1.1rem;
-  background: var(--bg-surface-muted);
-  border: 1px solid var(--panel-separator);
+  padding: 0.65rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
 }
 
 .profile-inline {
@@ -794,10 +872,9 @@ onBeforeUnmount(() => {
 .profile-controls {
   display: grid;
   gap: 0.45rem;
-  padding: 0.75rem;
-  border-radius: 1rem;
-  background: var(--bg-surface-muted);
-  border: 1px solid var(--panel-separator);
+  padding: 0.56rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
 }
 
 .profile-actions {
@@ -838,8 +915,8 @@ onBeforeUnmount(() => {
 
 .field-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.7rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
 }
 
 .field-span {
@@ -849,8 +926,8 @@ onBeforeUnmount(() => {
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.32rem;
-  font-size: 0.72rem;
+  gap: 0.28rem;
+  font-size: 0.66rem;
   color: var(--text-secondary);
 }
 
@@ -864,11 +941,11 @@ button {
 input,
 select,
 textarea {
-  border: 1px solid var(--control-border);
-  border-radius: 0.95rem;
-  background: var(--control-bg);
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
-  padding: 0.72rem 0.8rem;
+  padding: 0.48rem 0.58rem;
 }
 
 button {
@@ -884,7 +961,7 @@ button:focus-visible {
 
 .connect-actions {
   display: flex;
-  gap: 0.6rem;
+  gap: 0.45rem;
 }
 
 .btn-connect {
@@ -910,17 +987,13 @@ button:focus-visible {
 }
 
 .btn {
-  border: 1px solid var(--control-border);
-  border-radius: 999px;
-  background: var(--control-bg);
-  padding: 0.7rem 0.95rem;
-  font-size: 0.74rem;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--control-bg) 92%, transparent);
+  padding: 0.5rem 0.68rem;
+  font-size: 0.69rem;
   font-weight: 600;
   cursor: pointer;
-  transition:
-    background-color 0.12s ease,
-    border-color 0.12s ease,
-    transform 0.12s ease;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -929,7 +1002,6 @@ button:focus-visible {
 .btn:hover:not(:disabled) {
   background: var(--control-hover);
   border-color: var(--control-border);
-  transform: translateY(-1px);
 }
 
 .btn:focus-visible,
@@ -975,22 +1047,20 @@ button:focus-visible {
 .meta-pill {
   display: inline-flex;
   align-items: center;
-  min-height: 1.9rem;
-  padding: 0.22rem 0.65rem;
+  min-height: 1.65rem;
+  padding: 0.18rem 0.5rem;
   border-radius: 999px;
-  border: 1px solid var(--schema-chip-border);
-  background: var(--schema-chip-bg);
-  color: var(--schema-chip-text);
-  font-size: 0.7rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.65rem;
   font-weight: 600;
 }
 
 .tree-scroll {
   min-height: 0;
   overflow: auto;
-  padding-top: 0.25rem;
+  padding-top: 0.35rem;
   padding-right: 0.2rem;
-  border-top: 1px solid color-mix(in srgb, var(--panel-separator) 70%, transparent);
 }
 
 .tree-root,
@@ -1006,20 +1076,19 @@ button:focus-visible {
 
 .tree-row {
   width: 100%;
-  border: 1px solid transparent;
+  border: 0;
   background: transparent;
   text-align: left;
   display: flex;
   align-items: center;
-  gap: 0.42rem;
-  padding: 0.52rem 0.64rem;
-  border-radius: 0.95rem;
-  font-size: 0.75rem;
+  gap: 0.36rem;
+  padding: 0.42rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.72rem;
   cursor: pointer;
   transition:
     background-color 0.12s ease,
-    border-color 0.12s ease,
-    transform 0.12s ease;
+    border-color 0.12s ease;
 }
 
 .tree-type {
@@ -1028,7 +1097,7 @@ button:focus-visible {
 }
 
 .tree-type:hover {
-  background: var(--control-hover);
+  background: color-mix(in srgb, var(--accent-soft) 60%, var(--control-hover));
 }
 
 .tree-caret-icon {
@@ -1051,7 +1120,7 @@ button:focus-visible {
   min-width: 1.5rem;
   padding: 0 0.3rem;
   border-radius: 999px;
-  background: var(--bg-surface-muted);
+  background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
   color: var(--text-secondary);
   font-weight: 500;
   margin-left: 0.35rem;
@@ -1070,15 +1139,12 @@ button:focus-visible {
 }
 
 .tree-node:hover {
-  background: var(--control-hover);
-  transform: translateX(1px);
+  background: color-mix(in srgb, var(--accent-soft) 44%, var(--control-hover));
 }
 
 .tree-node.selected {
-  background: var(--tab-active-bg);
-  border-color: var(--tab-active-border);
+  background: color-mix(in srgb, var(--accent-soft) 82%, var(--bg-surface));
   color: var(--tree-selected-text);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .tree-leaf-icon {
@@ -1101,7 +1167,7 @@ button:focus-visible {
 
 .empty-copy {
   margin: 0;
-  padding: 0.35rem 0;
+  padding: 0.25rem 0;
 }
 
 .explorer-context-menu {
@@ -1109,8 +1175,7 @@ button:focus-visible {
   z-index: 90;
   min-width: 13rem;
   padding: 0.35rem;
-  border-radius: 1rem;
-  border: 1px solid var(--border);
+  border-radius: 14px;
   background: var(--bg-surface);
   box-shadow: var(--dialog-shadow);
   display: grid;
@@ -1119,7 +1184,7 @@ button:focus-visible {
 
 .explorer-context-menu-item {
   border: 0;
-  border-radius: 0.85rem;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-primary);
   font-size: 0.74rem;
