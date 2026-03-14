@@ -6,4 +6,5 @@ export interface UserSettings {
   aiSuggestionsEnabled: boolean;
   aiModel: string;
   aiEndpoint: string;
+  lastUsedConnectionProfileId: string;
 }

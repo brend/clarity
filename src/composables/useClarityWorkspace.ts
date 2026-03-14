@@ -557,6 +557,10 @@ export function useClarityWorkspace() {
     searchingSchema: false,
   });
 
+  function syncBusyDdlState(): void {
+    busy.loadingDdl = ddlTabs.value.some((tab) => tab.loadingDdl);
+  }
+
   const isConnected = computed(() => session.value !== null);
   const connectedSchema = computed(
     () => session.value?.schema ?? connection.schema.toUpperCase(),
@@ -707,6 +711,10 @@ export function useClarityWorkspace() {
       return false;
     }
 
+    if (activeDdlTab.value.activeDetailTabId === "ddl") {
+      return activeDdlTab.value.loadingDdl;
+    }
+
     if (activeDdlTab.value.activeDetailTabId === "data") {
       return activeDdlTab.value.loadingData;
     }
@@ -837,6 +845,37 @@ export function useClarityWorkspace() {
 
   function buildDdlTabId(object: OracleObjectEntry): string {
     return `ddl:${object.schema}:${object.objectType}:${object.objectName}`;
+  }
+
+  function createWorkspaceDdlTab(
+    object: OracleObjectEntry,
+    {
+      focusLine = null,
+      activeDetailTabId = null,
+      loadingDdl = false,
+    }: {
+      focusLine?: number | null;
+      activeDetailTabId?: ObjectDetailTabId | null;
+      loadingDdl?: boolean;
+    } = {},
+  ): WorkspaceDdlTab {
+    const normalizedFocusLine = normalizeLineReference(focusLine);
+    const resolvedDetailTabId =
+      activeDetailTabId ?? getDefaultObjectDetailTabId(object);
+
+    return {
+      id: buildDdlTabId(object),
+      object,
+      ddlText: "",
+      focusLine: normalizedFocusLine,
+      focusToken: 0,
+      activeDetailTabId: resolvedDetailTabId,
+      dataResult: null,
+      metadataResult: null,
+      loadingDdl,
+      loadingData: false,
+      loadingMetadata: false,
+    };
   }
 
   function normalizeLineReference(value: number | null): number | null {
@@ -1101,6 +1140,15 @@ export function useClarityWorkspace() {
       return;
     }
 
+    const detailTabId = getDefaultObjectDetailTabId(object);
+    const nextTab = createWorkspaceDdlTab(object, {
+      activeDetailTabId: detailTabId,
+      loadingDdl: true,
+    });
+    ddlTabs.value.push(nextTab);
+    syncBusyDdlState();
+    statusMessage.value = `Opening ${object.schema}.${object.objectName}...`;
+    activateWorkspaceTab(nextTab.id);
     void loadDdl(object);
   }
 
@@ -1816,8 +1864,35 @@ export function useClarityWorkspace() {
     const normalizedTargetLine = normalizeLineReference(targetLine);
 
     errorMessage.value = "";
-    busy.loadingDdl = true;
     selectedObject.value = object;
+    statusMessage.value = `Opening ${object.schema}.${object.objectName}...`;
+
+    const tabId = buildDdlTabId(object);
+    const detailTabId =
+      normalizedTargetLine === null
+        ? getDefaultObjectDetailTabId(object)
+        : "ddl";
+    let tab = ddlTabs.value.find((entry) => entry.id === tabId);
+    if (!tab) {
+      tab = createWorkspaceDdlTab(object, {
+        focusLine: normalizedTargetLine,
+        activeDetailTabId: detailTabId,
+        loadingDdl: true,
+      });
+      ddlTabs.value.push(tab);
+    } else {
+      tab.object = object;
+      tab.loadingDdl = true;
+      tab.focusLine = normalizedTargetLine;
+      tab.activeDetailTabId =
+        normalizedTargetLine !== null
+          ? "ddl"
+          : isObjectDetailTabSupported(tab.object, tab.activeDetailTabId)
+            ? tab.activeDetailTabId
+            : detailTabId;
+    }
+    syncBusyDdlState();
+    activateWorkspaceTab(tabId);
 
     try {
       const ddl = await invoke<string>("db_get_object_ddl", {
@@ -1829,12 +1904,7 @@ export function useClarityWorkspace() {
         },
       });
 
-      const tabId = buildDdlTabId(object);
-      const detailTabId =
-        normalizedTargetLine === null
-          ? getDefaultObjectDetailTabId(object)
-          : "ddl";
-      const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
+      const existingTab = ddlTabs.value.find((entry) => entry.id === tabId);
       if (existingTab) {
         existingTab.ddlText = ddl;
         existingTab.object = object;
@@ -1849,22 +1919,8 @@ export function useClarityWorkspace() {
         if (normalizedTargetLine !== null) {
           existingTab.activeDetailTabId = "ddl";
         }
-      } else {
-        ddlTabs.value.push({
-          id: tabId,
-          object,
-          ddlText: ddl,
-          focusLine: normalizedTargetLine,
-          focusToken: normalizedTargetLine === null ? 0 : 1,
-          activeDetailTabId: detailTabId,
-          dataResult: null,
-          metadataResult: null,
-          loadingData: false,
-          loadingMetadata: false,
-        });
       }
 
-      activateWorkspaceTab(tabId);
       const objectTab = ddlTabs.value.find((tab) => tab.id === tabId);
       if (objectTab) {
         currentScriptLineLocation.value = createScriptLineLocation(
@@ -1879,7 +1935,11 @@ export function useClarityWorkspace() {
       errorMessage.value = toErrorMessage(error);
       return false;
     } finally {
-      busy.loadingDdl = false;
+      const objectTab = ddlTabs.value.find((tab) => tab.id === tabId);
+      if (objectTab) {
+        objectTab.loadingDdl = false;
+      }
+      syncBusyDdlState();
     }
   }
 

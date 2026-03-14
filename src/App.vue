@@ -244,6 +244,7 @@ const {
   updateAiSuggestionsEnabled,
   updateAiModel,
   updateAiEndpoint,
+  updateLastUsedConnectionProfileId,
 } = useUserSettings();
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
 const settingsDialogOracleClientLibDir = ref(settings.value.oracleClientLibDir);
@@ -810,6 +811,29 @@ async function runSchemaExport(): Promise<void> {
   exportSummaryMessage.value = result.message;
 }
 
+async function restoreLastUsedConnectionProfile(): Promise<void> {
+  selectedProfileId.value = settings.value.lastUsedConnectionProfileId;
+  await loadConnectionProfiles();
+
+  if (!selectedProfileId.value || !selectedProfile.value) {
+    if (settings.value.lastUsedConnectionProfileId) {
+      updateLastUsedConnectionProfileId("");
+    }
+    return;
+  }
+
+  await applySelectedProfile();
+}
+
+async function handleConnect(): Promise<void> {
+  await connectOracle(settings.value.oracleClientLibDir);
+  if (!session.value) {
+    return;
+  }
+
+  updateLastUsedConnectionProfileId(selectedProfileId.value);
+}
+
 watch(
   () => [
     activeWorkspaceTabId.value,
@@ -835,7 +859,7 @@ watch(
 );
 
 onMounted(() => {
-  void loadConnectionProfiles();
+  void restoreLastUsedConnectionProfile();
   void refreshAiKeyPresence();
   void listen(EVENT_OPEN_EXPORT_DATABASE_DIALOG, () => {
     openExportDialogFromMenu();
@@ -956,7 +980,7 @@ onBeforeUnmount(() => {
       :on-apply-selected-profile="applySelectedProfile"
       :on-delete-selected-profile="deleteSelectedProfile"
       :on-save-connection-profile="saveConnectionProfile"
-      :on-connect="() => connectOracle(settings.oracleClientLibDir)"
+      :on-connect="handleConnect"
       :on-disconnect="disconnectOracle"
       :on-refresh-objects="refreshObjects"
       :on-toggle-object-type="toggleObjectType"

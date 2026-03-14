@@ -143,6 +143,16 @@ const editableColumnCount = computed<number>(
 const hasAiSuggestion = computed<boolean>(
   () => props.aiSuggestionText.trim().length > 0,
 );
+const showDdlLoadingState = computed<boolean>(() => {
+  if (!props.activeDdlTab?.loadingDdl) {
+    return false;
+  }
+
+  return props.activeDdlTab.ddlText.trim().length === 0;
+});
+const showObjectDetailSkeleton = computed<boolean>(
+  () => props.activeObjectDetailLoading && !props.activeObjectDetailResult,
+);
 const objectDetailColumns = computed<string[]>(
   () => props.activeObjectDetailResult?.columns ?? [],
 );
@@ -216,6 +226,8 @@ const objectDetailBottomSpacerHeight = computed<number>(() => {
   );
   return remainingRows * objectDetailRowHeight.value;
 });
+const ddlLoadingSkeletonWidths = [92, 78, 88, 66, 84, 72];
+const objectDetailSkeletonWidths = [100, 94, 97, 91, 95, 89];
 
 function cloneRows(rows: string[][]): string[][] {
   return rows.map((row) => [...row]);
@@ -803,7 +815,12 @@ watch(
         :class="{ active: props.activeWorkspaceTabId === tab.id }"
       >
         <button class="sheet-tab" @click="props.onActivateWorkspaceTab(tab.id)">
-          {{ tab.object.objectName }}
+          <span class="sheet-tab-label">{{ tab.object.objectName }}</span>
+          <span
+            v-if="tab.loadingDdl || tab.loadingData || tab.loadingMetadata"
+            class="sheet-tab-loading-dot"
+            aria-hidden="true"
+          ></span>
         </button>
         <button
           class="sheet-tab-close"
@@ -899,6 +916,7 @@ watch(
         :disabled="
           !props.activeDdlTab ||
           props.activeObjectDetailTabId !== 'ddl' ||
+          props.activeDdlTab.loadingDdl ||
           props.busy.savingDdl
         "
         @click="props.onSaveDdl"
@@ -1035,8 +1053,24 @@ watch(
         </button>
       </div>
 
+      <section
+        v-if="props.activeObjectDetailTabId === 'ddl' && showDdlLoadingState"
+        class="object-loading-panel"
+        aria-live="polite"
+      >
+        <p class="muted object-loading-title">Loading object DDL...</p>
+        <div class="object-loading-skeleton">
+          <span
+            v-for="(width, index) in ddlLoadingSkeletonWidths"
+            :key="`ddl-skeleton-${index}`"
+            class="object-loading-line"
+            :style="{ width: `${width}%` }"
+          ></span>
+        </div>
+      </section>
+
       <SqlCodeEditor
-        v-if="props.activeObjectDetailTabId === 'ddl'"
+        v-else-if="props.activeObjectDetailTabId === 'ddl'"
         v-model="ddlText"
         class="ddl-editor"
         placeholder="Object DDL will appear here"
@@ -1052,13 +1086,28 @@ watch(
         class="object-detail-grid-pane"
         :class="{ 'is-data-view': isDataDetailTab }"
       >
-        <p v-if="props.activeObjectDetailLoading" class="muted">
-          Loading object detail...
-        </p>
+        <div
+          v-if="showObjectDetailSkeleton"
+          class="object-loading-panel"
+          aria-live="polite"
+        >
+          <p class="muted object-loading-title">Loading object detail...</p>
+          <div class="object-loading-skeleton">
+            <span
+              v-for="(width, index) in objectDetailSkeletonWidths"
+              :key="`detail-skeleton-${index}`"
+              class="object-loading-line"
+              :style="{ width: `${width}%` }"
+            ></span>
+          </div>
+        </div>
         <p v-else-if="!props.activeObjectDetailResult" class="muted">
           Select a detail tab to load information for this object.
         </p>
         <template v-else>
+          <p v-if="props.activeObjectDetailLoading" class="muted">
+            Refreshing object detail...
+          </p>
           <p class="muted">
             {{ props.activeObjectDetailResult.message }}
           </p>
@@ -1512,16 +1561,33 @@ button:focus-visible {
   padding: 0.24rem 0.48rem;
   font-size: 0.73rem;
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 12rem;
   color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  min-width: 0;
 }
 
 .sheet-tab:hover {
   background: var(--control-hover);
   color: var(--text-primary);
+}
+
+.sheet-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-tab-loading-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: var(--accent);
+  flex: 0 0 auto;
+  animation: sheet-tab-loading-pulse 1s ease-in-out infinite;
 }
 
 .sheet-tab-search {
@@ -2001,6 +2067,37 @@ button:focus-visible {
   gap: 0.45rem;
 }
 
+.object-loading-panel {
+  min-height: 0;
+  padding: 0.85rem 0.9rem;
+  background: color-mix(in srgb, var(--bg-surface-muted) 70%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--panel-separator) 70%, transparent);
+}
+
+.object-loading-title {
+  margin: 0 0 0.65rem;
+}
+
+.object-loading-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.object-loading-line {
+  display: block;
+  height: 0.72rem;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--table-divider) 45%, transparent) 0%,
+    color-mix(in srgb, var(--table-header-bg) 80%, var(--bg-surface)) 50%,
+    color-mix(in srgb, var(--table-divider) 45%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: object-loading-shimmer 1.2s linear infinite;
+}
+
 .object-detail-grid-wrap {
   flex: 1 1 auto;
   min-height: 0;
@@ -2018,5 +2115,26 @@ button:focus-visible {
 .muted {
   color: var(--text-secondary);
   font-size: 0.76rem;
+}
+
+@keyframes sheet-tab-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes object-loading-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
 </style>

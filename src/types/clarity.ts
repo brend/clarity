@@ -125,6 +125,7 @@ export interface WorkspaceDdlTab {
   activeDetailTabId: ObjectDetailTabId;
   dataResult: OracleQueryResult | null;
   metadataResult: OracleQueryResult | null;
+  loadingDdl: boolean;
   loadingData: boolean;
   loadingMetadata: boolean;
 }

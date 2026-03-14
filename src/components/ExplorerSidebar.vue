@@ -48,18 +48,17 @@ const props = defineProps<{
 }>();
 
 const showAdvancedConnectionOptions = ref(false);
-const createContextMenu = ref<{
+const explorerContextMenu = ref<{
   x: number;
   y: number;
   preferredObjectType: string | null;
+  refreshObjectType: string | null;
 } | null>(null);
-const createContextMenuEl = ref<HTMLElement | null>(null);
+const explorerContextMenuEl = ref<HTMLElement | null>(null);
 
-const canOpenCreateContextMenu = computed(
-  () => props.isConnected && props.createObjectTypes.length > 0,
-);
+const canOpenExplorerContextMenu = computed(() => props.isConnected);
 const createContextMenuOptions = computed<CreateObjectTypeOption[]>(() => {
-  const preferredType = createContextMenu.value?.preferredObjectType;
+  const preferredType = explorerContextMenu.value?.preferredObjectType;
   if (!preferredType) {
     return props.createObjectTypes;
   }
@@ -78,12 +77,20 @@ const createContextMenuOptions = computed<CreateObjectTypeOption[]>(() => {
     ),
   ];
 });
+const refreshContextMenuLabel = computed(() => {
+  if (props.busy.loadingObjects) {
+    return "Refreshing...";
+  }
+
+  const refreshObjectType = explorerContextMenu.value?.refreshObjectType;
+  return refreshObjectType ? `Refresh ${refreshObjectType}` : "Refresh Explorer";
+});
 
 watch(
   () => props.isConnected,
   (isConnected) => {
     if (!isConnected) {
-      closeCreateContextMenu();
+      closeExplorerContextMenu();
     }
   },
 );
@@ -100,92 +107,104 @@ function normalizeObjectType(value: string): string {
   return value.trim().toUpperCase();
 }
 
-function closeCreateContextMenu(): void {
-  createContextMenu.value = null;
+function closeExplorerContextMenu(): void {
+  explorerContextMenu.value = null;
 }
 
-function clampCreateContextMenuPosition(): void {
-  if (!createContextMenu.value || !createContextMenuEl.value) {
+function clampExplorerContextMenuPosition(): void {
+  if (!explorerContextMenu.value || !explorerContextMenuEl.value) {
     return;
   }
 
-  const menuRect = createContextMenuEl.value.getBoundingClientRect();
+  const menuRect = explorerContextMenuEl.value.getBoundingClientRect();
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
   const margin = 8;
   const clampedX = Math.min(
-    Math.max(createContextMenu.value.x, margin),
+    Math.max(explorerContextMenu.value.x, margin),
     Math.max(margin, viewportWidth - menuRect.width - margin),
   );
   const clampedY = Math.min(
-    Math.max(createContextMenu.value.y, margin),
+    Math.max(explorerContextMenu.value.y, margin),
     Math.max(margin, viewportHeight - menuRect.height - margin),
   );
-  createContextMenu.value = {
-    ...createContextMenu.value,
+  explorerContextMenu.value = {
+    ...explorerContextMenu.value,
     x: clampedX,
     y: clampedY,
   };
 }
 
-async function openCreateContextMenu(
+async function openExplorerContextMenu(
   event: MouseEvent,
   preferredObjectType: string | null,
 ): Promise<void> {
   event.preventDefault();
   event.stopPropagation();
-  if (!canOpenCreateContextMenu.value) {
-    closeCreateContextMenu();
+  if (!canOpenExplorerContextMenu.value) {
+    closeExplorerContextMenu();
     return;
   }
 
-  createContextMenu.value = {
+  const normalizedObjectType = preferredObjectType
+    ? normalizeObjectType(preferredObjectType)
+    : null;
+
+  explorerContextMenu.value = {
     x: event.clientX,
     y: event.clientY,
-    preferredObjectType: preferredObjectType
-      ? normalizeObjectType(preferredObjectType)
-      : null,
+    preferredObjectType: normalizedObjectType,
+    refreshObjectType: normalizedObjectType,
   };
   await nextTick();
-  clampCreateContextMenuPosition();
+  clampExplorerContextMenuPosition();
 }
 
 function requestCreateObject(objectType: string): void {
-  closeCreateContextMenu();
+  closeExplorerContextMenu();
   props.onRequestCreateObject(objectType);
 }
 
+function refreshExplorerContext(): void {
+  if (props.busy.loadingObjects) {
+    return;
+  }
+
+  closeExplorerContextMenu();
+  void props.onRefreshObjects();
+}
+
 function onGlobalPointerDown(event: MouseEvent): void {
-  if (!createContextMenu.value) {
+  if (!explorerContextMenu.value) {
     return;
   }
 
   const target = event.target as Node | null;
-  if (target && createContextMenuEl.value?.contains(target)) {
+  if (target && explorerContextMenuEl.value?.contains(target)) {
     return;
   }
 
-  closeCreateContextMenu();
+  closeExplorerContextMenu();
 }
 
 function onGlobalKeyDown(event: KeyboardEvent): void {
   if (event.key === "Escape") {
-    closeCreateContextMenu();
+    closeExplorerContextMenu();
   }
 }
 
 onMounted(() => {
   window.addEventListener("pointerdown", onGlobalPointerDown);
   window.addEventListener("keydown", onGlobalKeyDown);
-  window.addEventListener("resize", closeCreateContextMenu);
-  window.addEventListener("blur", closeCreateContextMenu);
+  window.addEventListener("resize", closeExplorerContextMenu);
+  window.addEventListener("blur", closeExplorerContextMenu);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("pointerdown", onGlobalPointerDown);
   window.removeEventListener("keydown", onGlobalKeyDown);
-  window.removeEventListener("resize", closeCreateContextMenu);
-  window.removeEventListener("blur", closeCreateContextMenu);
+  window.removeEventListener("resize", closeExplorerContextMenu);
+  window.removeEventListener("blur", closeExplorerContextMenu);
 });
 </script>
 
@@ -400,7 +419,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="tree-area" @contextmenu="(event) => void openCreateContextMenu(event, null)">
+    <section class="tree-area" @contextmenu="(event) => void openExplorerContextMenu(event, null)">
       <div class="tree-caption">{{ props.connectedSchema }} Objects</div>
       <p v-if="!props.objectTree.length" class="muted">No objects loaded.</p>
       <ul v-else class="tree-root" role="tree" aria-label="Database object explorer">
@@ -415,7 +434,7 @@ onBeforeUnmount(() => {
             class="tree-row tree-type"
             :class="{ expanded: props.isObjectTypeExpanded(typeNode.objectType) }"
             @click="props.onToggleObjectType(typeNode.objectType)"
-            @contextmenu="(event) => void openCreateContextMenu(event, typeNode.objectType)"
+            @contextmenu="(event) => void openExplorerContextMenu(event, typeNode.objectType)"
           >
             <AppIcon name="chevron-right" class="tree-caret-icon" aria-hidden="true" />
             <span class="tree-type-label">
@@ -439,7 +458,7 @@ onBeforeUnmount(() => {
                     props.selectedObject?.objectType === entry.objectType,
                 }"
                 @click="props.onOpenObjectFromExplorer(entry)"
-                @contextmenu="(event) => void openCreateContextMenu(event, entry.objectType)"
+                @contextmenu="(event) => void openExplorerContextMenu(event, entry.objectType)"
               >
                 <AppIcon name="object" class="tree-leaf-icon" aria-hidden="true" />
                 <span>{{ entry.objectName }}</span>
@@ -451,15 +470,15 @@ onBeforeUnmount(() => {
     </section>
 
     <div
-      v-if="createContextMenu"
-      ref="createContextMenuEl"
+      v-if="explorerContextMenu"
+      ref="explorerContextMenuEl"
       class="explorer-context-menu"
       :style="{
-        left: `${createContextMenu.x}px`,
-        top: `${createContextMenu.y}px`,
+        left: `${explorerContextMenu.x}px`,
+        top: `${explorerContextMenu.y}px`,
       }"
       role="menu"
-      aria-label="Create object"
+      aria-label="Object explorer actions"
     >
       <button
         v-for="option in createContextMenuOptions"
@@ -470,6 +489,16 @@ onBeforeUnmount(() => {
         @click.stop="requestCreateObject(option.value)"
       >
         Create {{ option.label }}...
+      </button>
+      <div v-if="createContextMenuOptions.length" class="explorer-context-menu-separator"></div>
+      <button
+        class="explorer-context-menu-item"
+        type="button"
+        role="menuitem"
+        :disabled="props.busy.loadingObjects"
+        @click.stop="refreshExplorerContext"
+      >
+        {{ refreshContextMenuLabel }}
       </button>
     </div>
   </aside>
@@ -877,10 +906,21 @@ button:focus-visible {
   cursor: pointer;
 }
 
-.explorer-context-menu-item:hover,
-.explorer-context-menu-item:focus-visible {
+.explorer-context-menu-item:hover:not(:disabled),
+.explorer-context-menu-item:focus-visible:not(:disabled) {
   background: var(--control-hover);
   outline: none;
+}
+
+.explorer-context-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.explorer-context-menu-separator {
+  height: 1px;
+  margin: 0.18rem 0.2rem;
+  background: var(--panel-separator);
 }
 
 @media (max-width: 980px) {

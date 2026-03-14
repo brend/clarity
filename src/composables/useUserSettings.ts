@@ -9,6 +9,7 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   aiSuggestionsEnabled: false,
   aiModel: "gpt-4o-mini",
   aiEndpoint: "https://api.openai.com/v1/chat/completions",
+  lastUsedConnectionProfileId: "",
 };
 
 function isThemeSetting(value: unknown): value is ThemeSetting {
@@ -25,6 +26,10 @@ function normalizeUserSettings(value: unknown): UserSettings {
     typeof raw.oracleClientLibDir === "string" ? raw.oracleClientLibDir.trim() : "";
   const normalizedAiModel = typeof raw.aiModel === "string" ? raw.aiModel.trim() : "";
   const normalizedAiEndpoint = typeof raw.aiEndpoint === "string" ? raw.aiEndpoint.trim() : "";
+  const normalizedLastUsedConnectionProfileId =
+    typeof raw.lastUsedConnectionProfileId === "string"
+      ? raw.lastUsedConnectionProfileId.trim()
+      : "";
   return {
     theme: isThemeSetting(raw.theme) ? raw.theme : DEFAULT_USER_SETTINGS.theme,
     oracleClientLibDir: normalizedOracleClientLibDir,
@@ -34,6 +39,10 @@ function normalizeUserSettings(value: unknown): UserSettings {
         : DEFAULT_USER_SETTINGS.aiSuggestionsEnabled,
     aiModel: normalizedAiModel.length > 0 ? normalizedAiModel : DEFAULT_USER_SETTINGS.aiModel,
     aiEndpoint: normalizedAiEndpoint.length > 0 ? normalizedAiEndpoint : DEFAULT_USER_SETTINGS.aiEndpoint,
+    lastUsedConnectionProfileId:
+      normalizedLastUsedConnectionProfileId.length > 0
+        ? normalizedLastUsedConnectionProfileId
+        : DEFAULT_USER_SETTINGS.lastUsedConnectionProfileId,
   };
 }
 
@@ -153,6 +162,18 @@ export function useUserSettings() {
     };
   }
 
+  function updateLastUsedConnectionProfileId(value: string): void {
+    const normalized = value.trim();
+    if (settings.value.lastUsedConnectionProfileId === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      lastUsedConnectionProfileId: normalized,
+    };
+  }
+
   return {
     settings,
     theme,
@@ -161,5 +182,6 @@ export function useUserSettings() {
     updateAiSuggestionsEnabled,
     updateAiModel,
     updateAiEndpoint,
+    updateLastUsedConnectionProfileId,
   };
 }
