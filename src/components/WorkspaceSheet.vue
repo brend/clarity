@@ -116,6 +116,12 @@ const OBJECT_DETAIL_VIRTUAL_OVERSCAN_ROWS = 20;
 const isDataDetailTab = computed<boolean>(
   () => props.activeObjectDetailTabId === "data",
 );
+const activeObjectIsInvalid = computed<boolean>(
+  () => props.activeDdlObject?.status?.trim().toUpperCase() === "INVALID",
+);
+const activeObjectInvalidReason = computed<string>(
+  () => props.activeDdlObject?.invalidReason?.trim() ?? "",
+);
 const showEditableRowActions = computed<boolean>(() => {
   if (
     !isDataDetailTab.value ||
@@ -1027,6 +1033,16 @@ watch(
               ? `${props.activeDdlObject.schema}.${props.activeDdlObject.objectName} (${props.activeDdlObject.objectType})`
               : "Select an object from Object Explorer."
           }}
+          <span
+            v-if="activeObjectIsInvalid"
+            class="object-status-pill invalid"
+            :title="
+              activeObjectInvalidReason ||
+              'Oracle reports this object as invalid.'
+            "
+          >
+            Invalid
+          </span>
         </div>
         <button
           class="btn"
@@ -1110,6 +1126,21 @@ watch(
           Select a detail tab to load information for this object.
         </p>
         <template v-else>
+          <div
+            v-if="
+              props.activeObjectDetailTabId === 'metadata' && activeObjectIsInvalid
+            "
+            class="object-invalid-banner"
+            role="status"
+          >
+            <div class="object-invalid-banner-label">Invalid object</div>
+            <div class="object-invalid-banner-copy">
+              {{
+                activeObjectInvalidReason ||
+                "Oracle reports this object as invalid, but did not return a compiler message."
+              }}
+            </div>
+          </div>
           <p v-if="props.activeObjectDetailLoading" class="muted">
             Refreshing object detail...
           </p>
@@ -2084,6 +2115,31 @@ button:focus-visible {
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
+.ddl-header .muted {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.object-status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.14rem 0.48rem;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.object-status-pill.invalid {
+  color: color-mix(in srgb, var(--danger) 88%, #ffffff 12%);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
 .object-detail-tabs {
   display: flex;
   align-items: center;
@@ -2121,6 +2177,29 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+}
+
+.object-invalid-banner {
+  display: grid;
+  gap: 0.32rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface));
+}
+
+.object-invalid-banner-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--danger) 88%, #ffffff 12%);
+}
+
+.object-invalid-banner-copy {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  line-height: 1.45;
 }
 
 .object-loading-panel {

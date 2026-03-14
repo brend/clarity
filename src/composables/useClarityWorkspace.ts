@@ -320,6 +320,18 @@ function createQueryResultPane(
   };
 }
 
+function createDdlResultPane(tabId: string): WorkspaceQueryResultPane {
+  return {
+    id: `${tabId}:save-result`,
+    title: "Save Result",
+    queryResult: null,
+    errorMessage: "",
+    sourceSql: null,
+    sourceSessionId: null,
+    sourceRowLimit: null,
+  };
+}
+
 function createQueryTab(tabNumber: number, schema: string): WorkspaceQueryTab {
   const tabId = buildQueryTabId(tabNumber);
   const firstResultPane = createQueryResultPane(tabId, 1);
@@ -615,29 +627,39 @@ export function useClarityWorkspace() {
   const activeDdlObject = computed(() => activeDdlTab.value?.object ?? null);
   const isQueryTabActive = computed(() => activeQueryTab.value !== null);
   const activeQueryResultPanes = computed<WorkspaceQueryResultPane[]>(
-    () => activeQueryTab.value?.resultPanes ?? [],
+    () => {
+      if (activeQueryTab.value) {
+        return activeQueryTab.value.resultPanes;
+      }
+
+      if (activeDdlTab.value?.saveResultPane) {
+        return [activeDdlTab.value.saveResultPane];
+      }
+
+      return [];
+    },
   );
   const activeQueryResultPaneId = computed<string | null>(() => {
-    if (!activeQueryTab.value) {
-      return null;
+    if (activeQueryTab.value) {
+      return (
+        activeQueryTab.value.activeResultPaneId ||
+        activeQueryTab.value.resultPanes[0]?.id ||
+        null
+      );
     }
 
-    return (
-      activeQueryTab.value.activeResultPaneId ||
-      activeQueryTab.value.resultPanes[0]?.id ||
-      null
-    );
+    return activeDdlTab.value?.saveResultPane?.id ?? null;
   });
   const activeQueryResultPane = computed<WorkspaceQueryResultPane | null>(
     () => {
-      if (!activeQueryTab.value) {
-        return null;
+      if (activeQueryTab.value) {
+        const activePane = activeQueryTab.value.resultPanes.find(
+          (pane) => pane.id === activeQueryResultPaneId.value,
+        );
+        return activePane ?? activeQueryTab.value.resultPanes[0] ?? null;
       }
 
-      const activePane = activeQueryTab.value.resultPanes.find(
-        (pane) => pane.id === activeQueryResultPaneId.value,
-      );
-      return activePane ?? activeQueryTab.value.resultPanes[0] ?? null;
+      return activeDdlTab.value?.saveResultPane ?? null;
     },
   );
   const activeQueryText = computed({
@@ -882,6 +904,7 @@ export function useClarityWorkspace() {
       activeDetailTabId: resolvedDetailTabId,
       dataResult: null,
       metadataResult: null,
+      saveResultPane: null,
       loadingDdl,
       loadingData: false,
       loadingMetadata: false,
@@ -901,7 +924,40 @@ export function useClarityWorkspace() {
       schema: object.schema,
       objectType: object.objectType,
       objectName: object.objectName,
+      status: object.status ?? null,
+      invalidReason: object.invalidReason ?? null,
     };
+  }
+
+  function buildObjectIdentityKey(object: DbObjectEntry): string {
+    return `${object.schema}\u0000${object.objectType}\u0000${object.objectName}`;
+  }
+
+  function syncObjectReferences(nextObjects: DbObjectEntry[]): void {
+    const objectsByKey = new Map(
+      nextObjects.map((object) => [buildObjectIdentityKey(object), object]),
+    );
+
+    if (selectedObject.value) {
+      const refreshedSelectedObject = objectsByKey.get(
+        buildObjectIdentityKey(selectedObject.value),
+      );
+      if (refreshedSelectedObject) {
+        selectedObject.value = refreshedSelectedObject;
+      }
+    }
+
+    ddlTabs.value = ddlTabs.value.map((tab) => {
+      const refreshedObject = objectsByKey.get(buildObjectIdentityKey(tab.object));
+      if (!refreshedObject) {
+        return tab;
+      }
+
+      return {
+        ...tab,
+        object: refreshedObject,
+      };
+    });
   }
 
   function createScriptLineLocation(
@@ -1727,6 +1783,7 @@ export function useClarityWorkspace() {
       ]);
       objects.value = nextObjects;
       objectColumns.value = nextObjectColumns;
+      syncObjectReferences(nextObjects);
     } catch (error) {
       errorMessage.value = toErrorMessage(error);
     } finally {
@@ -1966,13 +2023,14 @@ export function useClarityWorkspace() {
       return;
     }
     const sessionId = session.value.sessionId;
+    const tabId = activeDdlTab.value.id;
 
     errorMessage.value = "";
     busy.savingDdl = true;
 
     try {
       const object = activeDdlTab.value.object;
-      const message = await invoke<string>("db_update_object_ddl", {
+      const result = await invoke<DbQueryResult>("db_update_object_ddl", {
         request: {
           sessionId,
           schema: object.schema,
@@ -1982,10 +2040,27 @@ export function useClarityWorkspace() {
         },
       });
 
+      const savedTab = ddlTabs.value.find((tab) => tab.id === tabId);
+      if (savedTab) {
+        const resultPane = savedTab.saveResultPane ?? createDdlResultPane(savedTab.id);
+        resultPane.queryResult = result;
+        resultPane.errorMessage = "";
+        savedTab.saveResultPane = resultPane;
+      }
+
       await syncTransactionState(sessionId);
-      statusMessage.value = `${object.objectName}: ${message}`;
+      await refreshObjects();
+      statusMessage.value = `${object.objectName}: ${result.message}`;
     } catch (error) {
-      errorMessage.value = toErrorMessage(error);
+      const message = toErrorMessage(error);
+      const savedTab = ddlTabs.value.find((tab) => tab.id === tabId);
+      if (savedTab) {
+        const resultPane = savedTab.saveResultPane ?? createDdlResultPane(savedTab.id);
+        resultPane.queryResult = null;
+        resultPane.errorMessage = message;
+        savedTab.saveResultPane = resultPane;
+      }
+      errorMessage.value = message;
     } finally {
       busy.savingDdl = false;
     }

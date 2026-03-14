@@ -96,6 +96,8 @@ export interface DbObjectEntry {
   schema: string;
   objectType: string;
   objectName: string;
+  status?: string | null;
+  invalidReason?: string | null;
 }
 
 export interface DbObjectColumnEntry {
@@ -165,6 +167,7 @@ export interface WorkspaceDdlTab {
   activeDetailTabId: ObjectDetailTabId;
   dataResult: DbQueryResult | null;
   metadataResult: DbQueryResult | null;
+  saveResultPane: WorkspaceQueryResultPane | null;
   loadingDdl: boolean;
   loadingData: boolean;
   loadingMetadata: boolean;

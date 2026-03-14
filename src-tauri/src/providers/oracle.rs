@@ -4,6 +4,7 @@ use crate::types::{
     OracleAuthMode, OracleConnectOptions,
 };
 use oracle::{Connection, Connector, Error as OracleError, InitParams, Privilege, SqlValue};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -87,9 +88,9 @@ fn format_oracle_user_label(username: &str, auth_mode: OracleAuthMode) -> String
 
 pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<DbObjectEntry>, String> {
     let sql = r#"
-        SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
+        SELECT OWNER, OBJECT_TYPE, OBJECT_NAME, STATUS
         FROM (
-            SELECT OWNER, OBJECT_TYPE, OBJECT_NAME
+            SELECT OWNER, OBJECT_TYPE, OBJECT_NAME, STATUS
             FROM ALL_OBJECTS
             WHERE OWNER = :1
               AND OBJECT_TYPE IN (
@@ -112,17 +113,133 @@ pub(crate) fn list_objects(session: &OracleSession) -> Result<Vec<DbObjectEntry>
         .query(sql, &[&session.target_schema, &MAX_EXPLORER_OBJECTS])
         .map_err(map_oracle_error)?;
 
+    let invalid_reasons = fetch_invalid_object_reasons(&session.connection, &session.target_schema)
+        .map_err(map_oracle_error)?;
     let mut objects = Vec::new();
     for row_result in rows {
         let row = row_result.map_err(map_oracle_error)?;
+        let object_type = row.get::<usize, String>(1).map_err(map_oracle_error)?;
+        let object_name = row.get::<usize, String>(2).map_err(map_oracle_error)?;
+        let status = row
+            .get::<usize, Option<String>>(3)
+            .map_err(map_oracle_error)?;
+        let invalid_reason = if status
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case("INVALID"))
+        {
+            Some(
+                invalid_reasons
+                    .get(&(object_type.clone(), object_name.clone()))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        "Oracle reports this object as invalid, but no compiler details were returned."
+                            .to_string()
+                    }),
+            )
+        } else {
+            None
+        };
         objects.push(DbObjectEntry {
             schema: row.get::<usize, String>(0).map_err(map_oracle_error)?,
-            object_type: row.get::<usize, String>(1).map_err(map_oracle_error)?,
-            object_name: row.get::<usize, String>(2).map_err(map_oracle_error)?,
+            object_type,
+            object_name,
+            status,
+            invalid_reason,
         });
     }
 
     Ok(objects)
+}
+
+fn fetch_invalid_object_reasons(
+    connection: &Connection,
+    schema: &str,
+) -> Result<HashMap<(String, String), String>, OracleError> {
+    let sql = r#"
+        SELECT TYPE, NAME, INVALID_REASON
+        FROM (
+            SELECT
+                TYPE,
+                NAME,
+                'Line ' || TO_CHAR(LINE) ||
+                    CASE
+                        WHEN POSITION > 0 THEN ', Col ' || TO_CHAR(POSITION)
+                        ELSE ''
+                    END ||
+                    ': ' ||
+                    REPLACE(REPLACE(TRIM(TEXT), CHR(13), ' '), CHR(10), ' ') AS INVALID_REASON,
+                ROW_NUMBER() OVER (
+                    PARTITION BY NAME, TYPE
+                    ORDER BY SEQUENCE, LINE, POSITION
+                ) AS RN
+            FROM ALL_ERRORS
+            WHERE OWNER = :1
+        )
+        WHERE RN = 1
+    "#;
+
+    let rows = connection.query(sql, &[&schema])?;
+    let mut reasons = HashMap::new();
+
+    for row_result in rows {
+        let row = row_result?;
+        let object_type = row.get::<usize, String>(0)?;
+        let object_name = row.get::<usize, String>(1)?;
+        let reason = row.get::<usize, String>(2)?;
+        reasons.insert((object_type, object_name), reason);
+    }
+
+    Ok(reasons)
+}
+
+fn fetch_object_compile_diagnostics(
+    connection: &Connection,
+    schema: &str,
+    object_type: &str,
+    object_name: &str,
+) -> Result<DbQueryResult, OracleError> {
+    let sql = r#"
+        SELECT ATTRIBUTE, LINE, POSITION, TEXT
+        FROM ALL_ERRORS
+        WHERE OWNER = :1
+          AND TYPE = :2
+          AND NAME = :3
+        ORDER BY SEQUENCE, LINE, POSITION
+    "#;
+
+    let rows = connection.query(sql, &[&schema, &object_type, &object_name])?;
+    let mut result_rows = Vec::new();
+
+    for row_result in rows {
+        let row = row_result?;
+        let attribute = row.get::<usize, Option<String>>(0)?.unwrap_or_default();
+        let raw_line = row.get::<usize, Option<i64>>(1)?.unwrap_or_default();
+        let raw_position = row.get::<usize, Option<i64>>(2)?.unwrap_or_default();
+        let text = row
+            .get::<usize, Option<String>>(3)?
+            .unwrap_or_default()
+            .trim_end_matches(&['\r', '\n'][..])
+            .to_string();
+
+        result_rows.push(vec![
+            attribute,
+            raw_line.to_string(),
+            raw_position.to_string(),
+            text,
+        ]);
+    }
+
+    Ok(DbQueryResult {
+        columns: vec![
+            "ATTRIBUTE".to_string(),
+            "LINE".to_string(),
+            "POSITION".to_string(),
+            "TEXT".to_string(),
+        ],
+        rows: result_rows,
+        rows_affected: None,
+        message: String::new(),
+    })
 }
 
 pub(crate) fn list_object_columns(
@@ -410,7 +527,7 @@ fn search_ddl_text(
 pub(crate) fn update_object_ddl(
     session: &mut OracleSession,
     request: &DbObjectDdlUpdateRequest,
-) -> Result<String, String> {
+) -> Result<DbQueryResult, String> {
     let mut ddl = request.ddl.trim().to_string();
     if ddl.is_empty() {
         return Err("DDL cannot be empty".to_string());
@@ -419,20 +536,79 @@ pub(crate) fn update_object_ddl(
     ddl = normalize_ddl_for_execute(ddl);
     let schema = normalize_schema_name(&request.schema)?;
     ensure_schema_is_in_scope(&schema, session)?;
+    let object_type = request.object_type.trim().to_ascii_uppercase();
+    let object_name = request.object_name.trim().to_ascii_uppercase();
 
-    session
-        .connection
-        .execute(ddl.as_str(), &[])
-        .map_err(map_oracle_error)?;
+    let mut compile_error_reported_by_oracle = false;
+    if let Err(error) = session.connection.execute(ddl.as_str(), &[]) {
+        if is_compile_diagnostics_error(&error) {
+            compile_error_reported_by_oracle = true;
+        } else {
+            return Err(map_oracle_error(error));
+        }
+    }
     session.connection.commit().map_err(map_oracle_error)?;
     session.transaction_active = false;
 
-    Ok(format!(
-        "{} {}.{} updated",
-        request.object_type.to_ascii_uppercase(),
-        schema,
-        request.object_name.to_ascii_uppercase()
-    ))
+    let diagnostics = fetch_object_compile_diagnostics(
+        &session.connection,
+        schema.as_str(),
+        object_type.as_str(),
+        object_name.as_str(),
+    )
+    .map_err(map_oracle_error)?;
+
+    if diagnostics.rows.is_empty() {
+        let message = if compile_error_reported_by_oracle {
+            format!(
+                "{} {}.{} updated, but Oracle did not return compilation details.",
+                object_type, schema, object_name
+            )
+        } else {
+            format!(
+                "{} {}.{} updated successfully.",
+                object_type, schema, object_name
+            )
+        };
+
+        return Ok(DbQueryResult {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            rows_affected: None,
+            message,
+        });
+    }
+
+    let error_count = diagnostics
+        .rows
+        .iter()
+        .filter(|row| {
+            row.first()
+                .is_some_and(|value| value.eq_ignore_ascii_case("ERROR"))
+        })
+        .count();
+    let warning_count = diagnostics.rows.len().saturating_sub(error_count);
+    let message = match (error_count, warning_count) {
+        (0, warnings) => format!(
+            "{} {}.{} updated with {} compilation warning(s).",
+            object_type, schema, object_name, warnings
+        ),
+        (errors, 0) => format!(
+            "{} {}.{} updated with {} compilation error(s).",
+            object_type, schema, object_name, errors
+        ),
+        (errors, warnings) => format!(
+            "{} {}.{} updated with {} compilation error(s) and {} warning(s).",
+            object_type, schema, object_name, errors, warnings
+        ),
+    };
+
+    Ok(DbQueryResult {
+        columns: diagnostics.columns,
+        rows: diagnostics.rows,
+        rows_affected: None,
+        message,
+    })
 }
 
 pub(crate) fn run_query(
@@ -1002,6 +1178,10 @@ fn map_connect_error(error: OracleError, host: &str, port: u16, service_name: &s
     }
 
     format!("{} (target: //{}:{}/{})", base, host, port, service_name)
+}
+
+fn is_compile_diagnostics_error(error: &OracleError) -> bool {
+    error.to_string().contains("ORA-24344")
 }
 
 fn normalize_metadata_type(object_type: &str) -> String {

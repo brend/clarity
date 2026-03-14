@@ -121,6 +121,10 @@ function normalizeObjectType(value: string): string {
   return value.trim().toUpperCase();
 }
 
+function isInvalidObject(entry: DbObjectEntry): boolean {
+  return entry.status?.trim().toUpperCase() === "INVALID";
+}
+
 function closeExplorerContextMenu(): void {
   explorerContextMenu.value = null;
 }
@@ -610,7 +614,17 @@ onBeforeUnmount(() => {
                     class="tree-leaf-icon"
                     aria-hidden="true"
                   />
-                  <span>{{ entry.objectName }}</span>
+                  <span class="tree-node-label">{{ entry.objectName }}</span>
+                  <span
+                    v-if="isInvalidObject(entry)"
+                    class="tree-status-pill invalid"
+                    :title="
+                      entry.invalidReason ||
+                      'Oracle reports this object as invalid.'
+                    "
+                  >
+                    Invalid
+                  </span>
                 </button>
               </li>
             </ul>
@@ -677,6 +691,30 @@ onBeforeUnmount(() => {
     );
   box-shadow: var(--card-shadow);
   overflow: hidden;
+}
+
+.tree-node-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-status-pill {
+  margin-left: auto;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.tree-status-pill.invalid {
+  color: color-mix(in srgb, var(--danger) 88%, #ffffff 12%);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
 }
 
 .sidebar-card.spotlight {
@@ -1177,12 +1215,6 @@ button:focus-visible {
   height: 0.62rem;
   color: var(--text-subtle);
   flex: 0 0 auto;
-}
-
-.tree-node span:last-child {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 .muted {

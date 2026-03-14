@@ -278,7 +278,9 @@ const hasDeterminateExportProgress = computed<boolean>(
 const queryResultsEmptyStateMessage = computed<string>(() =>
   isQueryTabActive.value
     ? "Run a query to see results."
-    : "Select a query sheet to see results.",
+    : activeDdlTab.value
+      ? "Save DDL to see compilation results."
+      : "Select a query sheet to see results.",
 );
 const exportProgressPercent = computed<number>(() => {
   if (exportProgressTotal.value <= 0) {

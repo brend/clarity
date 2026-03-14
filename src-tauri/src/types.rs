@@ -255,6 +255,8 @@ pub(crate) struct DbObjectEntry {
     pub(crate) schema: String,
     pub(crate) object_type: String,
     pub(crate) object_name: String,
+    pub(crate) status: Option<String>,
+    pub(crate) invalid_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

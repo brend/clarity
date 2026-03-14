@@ -74,7 +74,7 @@ impl ProviderRegistry {
     pub(crate) fn update_object_ddl(
         session: &mut AppSession,
         request: &DbObjectDdlUpdateRequest,
-    ) -> Result<String, String> {
+    ) -> Result<DbQueryResult, String> {
         match (session.provider, &mut session.session) {
             (DatabaseProvider::Oracle, ProviderSession::Oracle(oracle_session)) => {
                 oracle::update_object_ddl(oracle_session, request)

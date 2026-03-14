@@ -92,7 +92,7 @@ pub(crate) fn db_get_object_ddl(
 pub(crate) fn db_update_object_ddl(
     request: DbObjectDdlUpdateRequest,
     state: tauri::State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<DbQueryResult, String> {
     with_session_mut(&state, request.session_id, |session| {
         ProviderRegistry::update_object_ddl(session, &request)
     })
