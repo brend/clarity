@@ -5,9 +5,11 @@ import {
   EditorView,
   keymap,
   placeholder as cmPlaceholder,
+  ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import { openSearchPanel, search } from "@codemirror/search";
 import { basicSetup } from "codemirror";
 import { sql } from "@codemirror/lang-sql";
 import { tags } from "@lezer/highlight";
@@ -53,6 +55,7 @@ const placeholderCompartment = new Compartment();
 const languageCompartment = new Compartment();
 const themeCompartment = new Compartment();
 const syntaxCompartment = new Compartment();
+const searchCompartment = new Compartment();
 
 function buildEditorTheme(theme: ThemeSetting): Extension {
   return EditorView.theme(
@@ -212,6 +215,34 @@ function buildShortcutExtensions(): Extension {
   ]);
 }
 
+function syncSearchPanelInputs(view: EditorView): void {
+  const inputs = view.dom.querySelectorAll<HTMLInputElement>(
+    '.cm-panel.cm-search input[name="search"], .cm-panel.cm-search input[name="replace"]',
+  );
+
+  for (const input of inputs) {
+    input.spellcheck = false;
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("autocorrect", "off");
+    input.setAttribute("autocapitalize", "off");
+    input.setAttribute("data-gramm", "false");
+  }
+}
+
+function buildSearchInputSanitizer(): Extension {
+  return ViewPlugin.fromClass(
+    class {
+      constructor(view: EditorView) {
+        syncSearchPanelInputs(view);
+      }
+
+      update(update: ViewUpdate): void {
+        syncSearchPanelInputs(update.view);
+      }
+    },
+  );
+}
+
 function updateCompartment(
   compartment: Compartment,
   extension: Extension,
@@ -242,6 +273,14 @@ function revealLine(lineNumber: number): void {
   editorView.focus();
 }
 
+function openSearch(): void {
+  if (!editorView) {
+    return;
+  }
+
+  openSearchPanel(editorView);
+}
+
 onMounted(() => {
   if (!hostEl.value) {
     return;
@@ -254,6 +293,8 @@ onMounted(() => {
         basicSetup,
         themeCompartment.of(buildEditorTheme(props.theme)),
         syntaxCompartment.of(buildHighlightTheme()),
+        searchCompartment.of(search({ top: true })),
+        buildSearchInputSanitizer(),
         languageCompartment.of(
           buildLanguageExtension(
             props.completionSchema,
@@ -359,7 +400,7 @@ function getSelectedText(): string {
   );
 }
 
-defineExpose({ getSelectedText });
+defineExpose({ getSelectedText, openSearch });
 
 onBeforeUnmount(() => {
   editorView?.destroy();
@@ -381,5 +422,73 @@ onBeforeUnmount(() => {
 .sql-code-editor :deep(.cm-editor.cm-focused) {
   outline: 1px solid var(--editor-focus-outline);
   outline-offset: -1px;
+}
+
+.sql-code-editor :deep(.cm-panels) {
+  background: color-mix(in srgb, var(--editor-surface) 94%, transparent);
+  color: var(--editor-text);
+  border-color: var(--editor-gutter-border);
+}
+
+.sql-code-editor :deep(.cm-panels-top) {
+  border-bottom: 1px solid var(--editor-gutter-border);
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search) {
+  gap: 0.45rem;
+  padding: 0.55rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.74rem;
+  align-items: center;
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search label) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-secondary);
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search input) {
+  border: 1px solid var(--control-border);
+  border-radius: 0.5rem;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  padding: 0.38rem 0.55rem;
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search input[type="checkbox"]) {
+  width: 0.9rem;
+  height: 0.9rem;
+  padding: 0;
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search button) {
+  border: 0;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--control-bg) 92%, transparent);
+  color: var(--text-primary);
+  padding: 0.3rem 0.58rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search button:hover:not(:disabled)) {
+  background: var(--control-hover);
+}
+
+.sql-code-editor :deep(.cm-panel.cm-search button[name="close"]) {
+  min-width: 1.9rem;
+  padding-inline: 0;
+}
+
+.sql-code-editor :deep(.cm-searchMatch) {
+  background: color-mix(in srgb, var(--accent-soft) 82%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.sql-code-editor :deep(.cm-searchMatch.cm-searchMatch-selected) {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 </style>

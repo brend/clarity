@@ -101,7 +101,10 @@ const props = defineProps<{
 }>();
 
 const SqlCodeEditor = defineAsyncComponent(() => import("./SqlCodeEditor.vue"));
-const queryEditorRef = ref<{ getSelectedText?: () => string } | null>(null);
+const queryEditorRef = ref<{
+  getSelectedText?: () => string;
+  openSearch?: () => void;
+} | null>(null);
 const dataDraftRows = ref<string[][]>([]);
 const dataDraftSourceIndexes = ref<Array<number | null>>([]);
 const committingDataChanges = ref(false);
@@ -728,6 +731,10 @@ function executeWithSelection(): void {
   props.onRunQuery(selected);
 }
 
+function openQuerySearch(): void {
+  queryEditorRef.value?.openSearch?.();
+}
+
 function handleSheetKeydown(event: KeyboardEvent): void {
   if (event.defaultPrevented || event.isComposing || event.repeat) {
     return;
@@ -870,6 +877,15 @@ watch(
       >
         <AppIcon name="play" class="btn-icon" aria-hidden="true" />
         {{ props.busy.runningQuery ? "Running..." : "Execute" }}
+      </button>
+      <button
+        class="btn"
+        title="Find in query (Cmd/Ctrl+F)"
+        :disabled="!props.isQueryTabActive || !props.activeQueryTab"
+        @click="openQuerySearch"
+      >
+        <AppIcon name="search" class="btn-icon" aria-hidden="true" />
+        Find
       </button>
       <button
         class="btn"
