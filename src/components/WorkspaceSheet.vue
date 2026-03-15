@@ -716,6 +716,18 @@ function isModifierEnter(event: KeyboardEvent): boolean {
   return event.metaKey || event.ctrlKey;
 }
 
+function isModifierF(event: KeyboardEvent): boolean {
+  if (event.key.toLowerCase() !== "f") {
+    return false;
+  }
+
+  if (event.altKey || event.shiftKey) {
+    return false;
+  }
+
+  return event.metaKey || event.ctrlKey;
+}
+
 function isPlainEscape(event: KeyboardEvent): boolean {
   return (
     event.key === "Escape" &&
@@ -737,6 +749,12 @@ function openQuerySearch(): void {
 
 function handleSheetKeydown(event: KeyboardEvent): void {
   if (event.defaultPrevented || event.isComposing || event.repeat) {
+    return;
+  }
+
+  if (props.isQueryTabActive && isModifierF(event)) {
+    event.preventDefault();
+    openQuerySearch();
     return;
   }
 

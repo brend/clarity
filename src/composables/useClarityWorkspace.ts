@@ -1007,6 +1007,21 @@ export function useClarityWorkspace() {
     );
   }
 
+  function recordScriptLineNavigation(
+    targetLocation: ScriptLineLocation,
+    currentLocation: ScriptLineLocation | null = getActiveScriptLineLocation(),
+  ): void {
+    if (
+      !currentLocation ||
+      isSameScriptLineLocation(currentLocation, targetLocation)
+    ) {
+      return;
+    }
+
+    pushScriptLineHistoryEntry(scriptLineBackHistory, currentLocation);
+    scriptLineForwardHistory.value = [];
+  }
+
   function getActiveScriptLineLocation(): ScriptLineLocation | null {
     if (!activeDdlTab.value) {
       const current = currentScriptLineLocation.value;
@@ -1201,7 +1216,12 @@ export function useClarityWorkspace() {
     selectedObject.value = object;
     const tabId = buildDdlTabId(object);
     const existingTab = ddlTabs.value.find((tab) => tab.id === tabId);
+    const targetLocation = createScriptLineLocation(
+      existingTab?.object ?? object,
+      existingTab?.focusLine ?? null,
+    );
     if (existingTab) {
+      recordScriptLineNavigation(targetLocation);
       existingTab.object = object;
       if (
         !isObjectDetailTabSupported(
@@ -1217,6 +1237,7 @@ export function useClarityWorkspace() {
       return;
     }
 
+    recordScriptLineNavigation(targetLocation);
     const detailTabId = getDefaultObjectDetailTabId(object);
     const nextTab = createWorkspaceDdlTab(object, {
       activeDetailTabId: detailTabId,
@@ -2295,13 +2316,7 @@ export function useClarityWorkspace() {
       return;
     }
 
-    if (
-      currentLocation &&
-      !isSameScriptLineLocation(currentLocation, targetLocation)
-    ) {
-      pushScriptLineHistoryEntry(scriptLineBackHistory, currentLocation);
-    }
-    scriptLineForwardHistory.value = [];
+    recordScriptLineNavigation(targetLocation, currentLocation);
   }
 
   async function navigateScriptLineBack(): Promise<void> {
