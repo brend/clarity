@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::{Emitter, Runtime};
 
 const MENU_ID_TOOLS_SETTINGS: &str = "tools.settings";
+const MENU_ID_HELP_CHECK_FOR_UPDATES: &str = "help.check_for_updates";
 const MENU_ID_TOOLS_FIND_IN_SCHEMA: &str = "tools.find_in_schema";
 const MENU_ID_TOOLS_EXPORT_DATABASE: &str = "tools.export_database";
 const MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET: &str = "tools.save_active_query_sheet";
@@ -19,6 +20,7 @@ const MENU_ID_TOOLS_CREATE_OBJECT_SEQUENCE: &str = "tools.create_object.sequence
 const MENU_ID_TOOLS_CREATE_OBJECT_TYPE: &str = "tools.create_object.type";
 const MENU_ID_TOOLS_CREATE_OBJECT_SYNONYM: &str = "tools.create_object.synonym";
 const EVENT_OPEN_SETTINGS_DIALOG: &str = "clarity://open-settings-dialog";
+const EVENT_CHECK_FOR_UPDATES: &str = "clarity://check-for-updates";
 const EVENT_OPEN_SCHEMA_SEARCH: &str = "clarity://open-schema-search";
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG: &str = "clarity://open-export-database-dialog";
 const EVENT_OPEN_CREATE_OBJECT_TEMPLATE: &str = "clarity://open-create-object-template";
@@ -157,6 +159,13 @@ pub(crate) fn build<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<taur
         true,
         None::<&str>,
     )?;
+    let check_for_updates = tauri::menu::MenuItem::with_id(
+        app,
+        MENU_ID_HELP_CHECK_FOR_UPDATES,
+        "Check for Updates...",
+        true,
+        None::<&str>,
+    )?;
     let find_in_schema = tauri::menu::MenuItem::with_id(
         app,
         MENU_ID_TOOLS_FIND_IN_SCHEMA,
@@ -194,6 +203,10 @@ pub(crate) fn build<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<taur
         .iter()
         .position(|item| item.id() == tauri::menu::HELP_SUBMENU_ID)
         .unwrap_or(existing_items.len());
+    let help_menu = existing_items
+        .iter()
+        .find(|item| item.id() == tauri::menu::HELP_SUBMENU_ID)
+        .and_then(|item| item.as_submenu());
     #[cfg(target_os = "macos")]
     let app_menu = existing_items.iter().find_map(|item| {
         let submenu = item.as_submenu()?;
@@ -217,6 +230,12 @@ pub(crate) fn build<R: Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<taur
 
     #[cfg(not(target_os = "macos"))]
     menu.insert(&settings, help_position + 2)?;
+
+    if let Some(help_menu) = help_menu {
+        help_menu.insert(&check_for_updates, 0)?;
+    } else {
+        menu.insert(&check_for_updates, help_position + 3)?;
+    }
 
     Ok(menu)
 }
@@ -257,6 +276,8 @@ pub(crate) fn handle_event<R: Runtime>(app: &tauri::AppHandle<R>, event_id: &str
         }
     } else if event_id == MENU_ID_TOOLS_SETTINGS {
         emit_unit_event(app, EVENT_OPEN_SETTINGS_DIALOG, "open settings");
+    } else if event_id == MENU_ID_HELP_CHECK_FOR_UPDATES {
+        emit_unit_event(app, EVENT_CHECK_FOR_UPDATES, "check for updates");
     } else if event_id == MENU_ID_TOOLS_SAVE_ACTIVE_QUERY_SHEET {
         emit_unit_event(
             app,

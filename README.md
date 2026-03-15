@@ -79,6 +79,18 @@ npm run build
 cd src-tauri && cargo check
 ```
 
+## App Updates
+
+Clarity uses Tauri's updater plugin against GitHub Releases. The app checks:
+
+- `https://github.com/brend/clarity/releases/latest/download/latest.json`
+
+Users can trigger a manual update check from `Help -> Check for Updates...` or from `Settings -> Updates`.
+
+- The updater only sees the latest published GitHub Release.
+- Releases left in draft mode are not visible to installed apps.
+- After an update downloads and installs, Clarity relaunches itself to apply it.
+
 ## CI/CD (GitHub Actions)
 
 Clarity now includes two workflows:
@@ -115,11 +127,16 @@ For `main`, enable:
 From a clean `main` branch:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-That tag triggers the release workflow and creates a draft release with attached binaries/installers.
+Release checklist:
+
+- Bump the app version consistently in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+- Push the matching `v...` Git tag.
+- GitHub Actions builds the installers and updater artifacts, including `latest.json`.
+- The workflow currently creates a draft release. Publish that draft in GitHub before users can receive the update through Clarity.
 
 ## Next Step
 

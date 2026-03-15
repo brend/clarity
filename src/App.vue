@@ -6,6 +6,13 @@ import ExplorerSidebar from "./components/ExplorerSidebar.vue";
 import QueryResultsPane from "./components/QueryResultsPane.vue";
 import WorkspaceSheet from "./components/WorkspaceSheet.vue";
 import {
+  checkForUpdates,
+  downloadAndInstallUpdate,
+  getCurrentAppVersion,
+  relaunchToApplyUpdate,
+  type UpdateCheckResult,
+} from "./services/updater";
+import {
   CREATE_OBJECT_TYPE_OPTIONS,
   createObjectDefaultName,
   normalizeCreateObjectType,
@@ -25,6 +32,7 @@ import type { ThemeSetting } from "./types/settings";
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG =
   "clarity://open-export-database-dialog";
 const EVENT_OPEN_SETTINGS_DIALOG = "clarity://open-settings-dialog";
+const EVENT_CHECK_FOR_UPDATES = "clarity://check-for-updates";
 const EVENT_OPEN_SCHEMA_SEARCH = "clarity://open-schema-search";
 const EVENT_OPEN_CREATE_OBJECT_TEMPLATE = "clarity://open-create-object-template";
 const EVENT_SAVE_ACTIVE_QUERY_SHEET = "clarity://save-active-query-sheet";
@@ -221,6 +229,7 @@ const highlightedSidebarSection = ref<"connections" | "explorer">(
 const exportSummaryMessage = ref("");
 const exportMenuUnlisten = ref<UnlistenFn | null>(null);
 const settingsMenuUnlisten = ref<UnlistenFn | null>(null);
+const checkForUpdatesMenuUnlisten = ref<UnlistenFn | null>(null);
 const searchMenuUnlisten = ref<UnlistenFn | null>(null);
 const createObjectMenuUnlisten = ref<UnlistenFn | null>(null);
 const saveActiveSheetMenuUnlisten = ref<UnlistenFn | null>(null);
@@ -259,6 +268,14 @@ const settingsDialogAiEndpoint = ref(settings.value.aiEndpoint);
 const settingsDialogAiApiKey = ref("");
 const settingsDialogAiApiKeyDirty = ref(false);
 const settingsDialogError = ref("");
+const settingsDialogAppVersion = ref("");
+const updateCheckResult = ref<UpdateCheckResult | null>(null);
+const updateStatusTone = ref<"neutral" | "success" | "error">("neutral");
+const updateStatusMessage = ref(
+  "Check the latest published GitHub Release when you want to update this app.",
+);
+const updateCheckInProgress = ref(false);
+const updateInstallInProgress = ref(false);
 const hasAiApiKey = ref(false);
 const aiSuggestion = ref<AiQuerySuggestionResponse | null>(null);
 const aiSuggestionError = ref("");
@@ -360,6 +377,9 @@ const canUseAiSuggestions = computed<boolean>(
     isConnected.value &&
     hasAiApiKey.value,
 );
+const availableUpdate = computed(() =>
+  updateCheckResult.value?.kind === "available" ? updateCheckResult.value : null,
+);
 
 interface AiApiKeyPresence {
   configured: boolean;
@@ -375,6 +395,10 @@ interface SchemaExportProgressPayload {
 
 interface CreateObjectTemplatePayload {
   objectType: string;
+}
+
+interface OpenSettingsDialogOptions {
+  checkForUpdates?: boolean;
 }
 
 function extractReferencedTables(sql: string): Set<string> {
@@ -540,6 +564,42 @@ function clearAiSuggestionState(clearError = true): void {
   }
 }
 
+function toDisplayMessage(error: unknown, fallback: string): string {
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function setUpdateStatus(
+  message: string,
+  tone: "neutral" | "success" | "error" = "neutral",
+): void {
+  updateStatusMessage.value = message;
+  updateStatusTone.value = tone;
+}
+
+function formatUpdateDate(value: string | null): string {
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
 function cancelAiSuggestionDebounce(): void {
   if (!aiSuggestionDebounceHandle) {
     return;
@@ -555,6 +615,69 @@ async function refreshAiKeyPresence(): Promise<void> {
     hasAiApiKey.value = result.configured;
   } catch {
     hasAiApiKey.value = false;
+  }
+}
+
+async function refreshCurrentAppVersion(): Promise<void> {
+  try {
+    settingsDialogAppVersion.value = await getCurrentAppVersion();
+  } catch {
+    settingsDialogAppVersion.value = "Unavailable";
+  }
+}
+
+async function runUpdateCheck(): Promise<void> {
+  updateCheckInProgress.value = true;
+  updateCheckResult.value = null;
+  setUpdateStatus("Checking GitHub Releases for updates...");
+
+  try {
+    const result = await checkForUpdates();
+    updateCheckResult.value = result;
+
+    if (result.kind === "available") {
+      setUpdateStatus(
+        `Clarity ${result.version} is available. Review the release notes below to install it.`,
+        "success",
+      );
+      return;
+    }
+
+    if (result.kind === "up-to-date") {
+      setUpdateStatus(
+        `Clarity ${result.currentVersion} is already up to date.`,
+        "success",
+      );
+      return;
+    }
+
+    setUpdateStatus(result.message, "error");
+  } finally {
+    updateCheckInProgress.value = false;
+  }
+}
+
+async function installUpdateAndRelaunch(): Promise<void> {
+  if (!availableUpdate.value) {
+    return;
+  }
+
+  updateInstallInProgress.value = true;
+  setUpdateStatus(
+    `Downloading and installing Clarity ${availableUpdate.value.version}...`,
+  );
+
+  try {
+    await downloadAndInstallUpdate();
+    setUpdateStatus("Update installed. Relaunching Clarity...", "success");
+    await relaunchToApplyUpdate();
+  } catch (error) {
+    setUpdateStatus(
+      toDisplayMessage(error, "Unable to install the update."),
+      "error",
+    );
+  } finally {
+    updateInstallInProgress.value = false;
   }
 }
 
@@ -747,7 +870,9 @@ function submitCreateObjectDialog(): void {
   closeCreateObjectDialog();
 }
 
-async function openSettingsDialog(): Promise<void> {
+async function openSettingsDialog(
+  options: OpenSettingsDialogOptions = {},
+): Promise<void> {
   settingsDialogTheme.value = theme.value;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
   settingsDialogAiSuggestionsEnabled.value =
@@ -757,8 +882,11 @@ async function openSettingsDialog(): Promise<void> {
   settingsDialogAiApiKey.value = "";
   settingsDialogAiApiKeyDirty.value = false;
   settingsDialogError.value = "";
-  await refreshAiKeyPresence();
+  await Promise.all([refreshAiKeyPresence(), refreshCurrentAppVersion()]);
   showSettingsDialog.value = true;
+  if (options.checkForUpdates) {
+    await runUpdateCheck();
+  }
 }
 
 function closeSettingsDialog(): void {
@@ -872,9 +1000,14 @@ onMounted(() => {
     exportMenuUnlisten.value = unlisten;
   });
   void listen(EVENT_OPEN_SETTINGS_DIALOG, () => {
-    openSettingsDialog();
+    void openSettingsDialog();
   }).then((unlisten) => {
     settingsMenuUnlisten.value = unlisten;
+  });
+  void listen(EVENT_CHECK_FOR_UPDATES, () => {
+    void openSettingsDialog({ checkForUpdates: true });
+  }).then((unlisten) => {
+    checkForUpdatesMenuUnlisten.value = unlisten;
   });
   void listen(EVENT_OPEN_SCHEMA_SEARCH, () => {
     openSearchTab(true);
@@ -936,6 +1069,10 @@ onBeforeUnmount(() => {
   if (settingsMenuUnlisten.value) {
     settingsMenuUnlisten.value();
     settingsMenuUnlisten.value = null;
+  }
+  if (checkForUpdatesMenuUnlisten.value) {
+    checkForUpdatesMenuUnlisten.value();
+    checkForUpdatesMenuUnlisten.value = null;
   }
   if (searchMenuUnlisten.value) {
     searchMenuUnlisten.value();
@@ -1278,6 +1415,66 @@ onBeforeUnmount(() => {
               No key configured. Enter your API key above.
             </template>
           </p>
+        </fieldset>
+        <fieldset class="settings-group">
+          <legend>Updates</legend>
+          <div class="settings-update-row">
+            <div class="settings-update-version">
+              <span class="settings-update-label">Current version</span>
+              <code>{{ settingsDialogAppVersion || "Loading..." }}</code>
+            </div>
+            <button
+              class="btn"
+              type="button"
+              :disabled="updateCheckInProgress || updateInstallInProgress"
+              @click="runUpdateCheck"
+            >
+              {{ updateCheckInProgress ? "Checking..." : "Check for Updates" }}
+            </button>
+          </div>
+          <p class="muted settings-hint">
+            Checks the latest published GitHub Release for Clarity. Draft
+            releases do not appear to users until they are published.
+          </p>
+          <p
+            class="settings-update-status"
+            :class="`tone-${updateStatusTone}`"
+          >
+            {{ updateStatusMessage }}
+          </p>
+          <div v-if="availableUpdate" class="settings-update-card">
+            <div class="settings-update-card-header">
+              <div>
+                <div class="settings-update-card-title">
+                  Clarity {{ availableUpdate.version }}
+                </div>
+                <div
+                  v-if="availableUpdate.date"
+                  class="settings-update-card-meta"
+                >
+                  Published {{ formatUpdateDate(availableUpdate.date) }}
+                </div>
+              </div>
+              <button
+                class="btn primary"
+                type="button"
+                :disabled="updateCheckInProgress || updateInstallInProgress"
+                @click="installUpdateAndRelaunch"
+              >
+                {{
+                  updateInstallInProgress
+                    ? "Installing..."
+                    : "Download and Install"
+                }}
+              </button>
+            </div>
+            <p
+              v-if="availableUpdate.body"
+              class="muted settings-release-notes"
+            >
+              {{ availableUpdate.body }}
+            </p>
+          </div>
         </fieldset>
       </div>
 
@@ -1754,6 +1951,57 @@ body {
 .settings-field {
   display: grid;
   gap: 0.32rem;
+}
+
+.settings-update-row,
+.settings-update-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.settings-update-version,
+.settings-update-card {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.settings-update-label,
+.settings-update-card-meta {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.settings-update-card {
+  padding: 0.7rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+}
+
+.settings-update-card-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.settings-update-status {
+  margin: 0;
+  font-size: 0.76rem;
+}
+
+.settings-update-status.tone-success {
+  color: var(--success);
+}
+
+.settings-update-status.tone-error {
+  color: var(--danger);
+}
+
+.settings-release-notes {
+  white-space: pre-wrap;
 }
 
 .settings-hint code {
