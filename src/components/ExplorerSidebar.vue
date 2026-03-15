@@ -125,6 +125,16 @@ function isInvalidObject(entry: DbObjectEntry): boolean {
   return entry.status?.trim().toUpperCase() === "INVALID";
 }
 
+function isPackageBodyEntry(entry: DbObjectEntry): boolean {
+  return normalizeObjectType(entry.objectType) === "PACKAGE BODY";
+}
+
+function getObjectEntryLabel(entry: DbObjectEntry): string {
+  return isPackageBodyEntry(entry)
+    ? `${entry.objectName} (Body)`
+    : entry.objectName;
+}
+
 function closeExplorerContextMenu(): void {
   explorerContextMenu.value = null;
 }
@@ -614,7 +624,7 @@ onBeforeUnmount(() => {
                     class="tree-leaf-icon"
                     aria-hidden="true"
                   />
-                  <span class="tree-node-label">{{ entry.objectName }}</span>
+                  <span class="tree-node-label">{{ getObjectEntryLabel(entry) }}</span>
                   <span
                     v-if="isInvalidObject(entry)"
                     class="tree-status-pill invalid"

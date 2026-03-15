@@ -108,6 +108,11 @@ function clampQueryRowLimit(value: number): number {
   return Math.min(Math.max(Math.trunc(value), 1), MAX_QUERY_ROW_LIMIT);
 }
 
+function getExplorerObjectType(objectType: string): string {
+  const normalized = objectType.trim().toUpperCase();
+  return normalized === "PACKAGE BODY" ? "PACKAGE" : normalized;
+}
+
 function toErrorMessage(error: unknown): string {
   if (typeof error === "string") {
     return error;
@@ -761,10 +766,11 @@ export function useClarityWorkspace() {
     const byType = new Map<string, DbObjectEntry[]>();
 
     for (const entry of objects.value) {
-      let entries = byType.get(entry.objectType);
+      const explorerObjectType = getExplorerObjectType(entry.objectType);
+      let entries = byType.get(explorerObjectType);
       if (!entries) {
         entries = [];
-        byType.set(entry.objectType, entries);
+        byType.set(explorerObjectType, entries);
       }
       entries.push(entry);
     }
@@ -773,9 +779,14 @@ export function useClarityWorkspace() {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([objectType, entries]) => ({
         objectType,
-        entries: [...entries].sort((left, right) =>
-          left.objectName.localeCompare(right.objectName),
-        ),
+        entries: [...entries].sort((left, right) => {
+          const byName = left.objectName.localeCompare(right.objectName);
+          if (byName !== 0) {
+            return byName;
+          }
+
+          return left.objectType.localeCompare(right.objectType);
+        }),
       }));
   });
 
