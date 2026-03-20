@@ -62,7 +62,7 @@ const emit = defineEmits<{
   gap: 0.75rem;
   align-items: center;
   padding: 0.4rem 0.55rem 0.55rem;
-  border-radius: 20px 20px 12px 12px;
+  border-radius: 4px;
   background:
     linear-gradient(
       180deg,
@@ -87,7 +87,7 @@ const emit = defineEmits<{
   align-items: center;
   min-height: 2rem;
   padding: 0 0.8rem;
-  border-radius: 14px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
   font-size: 0.74rem;
   font-weight: 700;
@@ -99,7 +99,7 @@ const emit = defineEmits<{
   align-items: center;
   min-height: 2rem;
   padding: 0 0.9rem;
-  border-radius: 14px 14px 6px 6px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--bg-selected) 40%, var(--bg-surface));
   border: 0;
   box-shadow: inset 0 -2px 0 var(--accent);
@@ -150,7 +150,7 @@ const emit = defineEmits<{
 
 .header-action {
   border: 0;
-  border-radius: 12px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
   padding: 0.58rem 0.82rem;

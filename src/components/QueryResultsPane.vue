@@ -848,10 +848,6 @@ onBeforeUnmount(() => {
           {{ activePane.errorMessage }}
         </p>
 
-        <p v-if="activePane.queryResult.message" class="muted results-message">
-          {{ activePane.queryResult.message }}
-        </p>
-
         <p v-if="activePane.queryResult.rowsAffected !== null" class="muted">
           Rows affected: {{ activePane.queryResult.rowsAffected }}
         </p>
@@ -957,15 +953,18 @@ onBeforeUnmount(() => {
         </div>
       </template>
     </div>
+    <div v-if="activePane?.queryResult?.message" class="results-footer">
+      <span class="muted">{{ activePane.queryResult.message }}</span>
+    </div>
   </section>
 </template>
 
 <style scoped>
 .results-pane {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
-  border-radius: 20px;
+  border-radius: 4px;
   background:
     linear-gradient(
       180deg,
@@ -979,9 +978,9 @@ onBeforeUnmount(() => {
 .results-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 3.1rem;
-  padding: 0.75rem 0.85rem;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  padding: 0.5rem 0.75rem;
   background:
     linear-gradient(
       180deg,
@@ -991,7 +990,7 @@ onBeforeUnmount(() => {
 }
 
 .results-title {
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -1005,23 +1004,24 @@ onBeforeUnmount(() => {
 }
 
 .results-tab {
-  min-height: 1.8rem;
+  min-height: 1.5rem;
   border: 0;
-  border-radius: 8px 8px 4px 4px;
+  border-radius: 0;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.71rem;
+  color: var(--text-subtle);
+  font-size: 0.68rem;
   font-weight: 600;
-  padding: 0 0.62rem;
+  padding: 0 0.5rem;
   cursor: pointer;
+  transition: color 0.12s ease;
 }
 
 .results-tab:hover {
-  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .results-tab.active {
-  background: color-mix(in srgb, var(--accent-soft) 72%, var(--tab-active-bg));
+  background: transparent;
   color: var(--text-primary);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
@@ -1038,7 +1038,7 @@ onBeforeUnmount(() => {
 .results-content {
   min-height: 0;
   overflow: auto;
-  padding: 0.8rem;
+  padding: 0.5rem;
   margin: 0;
   font-family: Consolas, "Courier New", monospace;
 }
@@ -1049,7 +1049,7 @@ onBeforeUnmount(() => {
   min-height: 100%;
   align-content: center;
   padding: 1rem 1.1rem;
-  border-radius: 16px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
 }
 
@@ -1063,17 +1063,17 @@ onBeforeUnmount(() => {
 .results-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.55rem 0.65rem;
-  border-radius: 10px;
+  gap: 0.3rem;
+  padding: 0.38rem 0.5rem;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.5rem;
 }
 
 .results-search-input,
 .results-filter-input {
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--control-bg);
   color: var(--text-primary);
   font-family: inherit;
@@ -1082,24 +1082,24 @@ onBeforeUnmount(() => {
 .results-search-input {
   flex: 1 1 14rem;
   min-width: 11rem;
-  padding: 0.34rem 0.46rem;
-  font-size: 0.68rem;
+  padding: 0.26rem 0.4rem;
+  font-size: 0.66rem;
 }
 
 .results-filter-input {
   width: 100%;
-  padding: 0.26rem 0.36rem;
-  font-size: 0.67rem;
+  padding: 0.2rem 0.32rem;
+  font-size: 0.65rem;
 }
 
 .results-toolbar-btn {
   border: 0;
-  border-radius: 7px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
   font-weight: 600;
-  padding: 0.3rem 0.44rem;
+  padding: 0.24rem 0.38rem;
   cursor: pointer;
 }
 
@@ -1123,15 +1123,15 @@ onBeforeUnmount(() => {
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 0.73rem;
+  font-size: 0.7rem;
   margin: 0;
-  border-radius: 16px;
+  border-radius: 3px;
   overflow: hidden;
   background: var(--bg-surface);
 }
 
 .results-grid-shell {
-  border-radius: 16px;
+  border-radius: 3px;
   overflow: hidden;
 }
 
@@ -1141,7 +1141,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
   color: var(--text-primary);
   text-align: left;
-  padding: 0.46rem 0.62rem;
+  padding: 0.3rem 0.5rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1153,7 +1153,7 @@ onBeforeUnmount(() => {
   top: 0;
   font-weight: 600;
   z-index: 2;
-  padding-right: 0.62rem;
+  padding-right: 0.5rem;
   overflow: visible;
 }
 
@@ -1197,7 +1197,7 @@ onBeforeUnmount(() => {
   top: auto;
   z-index: 1;
   background: color-mix(in srgb, var(--bg-surface-muted) 80%, transparent);
-  padding: 0.32rem 0.42rem;
+  padding: 0.22rem 0.36rem;
 }
 
 .results-spacer-row td {
@@ -1259,6 +1259,18 @@ onBeforeUnmount(() => {
 
 .results-message {
   margin: 0 0 0.45rem;
+}
+
+.results-footer {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.7rem;
+  border-top: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-surface-muted) 88%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 42%, transparent) 100%
+    );
 }
 
 .results-empty-filtered {

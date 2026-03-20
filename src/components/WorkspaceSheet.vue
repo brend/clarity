@@ -100,6 +100,15 @@ const props = defineProps<{
   isLikelyNumeric: (value: string) => boolean;
 }>();
 
+const vIndeterminate = {
+  mounted(el: HTMLInputElement, binding: { value: boolean }) {
+    el.indeterminate = binding.value;
+  },
+  updated(el: HTMLInputElement, binding: { value: boolean }) {
+    el.indeterminate = binding.value;
+  },
+};
+
 const SqlCodeEditor = defineAsyncComponent(() => import("./SqlCodeEditor.vue"));
 const queryEditorRef = ref<{
   getSelectedText?: () => string;
@@ -107,6 +116,8 @@ const queryEditorRef = ref<{
 } | null>(null);
 const dataDraftRows = ref<string[][]>([]);
 const dataDraftSourceIndexes = ref<Array<number | null>>([]);
+const selectedRowIndexes = ref<Set<number>>(new Set());
+const lastClickedRowIndex = ref<number | null>(null);
 const committingDataChanges = ref(false);
 const suppressDraftSync = ref(false);
 const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
@@ -261,6 +272,7 @@ function syncDraftRowsFromResult(): void {
   dataDraftSourceIndexes.value = props.activeObjectDetailResult.rows.map(
     (_, rowIndex) => rowIndex,
   );
+  clearSelection();
 }
 
 function onCellDraftInput(
@@ -398,6 +410,18 @@ const hasDraftStructureChanges = computed<boolean>(() => {
 const canRevertDataChanges = computed<boolean>(
   () => hasPendingDataChanges.value || hasDraftStructureChanges.value,
 );
+const selectedRowCount = computed<number>(() => selectedRowIndexes.value.size);
+const hasSelection = computed<boolean>(() => selectedRowCount.value > 0);
+const allRowsSelected = computed<boolean>(
+  () =>
+    displayedDataRows.value.length > 0 &&
+    selectedRowIndexes.value.size === displayedDataRows.value.length,
+);
+const someRowsSelected = computed<boolean>(
+  () =>
+    selectedRowIndexes.value.size > 0 &&
+    selectedRowIndexes.value.size < displayedDataRows.value.length,
+);
 
 function isPersistedDataRow(rowIndex: number): boolean {
   return getDraftSourceRowIndex(rowIndex) !== null;
@@ -416,27 +440,61 @@ function canDeleteDraftRow(rowIndex: number): boolean {
   );
 }
 
-function deleteRowActionTitle(rowIndex: number): string {
-  if (!isPersistedDataRow(rowIndex)) {
-    return "Remove unsaved draft row";
-  }
-
-  if (!canDeleteDraftRow(rowIndex)) {
-    return "Delete is unavailable while another data update is in progress";
-  }
-
-  return "Mark row for deletion (applied on Commit)";
+function clearSelection(): void {
+  selectedRowIndexes.value = new Set();
+  lastClickedRowIndex.value = null;
 }
 
-async function deleteDraftRow(rowIndex: number): Promise<void> {
-  if (!canDeleteDraftRow(rowIndex)) {
+function toggleRowSelection(rowIndex: number, event: MouseEvent): void {
+  const next = new Set(selectedRowIndexes.value);
+
+  if (event.shiftKey && lastClickedRowIndex.value !== null) {
+    const start = Math.min(lastClickedRowIndex.value, rowIndex);
+    const end = Math.max(lastClickedRowIndex.value, rowIndex);
+    for (let i = start; i <= end; i++) {
+      next.add(i);
+    }
+  } else if (event.ctrlKey || event.metaKey) {
+    if (next.has(rowIndex)) {
+      next.delete(rowIndex);
+    } else {
+      next.add(rowIndex);
+    }
+  } else {
+    next.clear();
+    next.add(rowIndex);
+  }
+
+  selectedRowIndexes.value = next;
+  lastClickedRowIndex.value = rowIndex;
+}
+
+function toggleSelectAll(): void {
+  if (allRowsSelected.value) {
+    selectedRowIndexes.value = new Set();
+  } else {
+    selectedRowIndexes.value = new Set(
+      displayedDataRows.value.map((_, i) => i),
+    );
+  }
+}
+
+function deleteSelectedRows(): void {
+  if (!hasSelection.value || committingDataChanges.value || props.busy.updatingData) {
     return;
   }
 
-  dataDraftRows.value.splice(rowIndex, 1);
+  const sortedDescending = [...selectedRowIndexes.value].sort((a, b) => b - a);
+  for (const rowIndex of sortedDescending) {
+    if (canDeleteDraftRow(rowIndex)) {
+      dataDraftRows.value.splice(rowIndex, 1);
+      dataDraftSourceIndexes.value.splice(rowIndex, 1);
+    }
+  }
+
   dataDraftRows.value = [...dataDraftRows.value];
-  dataDraftSourceIndexes.value.splice(rowIndex, 1);
   dataDraftSourceIndexes.value = [...dataDraftSourceIndexes.value];
+  clearSelection();
 }
 
 function revertDataChanges(): void {
@@ -770,6 +828,20 @@ function handleSheetKeydown(event: KeyboardEvent): void {
       void commitDataChanges();
     }
     return;
+  }
+
+  if (
+    showEditableRowActions.value &&
+    hasSelection.value &&
+    event.key === "Delete" &&
+    !event.metaKey && !event.ctrlKey && !event.altKey
+  ) {
+    const activeEl = document.activeElement;
+    if (!activeEl || !activeEl.classList.contains("cell-editor")) {
+      event.preventDefault();
+      deleteSelectedRows();
+      return;
+    }
   }
 
   if (!showEditableRowActions.value || !isPlainEscape(event)) {
@@ -1196,7 +1268,7 @@ watch(
           </p>
           <template v-else>
             <p v-if="showEditableRowActions" class="muted object-detail-hint">
-              Cells are editable. Add/Delete adjusts draft rows. Use Commit to apply, or Revert to discard.
+              Cells are editable. Select rows to delete (Shift+click for range, Del to remove). Commit to apply, Esc to revert.
             </p>
             <p v-else-if="isDataDetailTab" class="muted object-detail-hint">
               Data preview is read-only for this object type.
@@ -1213,6 +1285,7 @@ watch(
                 }"
               >
                 <colgroup>
+                  <col v-if="showEditableRowActions" style="width: 40px" />
                   <col
                     v-for="(column, columnIndex) in props
                       .activeObjectDetailResult.columns"
@@ -1221,10 +1294,20 @@ watch(
                       width: `${getObjectDetailColumnWidth(columnIndex)}px`,
                     }"
                   />
-                  <col v-if="showEditableRowActions" class="results-row-actions-col" />
                 </colgroup>
                 <thead>
                   <tr>
+                    <th v-if="showEditableRowActions" class="results-select-header">
+                      <input
+                        type="checkbox"
+                        class="row-select-checkbox"
+                        :checked="allRowsSelected"
+                        v-indeterminate="someRowsSelected"
+                        :disabled="committingDataChanges || props.busy.updatingData || displayedDataRows.length === 0"
+                        title="Select all rows"
+                        @change="toggleSelectAll"
+                      />
+                    </th>
                     <th
                       v-for="(column, columnIndex) in props
                         .activeObjectDetailResult.columns"
@@ -1242,9 +1325,6 @@ watch(
                           startObjectDetailColumnResize(columnIndex, $event)
                         "
                       ></button>
-                    </th>
-                    <th v-if="showEditableRowActions" class="results-row-actions-header">
-                      Actions
                     </th>
                   </tr>
                 </thead>
@@ -1273,8 +1353,20 @@ watch(
                       'results-row-new':
                         showEditableRowActions &&
                         !isPersistedDataRow(rowIndex),
+                      'results-row-selected':
+                        showEditableRowActions &&
+                        selectedRowIndexes.has(rowIndex),
                     }"
                   >
+                    <td v-if="showEditableRowActions" class="results-select-cell">
+                      <input
+                        type="checkbox"
+                        class="row-select-checkbox"
+                        :checked="selectedRowIndexes.has(rowIndex)"
+                        :disabled="committingDataChanges || props.busy.updatingData"
+                        @click.stop="toggleRowSelection(rowIndex, $event)"
+                      />
+                    </td>
                     <td
                       v-for="(value, colIndex) in row"
                       :key="`obj-col-${rowIndex}-${colIndex}`"
@@ -1303,20 +1395,6 @@ watch(
                         }}</span>
                       </template>
                     </td>
-                    <td
-                      v-if="showEditableRowActions"
-                      class="results-row-actions-cell"
-                    >
-                      <button
-                        class="btn row-delete-btn"
-                        :class="{ 'delete-existing': isPersistedDataRow(rowIndex) }"
-                        :disabled="!canDeleteDraftRow(rowIndex)"
-                        :title="deleteRowActionTitle(rowIndex)"
-                        @click="deleteDraftRow(rowIndex)"
-                      >
-                        {{ isPersistedDataRow(rowIndex) ? "Delete" : "Remove" }}
-                      </button>
-                    </td>
                   </tr>
                   <tr
                     v-if="objectDetailBottomSpacerHeight > 0"
@@ -1344,6 +1422,14 @@ watch(
                   @click="addDraftRow"
                 >
                   Add Row
+                </button>
+                <button
+                  class="btn row-action-btn danger"
+                  :disabled="!hasSelection || committingDataChanges || props.busy.updatingData"
+                  title="Delete selected rows (Del)"
+                  @click="deleteSelectedRows"
+                >
+                  Delete Selected ({{ selectedRowCount }})
                 </button>
                 <div class="muted">
                   Pending row changes:
@@ -1491,7 +1577,7 @@ input,
 select,
 textarea {
   border: 1px solid var(--control-border);
-  border-radius: 0.95rem;
+  border-radius: 3px;
   background: var(--control-bg);
   color: var(--text-primary);
   padding: 0.72rem 0.85rem;
@@ -1510,7 +1596,7 @@ button:focus-visible {
 
 .btn {
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   padding: 0.3rem 0.64rem;
   font-size: 0.7rem;
@@ -1555,7 +1641,7 @@ button:focus-visible {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
-  border-radius: 20px;
+  border-radius: 4px;
   background:
     linear-gradient(
       180deg,
@@ -1646,8 +1732,8 @@ button:focus-visible {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.45rem;
-  padding: 0.48rem 0.75rem;
+  gap: 0.35rem;
+  padding: 0.34rem 0.6rem;
   min-width: 0;
   background:
     linear-gradient(
@@ -1662,28 +1748,28 @@ button:focus-visible {
   display: flex;
   align-items: center;
   min-width: 0;
-  border-radius: 6px 6px 3px 3px;
+  border-radius: 0;
   border: 0;
   background: transparent;
 }
 
 .sheet-tab {
   border: 0;
-  border-radius: 6px 6px 3px 3px;
+  border-radius: 0;
   background: transparent;
-  padding: 0.2rem 0.5rem;
-  font-size: 0.69rem;
+  padding: 0.28rem 0.42rem;
+  font-size: 0.66rem;
   cursor: pointer;
   max-width: 14rem;
-  color: var(--text-secondary);
+  color: var(--text-subtle);
   display: inline-flex;
   align-items: center;
   gap: 0.36rem;
   min-width: 0;
+  transition: color 0.12s ease;
 }
 
 .sheet-tab:hover {
-  background: var(--control-hover);
   color: var(--text-primary);
 }
 
@@ -1720,7 +1806,7 @@ button:focus-visible {
 
 .sheet-tab.active,
 .sheet-tab-wrap.active {
-  background: color-mix(in srgb, var(--accent-soft) 75%, var(--tab-active-bg));
+  background: transparent;
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
@@ -1729,28 +1815,34 @@ button:focus-visible {
   color: var(--text-primary);
 }
 
+.sheet-tab.active {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .sheet-tab-add {
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   background: transparent;
   padding: 0.24rem 0.34rem;
   font-size: 0.68rem;
   cursor: pointer;
-  color: var(--text-primary);
+  color: var(--text-subtle);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  transition: color 0.12s ease;
 }
 
 .sheet-tab-add:hover {
-  background: var(--control-hover);
+  color: var(--text-primary);
 }
 
 .sheet-tab-close {
   border: 0;
   background: transparent;
-  padding: 0.3rem 0.3rem;
-  font-size: 0.72rem;
+  padding: 0.2rem 0.2rem;
+  font-size: 0.68rem;
   cursor: pointer;
   color: var(--text-subtle);
   display: inline-flex;
@@ -1777,7 +1869,7 @@ button:focus-visible {
   color: var(--text-secondary);
   letter-spacing: 0.01em;
   padding: 0.04rem 0.2rem;
-  border-radius: 6px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--bg-surface-muted) 76%, transparent);
 }
 
@@ -1822,7 +1914,7 @@ button:focus-visible {
   justify-content: space-between;
   gap: 0.55rem;
   padding: 0.72rem 0.8rem;
-  border-radius: 14px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
@@ -1867,7 +1959,7 @@ button:focus-visible {
   height: 100%;
   min-height: 0;
   background: var(--editor-surface);
-  border-radius: 16px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
@@ -1886,7 +1978,7 @@ button:focus-visible {
   flex-wrap: wrap;
   gap: 0.5rem;
   padding: 0.72rem 0.8rem;
-  border-radius: 14px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
@@ -1912,21 +2004,21 @@ button:focus-visible {
   overflow: auto;
   min-height: 0;
   font-family: Consolas, "Courier New", monospace;
-  border-radius: 16px;
+  border-radius: 4px;
   background: var(--bg-surface);
 }
 
 .source-search-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.74rem;
+  font-size: 0.7rem;
 }
 
 .source-search-table th,
 .source-search-table td {
   border: 0;
   text-align: left;
-  padding: 0.55rem 0.7rem;
+  padding: 0.32rem 0.5rem;
 }
 
 .source-search-table th {
@@ -1960,7 +2052,7 @@ button:focus-visible {
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   margin: 0;
 }
 
@@ -1971,7 +2063,7 @@ button:focus-visible {
     color-mix(in srgb, var(--table-divider) 70%, transparent);
   color: var(--text-primary);
   text-align: left;
-  padding: 0.48rem 0.62rem;
+  padding: 0.3rem 0.5rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1983,17 +2075,34 @@ button:focus-visible {
   top: 0;
   z-index: 2;
   font-weight: 600;
-  padding-right: 0.5rem;
+  padding-right: 0.44rem;
   overflow: visible;
 }
 
-.results-row-actions-col {
-  width: 8rem;
+.results-select-header,
+.results-select-cell {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  text-align: center;
+  padding: 0.2rem 0.3rem;
 }
 
-.results-row-actions-header {
-  text-align: center;
-  min-width: 8rem;
+.row-select-checkbox {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.row-select-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.results-row-selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface)) !important;
 }
 
 .results-table tbody tr.results-row-alt {
@@ -2071,8 +2180,8 @@ button:focus-visible {
 .cell-editor {
   width: 100%;
   min-width: 0;
-  padding: 0.3rem 0.36rem;
-  font-size: 0.72rem;
+  padding: 0.2rem 0.3rem;
+  font-size: 0.68rem;
   font-family: inherit;
   color: var(--text-primary);
   border: 0;
@@ -2082,26 +2191,19 @@ button:focus-visible {
   text-overflow: ellipsis;
 }
 
-.results-row-actions-cell {
-  text-align: center;
-  padding: 0.22rem 0.28rem;
-}
-
-.row-delete-btn {
-  min-width: 5.2rem;
-  justify-content: center;
-  padding: 0.45rem 0.7rem;
-  font-size: 0.68rem;
-}
-
-.row-delete-btn.delete-existing {
+.row-action-btn.danger {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--control-border));
+  color: var(--danger);
+}
+
+.row-action-btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, var(--control-hover));
 }
 
 .row-action-btn {
-  margin-right: 0.28rem;
-  padding: 0.55rem 0.85rem;
-  font-size: 0.71rem;
+  margin-right: 0.22rem;
+  padding: 0.38rem 0.65rem;
+  font-size: 0.68rem;
 }
 
 .row-action-btn:last-child {
@@ -2112,10 +2214,10 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.4rem;
   background: var(--bg-surface);
-  margin-top: 0.35rem;
-  padding: 0.85rem 0 0.2rem;
+  margin-top: 0.25rem;
+  padding: 0.55rem 0 0.15rem;
 }
 
 .object-detail-edit-leading {
@@ -2145,7 +2247,7 @@ button:focus-visible {
   align-items: center;
   gap: 0.6rem;
   padding: 0.72rem 0.8rem;
-  border-radius: 14px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
@@ -2183,30 +2285,31 @@ button:focus-visible {
 
 .object-detail-tab {
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   background: transparent;
-  padding: 0.48rem 0.76rem;
+  padding: 0.38rem 0.6rem;
   font-size: 0.7rem;
-  color: var(--text-secondary);
+  color: var(--text-subtle);
   cursor: pointer;
+  transition: color 0.12s ease;
 }
 
 .object-detail-tab:hover {
-  background: var(--control-hover);
   color: var(--text-primary);
 }
 
 .object-detail-tab.active {
-  background: var(--tab-active-bg);
+  background: transparent;
   color: var(--text-primary);
   font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .object-detail-grid-pane {
   min-height: 0;
   overflow: hidden;
   padding: 0.8rem;
-  border-radius: 16px;
+  border-radius: 4px;
   background: var(--bg-surface);
   display: flex;
   flex-direction: column;
@@ -2217,7 +2320,7 @@ button:focus-visible {
   display: grid;
   gap: 0.32rem;
   padding: 0.8rem 0.9rem;
-  border-radius: 12px;
+  border-radius: 3px;
   border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--border));
   background: color-mix(in srgb, var(--danger) 10%, var(--bg-surface));
 }
@@ -2240,7 +2343,7 @@ button:focus-visible {
   min-height: 0;
   padding: 0.85rem 0.9rem;
   background: color-mix(in srgb, var(--bg-surface-muted) 70%, transparent);
-  border-radius: 6px;
+  border-radius: 3px;
 }
 
 .object-loading-title {

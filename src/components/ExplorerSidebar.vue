@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
 
 .sidebar-card {
   min-width: 0;
-  border-radius: 18px;
+  border-radius: 4px;
   background:
     linear-gradient(
       180deg,
@@ -829,7 +829,7 @@ onBeforeUnmount(() => {
   color: var(--text-secondary);
   width: 1.7rem;
   height: 1.7rem;
-  border-radius: 7px;
+  border-radius: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -871,7 +871,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 0.14rem;
   padding: 0.5rem 0.58rem;
-  border-radius: 10px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
 }
 
@@ -912,7 +912,7 @@ onBeforeUnmount(() => {
 
 .connection-core-fields {
   padding: 0.65rem;
-  border-radius: 14px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
 }
 
@@ -945,7 +945,7 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 0.45rem;
   padding: 0.56rem;
-  border-radius: 12px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
 }
 
@@ -1014,7 +1014,7 @@ input,
 select,
 textarea {
   border: 0;
-  border-radius: 10px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
   padding: 0.48rem 0.58rem;
@@ -1060,7 +1060,7 @@ button:focus-visible {
 
 .btn {
   border: 0;
-  border-radius: 12px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   padding: 0.5rem 0.68rem;
   font-size: 0.69rem;
@@ -1156,7 +1156,7 @@ button:focus-visible {
   align-items: center;
   gap: 0.36rem;
   padding: 0.42rem 0.5rem;
-  border-radius: 10px;
+  border-radius: 3px;
   font-size: 0.72rem;
   cursor: pointer;
   transition:
@@ -1242,7 +1242,7 @@ button:focus-visible {
   z-index: 90;
   min-width: 13rem;
   padding: 0.35rem;
-  border-radius: 14px;
+  border-radius: 4px;
   background: var(--bg-surface);
   box-shadow: var(--dialog-shadow);
   display: grid;

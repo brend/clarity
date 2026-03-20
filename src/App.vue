@@ -1608,9 +1608,9 @@ onBeforeUnmount(() => {
   --bg-hover: #ece5f6;
   --bg-active: #e4daf4;
   --bg-selected: #e9e0fb;
-  --border: rgba(118, 92, 171, 0.1);
-  --border-strong: rgba(118, 92, 171, 0.22);
-  --panel-separator: rgba(118, 92, 171, 0.1);
+  --border: rgba(118, 92, 171, 0.06);
+  --border-strong: rgba(118, 92, 171, 0.14);
+  --panel-separator: rgba(118, 92, 171, 0.05);
   --text-primary: #21182f;
   --text-secondary: #64567d;
   --text-subtle: #8b7fa2;
@@ -1628,15 +1628,15 @@ onBeforeUnmount(() => {
   --shell-shadow: 0 30px 70px rgba(74, 52, 121, 0.12);
   --splitter-hover: rgba(125, 91, 214, 0.28);
   --control-bg: #ffffff;
-  --control-border: rgba(118, 92, 171, 0.14);
+  --control-border: rgba(118, 92, 171, 0.08);
   --control-hover: #f5f0fb;
   --tab-active-bg: rgba(255, 255, 255, 0.96);
-  --tab-active-border: rgba(125, 91, 214, 0.38);
-  --table-divider: rgba(118, 92, 171, 0.12);
+  --tab-active-border: rgba(125, 91, 214, 0.25);
+  --table-divider: rgba(118, 92, 171, 0.06);
   --table-header-bg: #f4eefb;
   --table-row-alt: rgba(125, 91, 214, 0.035);
   --schema-chip-bg: rgba(125, 91, 214, 0.12);
-  --schema-chip-border: rgba(125, 91, 214, 0.28);
+  --schema-chip-border: rgba(125, 91, 214, 0.16);
   --schema-chip-text: #6b47c6;
   --link-hover: #5933b8;
   --row-new-bg: rgba(44, 155, 99, 0.1);
@@ -1644,7 +1644,7 @@ onBeforeUnmount(() => {
   --tree-selected-text: #2c1a4d;
   --editor-surface: #ffffff;
   --editor-gutter-bg: #f6f1fb;
-  --editor-gutter-border: rgba(118, 92, 171, 0.12);
+  --editor-gutter-border: rgba(118, 92, 171, 0.05);
   --editor-gutter-text: #998cb0;
   --editor-focus-outline: rgba(125, 91, 214, 0.45);
   --editor-text: #241930;
@@ -1663,14 +1663,14 @@ onBeforeUnmount(() => {
   --editor-token-variable: #241930;
   --editor-token-property: #241930;
   --editor-token-function: #6b47c6;
-  --resizer-line: rgba(118, 92, 171, 0.18);
-  --resizer-line-hover: rgba(125, 91, 214, 0.5);
+  --resizer-line: rgba(118, 92, 171, 0.08);
+  --resizer-line-hover: rgba(125, 91, 214, 0.3);
   --scrollbar-thumb: rgba(128, 104, 173, 0.34);
   --scrollbar-thumb-hover: rgba(113, 86, 162, 0.5);
   --pane-header-height: 46px;
-  --shell-border: rgba(118, 92, 171, 0.1);
-  --shell-inner-border: rgba(255, 255, 255, 0.28);
-  --grid-line: rgba(118, 92, 171, 0.08);
+  --shell-border: rgba(118, 92, 171, 0.05);
+  --shell-inner-border: rgba(255, 255, 255, 0.12);
+  --grid-line: rgba(118, 92, 171, 0.0);
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -1686,9 +1686,9 @@ onBeforeUnmount(() => {
   --bg-hover: #303b4d;
   --bg-active: #384658;
   --bg-selected: #2d435b;
-  --border: rgba(148, 163, 184, 0.1);
-  --border-strong: rgba(148, 163, 184, 0.22);
-  --panel-separator: rgba(148, 163, 184, 0.09);
+  --border: rgba(148, 163, 184, 0.06);
+  --border-strong: rgba(148, 163, 184, 0.14);
+  --panel-separator: rgba(148, 163, 184, 0.04);
   --text-primary: #e8eef7;
   --text-secondary: #aeb9c8;
   --text-subtle: #8190a4;
@@ -1706,15 +1706,15 @@ onBeforeUnmount(() => {
   --shell-shadow: 0 40px 100px rgba(5, 3, 10, 0.4);
   --splitter-hover: rgba(95, 143, 203, 0.34);
   --control-bg: rgba(38, 47, 62, 0.92);
-  --control-border: rgba(148, 163, 184, 0.12);
+  --control-border: rgba(148, 163, 184, 0.07);
   --control-hover: #334156;
   --tab-active-bg: rgba(37, 47, 64, 0.92);
-  --tab-active-border: rgba(95, 143, 203, 0.42);
-  --table-divider: rgba(148, 163, 184, 0.12);
+  --tab-active-border: rgba(95, 143, 203, 0.28);
+  --table-divider: rgba(148, 163, 184, 0.06);
   --table-header-bg: #202835;
   --table-row-alt: rgba(255, 255, 255, 0.02);
   --schema-chip-bg: rgba(95, 143, 203, 0.15);
-  --schema-chip-border: rgba(141, 179, 226, 0.26);
+  --schema-chip-border: rgba(141, 179, 226, 0.14);
   --schema-chip-text: #bfd7f2;
   --link-hover: #d0e3fa;
   --row-new-bg: rgba(130, 212, 156, 0.12);
@@ -1722,7 +1722,7 @@ onBeforeUnmount(() => {
   --tree-selected-text: #ffffff;
   --editor-surface: #1b2230;
   --editor-gutter-bg: #1d2532;
-  --editor-gutter-border: rgba(148, 163, 184, 0.1);
+  --editor-gutter-border: rgba(148, 163, 184, 0.04);
   --editor-gutter-text: #708095;
   --editor-focus-outline: rgba(141, 179, 226, 0.42);
   --editor-text: #edf2f9;
@@ -1741,13 +1741,13 @@ onBeforeUnmount(() => {
   --editor-token-variable: #edf2f9;
   --editor-token-property: #9dc3ef;
   --editor-token-function: #8db3e2;
-  --resizer-line: rgba(148, 163, 184, 0.12);
-  --resizer-line-hover: rgba(141, 179, 226, 0.5);
+  --resizer-line: rgba(148, 163, 184, 0.06);
+  --resizer-line-hover: rgba(141, 179, 226, 0.3);
   --scrollbar-thumb: rgba(121, 140, 165, 0.34);
   --scrollbar-thumb-hover: rgba(148, 163, 184, 0.5);
-  --shell-border: rgba(148, 163, 184, 0.08);
-  --shell-inner-border: rgba(255, 255, 255, 0.03);
-  --grid-line: rgba(148, 163, 184, 0.08);
+  --shell-border: rgba(148, 163, 184, 0.04);
+  --shell-inner-border: rgba(255, 255, 255, 0.01);
+  --grid-line: rgba(148, 163, 184, 0.0);
   color-scheme: dark;
 }
 
@@ -1767,15 +1767,8 @@ body {
 body {
   font-family: var(--font-ui);
   background:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    radial-gradient(circle at top, rgba(155, 107, 255, 0.08), transparent 34%),
+    radial-gradient(circle at top, rgba(155, 107, 255, 0.05), transparent 34%),
     var(--bg-canvas);
-  background-size:
-    12rem 12rem,
-    12rem 12rem,
-    auto,
-    auto;
 }
 
 #app {
@@ -1810,7 +1803,7 @@ body {
   background: var(--bg-shell);
   box-shadow: var(--shell-shadow);
   backdrop-filter: blur(18px);
-  border-radius: 28px;
+  border-radius: 3px;
   padding: 0.35rem;
   overflow: hidden;
 }
@@ -1862,7 +1855,7 @@ body {
 .dialog {
   width: min(40rem, 100%);
   background: var(--bg-surface);
-  border-radius: 18px;
+  border-radius: 3px;
   box-shadow: var(--dialog-shadow);
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -1909,7 +1902,7 @@ body {
 .dialog-body input,
 .dialog-body select {
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--control-bg);
   padding: 0.5rem 0.6rem;
   font: inherit;
@@ -1925,7 +1918,7 @@ body {
 .settings-group {
   margin: 0;
   padding: 0.7rem;
-  border-radius: 6px;
+  border-radius: 3px;
   display: grid;
   gap: 0.55rem;
   background: color-mix(in srgb, var(--bg-surface-muted) 72%, transparent);
@@ -1976,7 +1969,7 @@ body {
 
 .settings-update-card {
   padding: 0.7rem;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
 }
@@ -2020,7 +2013,7 @@ body {
 
 .dialog .btn {
   border: 0;
-  border-radius: 6px;
+  border-radius: 3px;
   background: var(--control-bg);
   padding: 0.45rem 0.7rem;
   font-size: 0.76rem;

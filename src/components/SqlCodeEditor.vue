@@ -451,7 +451,7 @@ onBeforeUnmount(() => {
 
 .sql-code-editor :deep(.cm-panel.cm-search input) {
   border: 1px solid var(--control-border);
-  border-radius: 0.5rem;
+  border-radius: 3px;
   background: var(--control-bg);
   color: var(--text-primary);
   padding: 0.38rem 0.55rem;
@@ -465,7 +465,7 @@ onBeforeUnmount(() => {
 
 .sql-code-editor :deep(.cm-panel.cm-search button) {
   border: 0;
-  border-radius: 0.5rem;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
   padding: 0.3rem 0.58rem;

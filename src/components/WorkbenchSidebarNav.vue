@@ -118,7 +118,7 @@ const sessionSummary = computed<string>(() => {
 .brand-mark {
   width: 2.4rem;
   height: 2.4rem;
-  border-radius: 6px;
+  border-radius: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -145,7 +145,7 @@ const sessionSummary = computed<string>(() => {
   border: 1px solid transparent;
   background: var(--bg-sidebar);
   color: var(--text-secondary);
-  border-radius: 6px;
+  border-radius: 3px;
   padding: 0.55rem 0.45rem;
   display: flex;
   flex-direction: column;
@@ -175,7 +175,7 @@ const sessionSummary = computed<string>(() => {
 .nav-icon {
   width: 1.75rem;
   height: 1.75rem;
-  border-radius: 6px;
+  border-radius: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -194,7 +194,7 @@ const sessionSummary = computed<string>(() => {
 }
 
 .nav-context {
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--border);
   background: var(--bg-surface);
   padding: 0.65rem;

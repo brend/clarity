@@ -37,7 +37,7 @@ defineProps<{
 .summary-card {
   min-width: 0;
   padding: 0.7rem 0.8rem;
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid var(--border);
   background: var(--bg-surface);
   display: grid;
