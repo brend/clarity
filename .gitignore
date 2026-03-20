@@ -53,3 +53,4 @@ debug.log
 TODO.md
 .aider*
 dist/
+settings.local.json
