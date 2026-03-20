@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import ExplorerSidebar from "./components/ExplorerSidebar.vue";
+import ConnectionDialog from "./components/ConnectionDialog.vue";
 import QueryResultsPane from "./components/QueryResultsPane.vue";
 import WorkspaceSheet from "./components/WorkspaceSheet.vue";
 import {
@@ -19,7 +20,7 @@ import {
 } from "./constants/createObjectTemplates";
 import { useClarityWorkspace } from "./composables/useClarityWorkspace";
 import { usePaneLayout } from "./composables/usePaneLayout";
-import { useUserSettings } from "./composables/useUserSettings";
+import { useUserSettings, previewTheme } from "./composables/useUserSettings";
 import type {
   AiQuerySuggestionRequest,
   AiQuerySuggestionResponse,
@@ -223,9 +224,8 @@ const {
 const showExportDialog = ref(false);
 const showSettingsDialog = ref(false);
 const showCreateObjectDialog = ref(false);
-const highlightedSidebarSection = ref<"connections" | "explorer">(
-  "connections",
-);
+const showConnectionDialog = ref(false);
+let connectionSnapshot: Record<string, unknown> | null = null;
 const exportSummaryMessage = ref("");
 const exportMenuUnlisten = ref<UnlistenFn | null>(null);
 const settingsMenuUnlisten = ref<UnlistenFn | null>(null);
@@ -259,6 +259,7 @@ const {
   updateLastUsedConnectionProfileId,
 } = useUserSettings();
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
+watch(settingsDialogTheme, (next) => previewTheme(next));
 const settingsDialogOracleClientLibDir = ref(settings.value.oracleClientLibDir);
 const settingsDialogAiSuggestionsEnabled = ref(
   settings.value.aiSuggestionsEnabled,
@@ -890,6 +891,7 @@ async function openSettingsDialog(
 }
 
 function closeSettingsDialog(): void {
+  previewTheme(theme.value);
   showSettingsDialog.value = false;
 }
 
@@ -956,6 +958,46 @@ async function restoreLastUsedConnectionProfile(): Promise<void> {
   }
 
   await applySelectedProfile();
+}
+
+function openConnectionDialog(mode: "new" | "edit"): void {
+  if (mode === "new") {
+    selectedProfileId.value = "";
+    syncSelectedProfileUi();
+    connection.connection.host = "";
+    connection.connection.serviceName = "";
+    connection.connection.username = "";
+    connection.connection.schema = "";
+    connection.connection.password = "";
+    connection.connection.port = 1521;
+    connection.connection.oracleAuthMode = "normal";
+  }
+  connectionSnapshot = { ...connection.connection };
+  errorMessage.value = "";
+  showConnectionDialog.value = true;
+}
+
+function cancelConnectionDialog(): void {
+  if (connectionSnapshot) {
+    Object.assign(connection.connection, connectionSnapshot);
+  }
+  connectionSnapshot = null;
+  showConnectionDialog.value = false;
+}
+
+async function saveConnectionDialogAndClose(): Promise<void> {
+  await saveConnectionProfile();
+  if (errorMessage.value) {
+    return;
+  }
+  connectionSnapshot = null;
+  showConnectionDialog.value = false;
+}
+
+async function deleteConnectionDialogAndClose(): Promise<void> {
+  await deleteSelectedProfile();
+  connectionSnapshot = null;
+  showConnectionDialog.value = false;
 }
 
 async function handleConnect(): Promise<void> {
@@ -1106,30 +1148,23 @@ onBeforeUnmount(() => {
     <aside class="sidebar-shell">
       <ExplorerSidebar
         v-model:selected-profile-id="selectedProfileId"
-        v-model:profile-name="profileName"
-        v-model:save-profile-password="saveProfilePassword"
-        :connection="connection"
-        :connection-error="errorMessage"
         :connection-profiles="connectionProfiles"
         :selected-profile="selectedProfile"
         :busy="busy"
         :is-connected="isConnected"
         :session="session"
         :connected-schema="connectedSchema"
-        :selected-provider-label="selectedProviderLabel"
-        :highlighted-section="highlightedSidebarSection"
         :object-tree="objectTree"
         :selected-object="selectedObject"
         :is-object-type-expanded="isObjectTypeExpanded"
         :on-sync-selected-profile-ui="syncSelectedProfileUi"
         :on-apply-selected-profile="applySelectedProfile"
-        :on-delete-selected-profile="deleteSelectedProfile"
-        :on-save-connection-profile="saveConnectionProfile"
         :on-connect="handleConnect"
         :on-disconnect="disconnectOracle"
         :on-refresh-objects="refreshObjects"
         :on-toggle-object-type="toggleObjectType"
         :on-open-object-from-explorer="openObjectFromExplorer"
+        :on-open-connection-dialog="openConnectionDialog"
         :create-object-types="CREATE_OBJECT_TYPE_OPTIONS"
         :on-request-create-object="openCreateObjectDialog"
       />
@@ -1299,6 +1334,19 @@ onBeforeUnmount(() => {
     </section>
   </div>
 
+  <ConnectionDialog
+    v-if="showConnectionDialog"
+    v-model:profile-name="profileName"
+    v-model:save-profile-password="saveProfilePassword"
+    :connection="connection"
+    :connection-error="errorMessage"
+    :selected-profile="selectedProfile"
+    :busy="busy"
+    :on-save="saveConnectionDialogAndClose"
+    :on-delete="deleteConnectionDialogAndClose"
+    :on-cancel="cancelConnectionDialog"
+  />
+
   <div
     v-if="showSettingsDialog"
     class="dialog-backdrop"
@@ -1317,67 +1365,59 @@ onBeforeUnmount(() => {
       <div class="dialog-body">
         <fieldset class="settings-group">
           <legend>Appearance</legend>
-          <label class="settings-option">
-            <input v-model="settingsDialogTheme" type="radio" value="light" />
-            <span>Light</span>
-          </label>
-          <label class="settings-option">
-            <input v-model="settingsDialogTheme" type="radio" value="dark" />
-            <span>Dark</span>
-          </label>
+          <div class="settings-theme-switch">
+            <label
+              class="settings-theme-option"
+              :class="{ active: settingsDialogTheme === 'light' }"
+            >
+              <input v-model="settingsDialogTheme" type="radio" value="light" />
+              <span>Light</span>
+            </label>
+            <label
+              class="settings-theme-option"
+              :class="{ active: settingsDialogTheme === 'dark' }"
+            >
+              <input v-model="settingsDialogTheme" type="radio" value="dark" />
+              <span>Dark</span>
+            </label>
+          </div>
         </fieldset>
+
         <fieldset class="settings-group">
-          <legend>Oracle</legend>
-          <label class="settings-field">
-            <span>Instant Client Library Directory (optional)</span>
-            <input
-              v-model.trim="settingsDialogOracleClientLibDir"
-              placeholder="/opt/homebrew/lib/instantclient_23_3"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-          <p class="muted settings-hint">
-            Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new Oracle
-            connections in this app.
-          </p>
-        </fieldset>
-        <fieldset class="settings-group">
-          <legend>AI</legend>
+          <legend>AI Suggestions</legend>
           <label class="settings-option">
             <input
               v-model="settingsDialogAiSuggestionsEnabled"
               type="checkbox"
             />
-            <span>Enable AI query suggestions while typing</span>
+            <span>Enable suggestions while typing</span>
           </label>
-          <label class="settings-field">
-            <span>Model</span>
-            <input
-              v-model.trim="settingsDialogAiModel"
-              placeholder="gpt-4o-mini"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-          <label class="settings-field">
-            <span>Endpoint</span>
-            <input
-              v-model.trim="settingsDialogAiEndpoint"
-              placeholder="https://api.openai.com/v1/chat/completions"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
+          <div class="settings-fields-grid">
+            <label class="settings-field">
+              <span>Model</span>
+              <input
+                v-model.trim="settingsDialogAiModel"
+                placeholder="gpt-4o-mini"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+            <label class="settings-field">
+              <span>Endpoint</span>
+              <input
+                v-model.trim="settingsDialogAiEndpoint"
+                placeholder="https://api.openai.com/v1/chat/completions"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+          </div>
           <label class="settings-field">
             <span>API Key</span>
             <input
@@ -1397,10 +1437,9 @@ onBeforeUnmount(() => {
             />
           </label>
           <p class="muted settings-hint">
-            Stored in the OS keychain.
             <template v-if="hasAiApiKey && !settingsDialogAiApiKeyDirty">
-              A key is already configured. Leave this field blank to keep the
-              existing key, or enter a new value to replace it.
+              A key is stored in the OS keychain. Leave blank to keep it, or
+              enter a new value to replace it.
             </template>
             <template
               v-else-if="
@@ -1412,10 +1451,31 @@ onBeforeUnmount(() => {
               Saving will remove the stored key.
             </template>
             <template v-else-if="!hasAiApiKey">
-              No key configured. Enter your API key above.
+              Stored in the OS keychain. No key configured yet.
             </template>
           </p>
         </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>Oracle</legend>
+          <label class="settings-field">
+            <span>Instant Client Library Directory</span>
+            <input
+              v-model.trim="settingsDialogOracleClientLibDir"
+              placeholder="/opt/homebrew/lib/instantclient_23_3"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+          <p class="muted settings-hint">
+            Optional. Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new
+            Oracle connections.
+          </p>
+        </fieldset>
+
         <fieldset class="settings-group">
           <legend>Updates</legend>
           <div class="settings-update-row">
@@ -1432,11 +1492,8 @@ onBeforeUnmount(() => {
               {{ updateCheckInProgress ? "Checking..." : "Check for Updates" }}
             </button>
           </div>
-          <p class="muted settings-hint">
-            Checks the latest published GitHub Release for Clarity. Draft
-            releases do not appear to users until they are published.
-          </p>
           <p
+            v-if="updateStatusMessage"
             class="settings-update-status"
             :class="`tone-${updateStatusTone}`"
           >
@@ -1600,77 +1657,77 @@ onBeforeUnmount(() => {
 :root[data-theme="light"] {
   --font-ui:
     "SF Pro Display", "Avenir Next", "Segoe UI", system-ui, sans-serif;
-  --bg-canvas: #f1edf8;
+  --bg-canvas: #edf1f5;
   --bg-shell: rgba(255, 255, 255, 0.88);
-  --bg-sidebar: rgba(248, 244, 253, 0.92);
+  --bg-sidebar: rgba(244, 248, 252, 0.92);
   --bg-surface: rgba(255, 255, 255, 0.92);
-  --bg-surface-muted: #f3edf9;
-  --bg-hover: #ece5f6;
-  --bg-active: #e4daf4;
-  --bg-selected: #e9e0fb;
-  --border: rgba(118, 92, 171, 0.06);
-  --border-strong: rgba(118, 92, 171, 0.14);
-  --panel-separator: rgba(118, 92, 171, 0.05);
-  --text-primary: #21182f;
-  --text-secondary: #64567d;
-  --text-subtle: #8b7fa2;
-  --accent: #7d5bd6;
-  --accent-soft: rgba(125, 91, 214, 0.14);
-  --accent-strong: #6b47c6;
+  --bg-surface-muted: #edf2f7;
+  --bg-hover: #e5ebf2;
+  --bg-active: #dae3ed;
+  --bg-selected: #e0eaf5;
+  --border: rgba(92, 112, 150, 0.06);
+  --border-strong: rgba(92, 112, 150, 0.14);
+  --panel-separator: rgba(92, 112, 150, 0.05);
+  --text-primary: #1a2230;
+  --text-secondary: #566882;
+  --text-subtle: #7f8fa2;
+  --accent: #4a7fd6;
+  --accent-soft: rgba(74, 127, 214, 0.14);
+  --accent-strong: #3968c0;
   --accent-contrast: #ffffff;
   --success: #2c9b63;
   --danger: #c45073;
   --warning: #c18932;
-  --focus-ring: rgba(125, 91, 214, 0.22);
-  --dialog-backdrop: rgba(31, 24, 47, 0.32);
-  --dialog-shadow: 0 22px 60px rgba(58, 39, 101, 0.16);
-  --card-shadow: 0 18px 45px rgba(109, 84, 160, 0.08);
-  --shell-shadow: 0 30px 70px rgba(74, 52, 121, 0.12);
-  --splitter-hover: rgba(125, 91, 214, 0.28);
+  --focus-ring: rgba(74, 127, 214, 0.22);
+  --dialog-backdrop: rgba(24, 31, 42, 0.32);
+  --dialog-shadow: 0 22px 60px rgba(39, 56, 90, 0.16);
+  --card-shadow: 0 18px 45px rgba(84, 104, 140, 0.08);
+  --shell-shadow: 0 30px 70px rgba(52, 72, 108, 0.12);
+  --splitter-hover: rgba(74, 127, 214, 0.28);
   --control-bg: #ffffff;
-  --control-border: rgba(118, 92, 171, 0.08);
-  --control-hover: #f5f0fb;
+  --control-border: rgba(92, 112, 150, 0.08);
+  --control-hover: #f0f4f9;
   --tab-active-bg: rgba(255, 255, 255, 0.96);
-  --tab-active-border: rgba(125, 91, 214, 0.25);
-  --table-divider: rgba(118, 92, 171, 0.06);
-  --table-header-bg: #f4eefb;
-  --table-row-alt: rgba(125, 91, 214, 0.035);
-  --schema-chip-bg: rgba(125, 91, 214, 0.12);
-  --schema-chip-border: rgba(125, 91, 214, 0.16);
-  --schema-chip-text: #6b47c6;
-  --link-hover: #5933b8;
+  --tab-active-border: rgba(74, 127, 214, 0.25);
+  --table-divider: rgba(92, 112, 150, 0.06);
+  --table-header-bg: #eef3f9;
+  --table-row-alt: rgba(74, 127, 214, 0.035);
+  --schema-chip-bg: rgba(74, 127, 214, 0.12);
+  --schema-chip-border: rgba(74, 127, 214, 0.16);
+  --schema-chip-text: #3968c0;
+  --link-hover: #2d56a8;
   --row-new-bg: rgba(44, 155, 99, 0.1);
   --row-dirty-bg: rgba(193, 137, 50, 0.14);
-  --tree-selected-text: #2c1a4d;
+  --tree-selected-text: #1a2d4d;
   --editor-surface: #ffffff;
-  --editor-gutter-bg: #f6f1fb;
-  --editor-gutter-border: rgba(118, 92, 171, 0.05);
-  --editor-gutter-text: #998cb0;
-  --editor-focus-outline: rgba(125, 91, 214, 0.45);
-  --editor-text: #241930;
-  --editor-caret: #7d5bd6;
-  --editor-active-line: rgba(125, 91, 214, 0.05);
-  --editor-active-gutter: rgba(125, 91, 214, 0.08);
-  --editor-selection: rgba(125, 91, 214, 0.12);
-  --editor-selection-focused: rgba(125, 91, 214, 0.18);
-  --editor-placeholder: #8d80a5;
-  --editor-token-keyword: #7d5bd6;
-  --editor-token-operator: #6c5b88;
+  --editor-gutter-bg: #f1f5fa;
+  --editor-gutter-border: rgba(92, 112, 150, 0.05);
+  --editor-gutter-text: #8c99b0;
+  --editor-focus-outline: rgba(74, 127, 214, 0.45);
+  --editor-text: #1a2433;
+  --editor-caret: #4a7fd6;
+  --editor-active-line: rgba(74, 127, 214, 0.05);
+  --editor-active-gutter: rgba(74, 127, 214, 0.08);
+  --editor-selection: rgba(74, 127, 214, 0.12);
+  --editor-selection-focused: rgba(74, 127, 214, 0.18);
+  --editor-placeholder: #8090a8;
+  --editor-token-keyword: #4a7fd6;
+  --editor-token-operator: #5b6e88;
   --editor-token-string: #c0875f;
   --editor-token-number: #2e8d93;
-  --editor-token-comment: #9689ad;
-  --editor-token-type: #5363d3;
-  --editor-token-variable: #241930;
-  --editor-token-property: #241930;
-  --editor-token-function: #6b47c6;
-  --resizer-line: rgba(118, 92, 171, 0.08);
-  --resizer-line-hover: rgba(125, 91, 214, 0.3);
-  --scrollbar-thumb: rgba(128, 104, 173, 0.34);
-  --scrollbar-thumb-hover: rgba(113, 86, 162, 0.5);
+  --editor-token-comment: #8996ad;
+  --editor-token-type: #4a63d3;
+  --editor-token-variable: #1a2433;
+  --editor-token-property: #1a2433;
+  --editor-token-function: #3968c0;
+  --resizer-line: rgba(92, 112, 150, 0.08);
+  --resizer-line-hover: rgba(74, 127, 214, 0.3);
+  --scrollbar-thumb: rgba(104, 120, 152, 0.34);
+  --scrollbar-thumb-hover: rgba(86, 104, 140, 0.5);
   --pane-header-height: 46px;
-  --shell-border: rgba(118, 92, 171, 0.05);
+  --shell-border: rgba(92, 112, 150, 0.05);
   --shell-inner-border: rgba(255, 255, 255, 0.12);
-  --grid-line: rgba(118, 92, 171, 0.0);
+  --grid-line: rgba(92, 112, 150, 0.0);
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-canvas);
@@ -1853,14 +1910,15 @@ body {
 }
 
 .dialog {
-  width: min(40rem, 100%);
+  width: min(38rem, 100%);
   background: var(--bg-surface);
-  border-radius: 3px;
+  border-radius: 7px;
   box-shadow: var(--dialog-shadow);
   display: grid;
   grid-template-rows: auto 1fr auto;
   max-height: min(85vh, 40rem);
   backdrop-filter: blur(16px);
+  overflow: hidden;
 }
 
 .create-object-dialog {
@@ -1868,20 +1926,20 @@ body {
 }
 
 .dialog-header {
-  padding: 0.75rem 0.9rem;
-  background: var(--bg-surface-muted);
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .dialog-title {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 600;
 }
 
 .dialog-body {
-  padding: 0.9rem;
+  padding: 1rem;
   display: grid;
-  gap: 0.75rem;
+  gap: 1.1rem;
   overflow: auto;
 }
 
@@ -1901,33 +1959,74 @@ body {
 
 .dialog-body input,
 .dialog-body select {
-  border: 0;
-  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
   background: var(--control-bg);
-  padding: 0.5rem 0.6rem;
+  padding: 0.44rem 0.55rem;
   font: inherit;
+  font-size: 0.76rem;
   color: var(--text-primary);
 }
 
 .dialog-body input:focus-visible,
 .dialog-body select:focus-visible {
-  outline: 1px solid var(--focus-ring);
-  outline-offset: 1px;
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
 }
 
 .settings-group {
   margin: 0;
-  padding: 0.7rem;
-  border-radius: 3px;
+  padding: 0;
+  border: 0;
   display: grid;
-  gap: 0.55rem;
-  background: color-mix(in srgb, var(--bg-surface-muted) 72%, transparent);
+  gap: 0.5rem;
 }
 
 .settings-group legend {
-  padding: 0 0.25rem;
+  padding: 0;
+  margin-bottom: 0.1rem;
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.settings-theme-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+}
+
+.settings-theme-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.6rem;
+  font-size: 0.76rem;
   color: var(--text-secondary);
-  font-size: 0.74rem;
+  background: var(--control-bg);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  user-select: none;
+}
+
+.settings-theme-option:first-child {
+  border-right: 1px solid var(--border-strong);
+}
+
+.settings-theme-option input {
+  display: none;
+}
+
+.settings-theme-option.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 550;
 }
 
 .settings-option {
@@ -1935,6 +2034,7 @@ body {
   align-items: center;
   gap: 0.44rem;
   color: var(--text-primary);
+  font-size: 0.76rem;
 }
 
 .settings-option input {
@@ -1943,7 +2043,18 @@ body {
 
 .settings-field {
   display: grid;
-  gap: 0.32rem;
+  gap: 0.28rem;
+}
+
+.settings-field > span {
+  font-size: 0.72rem;
+  color: var(--text-subtle);
+}
+
+.settings-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
 }
 
 .settings-update-row,
@@ -1958,31 +2069,31 @@ body {
 .settings-update-version,
 .settings-update-card {
   display: grid;
-  gap: 0.28rem;
+  gap: 0.22rem;
 }
 
 .settings-update-label,
 .settings-update-card-meta {
   font-size: 0.7rem;
-  color: var(--text-secondary);
+  color: var(--text-subtle);
 }
 
 .settings-update-card {
-  padding: 0.7rem;
-  border-radius: 3px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding: 0.65rem;
+  border-radius: 5px;
+  border: 1px solid var(--border-strong);
   background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
 }
 
 .settings-update-card-title {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .settings-update-status {
   margin: 0;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
 .settings-update-status.tone-success {
@@ -2007,15 +2118,15 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-  padding: 0.75rem 0.9rem;
-  background: var(--bg-surface-muted);
+  padding: 0.7rem 1rem;
+  border-top: 1px solid var(--border);
 }
 
 .dialog .btn {
-  border: 0;
-  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
   background: var(--control-bg);
-  padding: 0.45rem 0.7rem;
+  padding: 0.4rem 0.75rem;
   font-size: 0.76rem;
   font-weight: 500;
   cursor: pointer;
@@ -2033,19 +2144,19 @@ body {
 
 .dialog .btn.primary {
   background: var(--accent);
-  border-color: var(--accent);
+  border-color: transparent;
   color: var(--accent-contrast);
 }
 
 .dialog .btn.primary:hover:not(:disabled) {
   background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  border-color: transparent;
 }
 
 .dialog-body .muted {
   margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.76rem;
+  color: var(--text-subtle);
+  font-size: 0.72rem;
   line-height: 1.5;
 }
 
@@ -2072,8 +2183,8 @@ body {
 }
 
 .settings-error {
-  margin: 0.75rem 0.9rem 0;
-  font-size: 0.76rem;
+  margin: 0 1rem;
+  font-size: 0.74rem;
   color: var(--danger);
 }
 

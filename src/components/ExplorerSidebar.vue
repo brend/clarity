@@ -16,42 +16,31 @@ import type {
   DbObjectEntry,
   DbSessionSummary,
   OracleConnectionProfile,
-  OracleDbConnectRequest,
 } from "../types/clarity";
 
 const selectedProfileId = defineModel<string>("selectedProfileId", { required: true });
-const profileName = defineModel<string>("profileName", { required: true });
-const saveProfilePassword = defineModel<boolean>("saveProfilePassword", { required: true });
 
 const props = defineProps<{
-  connection: OracleDbConnectRequest;
-  connectionError: string;
   connectionProfiles: ConnectionProfile[];
   selectedProfile: OracleConnectionProfile | null;
   busy: BusyState;
   isConnected: boolean;
   session: DbSessionSummary | null;
   connectedSchema: string;
-  selectedProviderLabel: string;
-  highlightedSection: "connections" | "explorer";
   objectTree: ObjectTreeNode[];
   selectedObject: DbObjectEntry | null;
   isObjectTypeExpanded: (objectType: string) => boolean;
   onSyncSelectedProfileUi: () => void;
   onApplySelectedProfile: () => void;
-  onDeleteSelectedProfile: () => void;
-  onSaveConnectionProfile: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onRefreshObjects: () => void;
   onToggleObjectType: (objectType: string) => void;
   onOpenObjectFromExplorer: (object: DbObjectEntry) => void;
+  onOpenConnectionDialog: (mode: "new" | "edit") => void;
   createObjectTypes: CreateObjectTypeOption[];
   onRequestCreateObject: (objectType: string) => void;
 }>();
-
-const showAdvancedConnectionOptions = ref(false);
-const isConnectionPaneCollapsed = ref(false);
 const explorerContextMenu = ref<{
   x: number;
   y: number;
@@ -92,22 +81,12 @@ const refreshContextMenuLabel = computed(() => {
 
 watch(
   () => props.isConnected,
-  (isConnected, wasConnected) => {
+  (isConnected) => {
     if (!isConnected) {
       closeExplorerContextMenu();
-      isConnectionPaneCollapsed.value = false;
-      return;
-    }
-
-    if (!wasConnected) {
-      isConnectionPaneCollapsed.value = true;
     }
   },
 );
-
-function toggleConnectionPaneCollapsed(): void {
-  isConnectionPaneCollapsed.value = !isConnectionPaneCollapsed.value;
-}
 
 function onSelectedProfileChange(): void {
   props.onSyncSelectedProfileUi();
@@ -238,64 +217,27 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="explorer-sidebar">
-    <section
-      class="sidebar-card connect-box"
-      :class="{ spotlight: props.highlightedSection === 'connections' }"
-    >
-      <header class="card-header">
-        <div class="card-heading">
-          <p class="card-kicker">Connection Console</p>
-          <h2 class="card-title">Database Session</h2>
-          <p class="card-description">
-            {{ props.session ? props.session.displayName : "No active connection" }}
-          </p>
-        </div>
-        <div class="connect-header-actions">
-          <span class="connect-state-pill" :class="{ connected: props.isConnected }">
-            {{ props.isConnected ? "Connected" : "Offline" }}
-          </span>
-          <button
-            class="collapse-toggle"
-            type="button"
-            :aria-expanded="!isConnectionPaneCollapsed"
-            :title="isConnectionPaneCollapsed ? 'Expand connection pane' : 'Collapse connection pane'"
-            @click="toggleConnectionPaneCollapsed"
-          >
-            <AppIcon
-              name="chevron-right"
-              class="collapse-toggle-icon"
-              :class="{ expanded: !isConnectionPaneCollapsed }"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
-      </header>
-
-      <div class="connection-summary">
-        <div class="summary-tile">
-          <span class="summary-label">Provider</span>
-          <span class="summary-value">{{ props.selectedProviderLabel }}</span>
-        </div>
-        <div class="summary-tile">
-          <span class="summary-label">Schema</span>
-          <span class="summary-value">{{
-            props.connectedSchema || props.connection.connection.schema || "Pending"
-          }}</span>
-        </div>
-        <div class="summary-tile">
-          <span class="summary-label">Session</span>
-          <span class="summary-value">{{ props.session ? "Live" : "Draft" }}</span>
-        </div>
-      </div>
-
-      <div
-        v-if="!isConnectionPaneCollapsed"
-        class="connect-pane-body"
+    <section class="connect-box">
+      <select
+        class="connect-profile-select"
+        v-model="selectedProfileId"
+        :disabled="props.busy.loadingProfiles || props.busy.loadingProfileSecret"
+        @change="onSelectedProfileChange"
       >
-        <div class="connect-actions">
+        <option value="">(No connection selected)</option>
+        <option
+          v-for="profile in props.connectionProfiles"
+          :key="profile.id"
+          :value="profile.id"
+        >
+          {{ profile.name }}
+        </option>
+      </select>
+
+      <div class="connect-actions">
         <button
           class="btn primary btn-connect"
-          :disabled="props.busy.connecting"
+          :disabled="props.busy.connecting || !selectedProfileId"
           @click="props.isConnected ? props.onDisconnect() : props.onConnect()"
         >
           <AppIcon
@@ -312,219 +254,32 @@ onBeforeUnmount(() => {
           }}
         </button>
         <button
+          v-if="selectedProfileId"
           class="btn"
-          :disabled="!props.isConnected || props.busy.loadingObjects"
-          @click="props.onRefreshObjects"
+          title="Edit connection"
+          @click="props.onOpenConnectionDialog('edit')"
         >
-          <AppIcon name="refresh" class="btn-icon" aria-hidden="true" />
-          {{ props.busy.loadingObjects ? "Refreshing..." : "Refresh" }}
+          <AppIcon name="settings" class="btn-icon" aria-hidden="true" />
         </button>
-        </div>
-
-        <div class="connection-core-fields">
-          <div class="field-grid">
-          <label>
-            Host
-            <input
-              v-model.trim="props.connection.connection.host"
-              placeholder="db.example.com"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label>
-            Service
-            <input
-              v-model.trim="props.connection.connection.serviceName"
-              placeholder="XEPDB1"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label>
-            Username
-            <input
-              v-model.trim="props.connection.connection.username"
-              placeholder="hr"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label>
-            Schema
-            <input
-              v-model.trim="props.connection.connection.schema"
-              placeholder="HR"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label class="field-span">
-            Password
-            <input
-              v-model="props.connection.connection.password"
-              type="password"
-              placeholder="********"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-          </div>
-        </div>
-
-        <div class="profile-inline">
-          <label class="profile-select">
-            Profile
-            <select
-              v-model="selectedProfileId"
-              :disabled="
-                props.busy.loadingProfiles || props.busy.loadingProfileSecret
-              "
-              @change="onSelectedProfileChange"
-            >
-              <option value="">(Select profile)</option>
-              <option
-                v-for="profile in props.connectionProfiles"
-                :key="profile.id"
-                :value="profile.id"
-              >
-                {{ profile.name }}
-              </option>
-            </select>
-          </label>
-
-          <details class="profile-details">
-            <summary class="btn profile-manage-toggle">
-              <AppIcon
-                name="chevron-right"
-                class="connect-toggle-icon"
-                aria-hidden="true"
-              />
-              Manage profiles
-            </summary>
-
-            <div class="profile-controls">
-              <label>
-                Profile Name
-                <input
-                  v-model.trim="profileName"
-                  placeholder="Local Oracle Dev"
-                  spellcheck="false"
-                  autocomplete="off"
-                  autocorrect="off"
-                  autocapitalize="off"
-                  data-gramm="false"
-                />
-              </label>
-              <div class="profile-save-row">
-                <label class="profile-password-toggle">
-                  <input v-model="saveProfilePassword" type="checkbox" />
-                  Save password in OS keychain
-                </label>
-                <div class="profile-actions">
-                  <button
-                    class="btn"
-                    :disabled="props.busy.savingProfile"
-                    @click="props.onSaveConnectionProfile"
-                  >
-                    {{ props.busy.savingProfile ? "Saving..." : "Save" }}
-                  </button>
-                  <button
-                    class="btn"
-                    :disabled="!props.selectedProfile || props.busy.deletingProfile"
-                    @click="props.onDeleteSelectedProfile"
-                  >
-                    {{ props.busy.deletingProfile ? "Deleting..." : "Delete" }}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </details>
-        </div>
-
         <button
-          class="btn connect-advanced-toggle"
-          type="button"
-          :aria-expanded="showAdvancedConnectionOptions"
-          @click="showAdvancedConnectionOptions = !showAdvancedConnectionOptions"
+          class="btn"
+          title="New connection"
+          @click="props.onOpenConnectionDialog('new')"
         >
-          <AppIcon
-            name="chevron-right"
-            class="connect-toggle-icon"
-            :class="{ expanded: showAdvancedConnectionOptions }"
-            aria-hidden="true"
-          />
-          {{
-            showAdvancedConnectionOptions
-              ? "Hide advanced options"
-              : "Show advanced options"
-          }}
+          <AppIcon name="plus" class="btn-icon" aria-hidden="true" />
         </button>
-
-        <div v-show="showAdvancedConnectionOptions" class="field-grid advanced-grid">
-          <label>
-            Port
-            <input
-              v-model.number="props.connection.connection.port"
-              type="number"
-              min="1"
-              max="65535"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off"
-              data-gramm="false"
-            />
-          </label>
-
-          <label v-if="props.connection.provider === 'oracle'">
-            Auth Mode
-            <select v-model="props.connection.connection.oracleAuthMode">
-              <option value="normal">Normal</option>
-              <option value="sysdba">SYSDBA</option>
-            </select>
-          </label>
-        </div>
-
-        <p v-if="props.connectionError" class="connect-error">
-          {{ props.connectionError }}
-        </p>
       </div>
     </section>
 
     <section
       class="sidebar-card tree-area"
-      :class="{ spotlight: props.highlightedSection === 'explorer' }"
       @contextmenu="(event) => void openExplorerContextMenu(event, null)"
     >
       <header class="card-header">
         <div class="card-heading">
           <p class="card-kicker">Database Explorer</p>
           <h2 class="card-title">
-            {{
-              props.connectedSchema ||
-              props.connection.connection.schema ||
-              "Object tree"
-            }}
+            {{ props.connectedSchema || "Object tree" }}
           </h2>
           <p class="card-description">
             {{
@@ -727,14 +482,15 @@ onBeforeUnmount(() => {
   border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
 }
 
-.sidebar-card.spotlight {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent), var(--card-shadow);
-}
-
 .connect-box {
   display: grid;
-  gap: 0.5rem;
-  padding: 0.72rem;
+  gap: 0.45rem;
+  padding: 0.7rem;
+}
+
+.connect-profile-select {
+  width: 100%;
+  min-width: 0;
 }
 
 .tree-area {
@@ -751,248 +507,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 0.75rem;
   flex-wrap: wrap;
-}
-
-.connect-box > .card-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.45rem 0.7rem;
-}
-
-.connect-header-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  margin-left: auto;
-  flex: 0 0 auto;
-}
-
-.card-heading {
-  min-width: 0;
-  display: grid;
-  gap: 0.2rem;
-}
-
-.card-kicker {
-  margin: 0;
-  font-size: 0.64rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-subtle);
-}
-
-.card-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-
-.connect-box .card-title {
-  font-size: 0.92rem;
-}
-
-.card-description {
-  margin: 0;
-  font-size: 0.72rem;
-  color: var(--text-secondary);
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-
-.connect-box .card-description {
-  font-size: 0.66rem;
-  line-height: 1.3;
-}
-
-.connect-state-pill {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
-  color: var(--text-secondary);
-  padding: 0.28rem 0.62rem;
-  font-size: 0.58rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-
-.connect-state-pill.connected {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 10%, white);
-}
-
-.collapse-toggle {
-  border: 0;
-  background: color-mix(in srgb, var(--bg-surface-muted) 88%, transparent);
-  color: var(--text-secondary);
-  width: 1.7rem;
-  height: 1.7rem;
-  border-radius: 3px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex: 0 0 auto;
-}
-
-.collapse-toggle:hover {
-  background: var(--control-hover);
-  color: var(--text-primary);
-}
-
-.collapse-toggle-icon {
-  width: 0.78rem;
-  height: 0.78rem;
-  transition: transform 0.12s ease;
-}
-
-.collapse-toggle-icon.expanded {
-  transform: rotate(90deg);
-}
-
-.connection-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.35rem;
-}
-
-.connect-pane-body {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.summary-tile:last-child {
-  grid-column: auto;
-}
-
-.summary-tile {
-  display: grid;
-  gap: 0.14rem;
-  padding: 0.5rem 0.58rem;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--bg-surface-muted) 84%, transparent);
-}
-
-.summary-label {
-  font-size: 0.54rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-subtle);
-}
-
-.summary-value {
-  min-width: 0;
-  font-size: 0.68rem;
-  font-weight: 600;
-  line-height: 1.2;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  white-space: normal;
-}
-
-@media (max-width: 1240px) {
-  .connection-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.connect-toggle-icon {
-  width: 0.72rem;
-  height: 0.72rem;
-  color: var(--text-subtle);
-  transition: transform 0.12s ease;
-}
-
-.connect-toggle-icon.expanded {
-  transform: rotate(90deg);
-}
-
-.connection-core-fields {
-  padding: 0.65rem;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
-}
-
-.profile-inline {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.profile-select {
-  min-width: 0;
-}
-
-.profile-details {
-  min-width: 0;
-}
-
-.profile-details > summary {
-  list-style: none;
-}
-
-.profile-details > summary::-webkit-details-marker {
-  display: none;
-}
-
-.profile-details[open] .connect-toggle-icon {
-  transform: rotate(90deg);
-}
-
-.profile-controls {
-  display: grid;
-  gap: 0.45rem;
-  padding: 0.56rem;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-surface-muted) 82%, transparent);
-}
-
-.profile-actions {
-  display: flex;
-  gap: 0.34rem;
-  justify-content: flex-end;
-}
-
-.profile-manage-toggle {
-  width: fit-content;
-  white-space: nowrap;
-  justify-content: flex-start;
-}
-
-.profile-details > .profile-controls {
-  margin-top: 0.34rem;
-}
-
-.profile-save-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 0.34rem;
-}
-
-.profile-password-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.74rem;
-  color: var(--text-secondary);
-  min-width: 0;
-}
-
-.profile-password-toggle input {
-  margin: 0;
-}
-
-.field-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
-}
-
-.field-span {
-  grid-column: 1 / -1;
 }
 
 label {
@@ -1041,22 +555,6 @@ button:focus-visible {
   justify-content: center;
 }
 
-.connect-advanced-toggle {
-  justify-content: flex-start;
-}
-
-.advanced-grid {
-  padding: 0.25rem 0 0.1rem;
-}
-
-.connect-error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 0.72rem;
-  line-height: 1.28;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 
 .btn {
   border: 0;
@@ -1282,13 +780,7 @@ button:focus-visible {
     padding: 0 1rem 1rem;
   }
 
-  .profile-save-row {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
-  .connection-summary,
-  .field-grid {
+  .connection-summary {
     grid-template-columns: 1fr;
   }
 

@@ -88,6 +88,10 @@ export function initializeThemeFromSettings(): void {
   applyTheme(stored.theme);
 }
 
+export function previewTheme(theme: ThemeSetting): void {
+  applyTheme(theme);
+}
+
 export function useUserSettings() {
   const settings = ref<UserSettings>(readStoredUserSettings());
 
