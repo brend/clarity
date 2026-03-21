@@ -1896,7 +1896,7 @@ button:focus-visible {
   border-radius: 999px;
   background: var(--schema-chip-bg);
   color: var(--schema-chip-text);
-  font-size: 0.6rem;
+  font-size: 0.56rem;
   font-weight: 600;
 }
 
