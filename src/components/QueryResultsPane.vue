@@ -1459,7 +1459,8 @@ onBeforeUnmount(() => {
   overflow: auto;
   padding: 0.5rem;
   margin: 0;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--font-data);
+  font-size: var(--font-data-size);
 }
 
 .results-empty-state {
@@ -1502,13 +1503,13 @@ onBeforeUnmount(() => {
   flex: 1 1 14rem;
   min-width: 11rem;
   padding: 0.26rem 0.4rem;
-  font-size: 0.66rem;
+  font-size: var(--font-data-size);
 }
 
 .results-filter-input {
   width: 100%;
   padding: 0.2rem 0.32rem;
-  font-size: 0.65rem;
+  font-size: var(--font-data-size);
 }
 
 .results-toolbar-btn {
@@ -1516,7 +1517,7 @@ onBeforeUnmount(() => {
   border-radius: 3px;
   background: color-mix(in srgb, var(--control-bg) 92%, transparent);
   color: var(--text-primary);
-  font-size: 0.64rem;
+  font-size: var(--font-data-size);
   font-weight: 600;
   padding: 0.24rem 0.38rem;
   cursor: pointer;
@@ -1542,7 +1543,7 @@ onBeforeUnmount(() => {
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 0.7rem;
+  font-size: var(--font-data-size);
   margin: 0;
   border-radius: 3px;
   overflow: hidden;
@@ -1625,7 +1626,7 @@ onBeforeUnmount(() => {
   min-width: 0.68rem;
   text-align: center;
   color: var(--text-secondary);
-  font-size: 0.63rem;
+  font-size: var(--font-data-size);
 }
 
 .results-filter-row th {
@@ -1690,7 +1691,7 @@ onBeforeUnmount(() => {
 
 .muted {
   color: var(--text-secondary);
-  font-size: 0.73rem;
+  font-size: var(--font-data-size);
 }
 
 .results-message {
@@ -1699,7 +1700,7 @@ onBeforeUnmount(() => {
 
 .results-footer {
   padding: 0.3rem 0.75rem;
-  font-size: 0.7rem;
+  font-size: var(--font-data-size);
   border-top: 1px solid color-mix(in srgb, var(--table-divider) 70%, transparent);
   background:
     linear-gradient(

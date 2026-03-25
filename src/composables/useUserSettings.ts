@@ -3,8 +3,21 @@ import type { ThemeSetting, UserSettings } from "../types/settings";
 
 const USER_SETTINGS_STORAGE_KEY = "clarity.user-settings.v1";
 const THEME_ATTRIBUTE_NAME = "data-theme";
+const UI_FONT_FAMILY_DEFAULT =
+  '"SF Pro Display", "Avenir Next", "Segoe UI", system-ui, sans-serif';
+const UI_FONT_SIZE_DEFAULT = 16;
+const QUERY_EDITOR_FONT_FAMILY_DEFAULT = 'Consolas, "Courier New", monospace';
+const QUERY_EDITOR_FONT_SIZE_DEFAULT = 15;
+const DATA_FONT_FAMILY_DEFAULT = 'Consolas, "Courier New", monospace';
+const DATA_FONT_SIZE_DEFAULT = 11;
 const DEFAULT_USER_SETTINGS: UserSettings = {
   theme: "light",
+  uiFontFamily: UI_FONT_FAMILY_DEFAULT,
+  uiFontSize: UI_FONT_SIZE_DEFAULT,
+  queryEditorFontFamily: QUERY_EDITOR_FONT_FAMILY_DEFAULT,
+  queryEditorFontSize: QUERY_EDITOR_FONT_SIZE_DEFAULT,
+  dataFontFamily: DATA_FONT_FAMILY_DEFAULT,
+  dataFontSize: DATA_FONT_SIZE_DEFAULT,
   oracleClientLibDir: "",
   aiSuggestionsEnabled: false,
   aiModel: "gpt-4o-mini",
@@ -14,6 +27,35 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
 
 function isThemeSetting(value: unknown): value is ThemeSetting {
   return value === "light" || value === "dark";
+}
+
+function normalizeFontFamily(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function normalizeFontSize(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : NaN;
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  const rounded = Math.round(numericValue);
+  return Math.min(max, Math.max(min, rounded));
 }
 
 function normalizeUserSettings(value: unknown): UserSettings {
@@ -32,6 +74,36 @@ function normalizeUserSettings(value: unknown): UserSettings {
       : "";
   return {
     theme: isThemeSetting(raw.theme) ? raw.theme : DEFAULT_USER_SETTINGS.theme,
+    uiFontFamily: normalizeFontFamily(
+      raw.uiFontFamily,
+      DEFAULT_USER_SETTINGS.uiFontFamily,
+    ),
+    uiFontSize: normalizeFontSize(
+      raw.uiFontSize,
+      DEFAULT_USER_SETTINGS.uiFontSize,
+      12,
+      24,
+    ),
+    queryEditorFontFamily: normalizeFontFamily(
+      raw.queryEditorFontFamily,
+      DEFAULT_USER_SETTINGS.queryEditorFontFamily,
+    ),
+    queryEditorFontSize: normalizeFontSize(
+      raw.queryEditorFontSize,
+      DEFAULT_USER_SETTINGS.queryEditorFontSize,
+      10,
+      28,
+    ),
+    dataFontFamily: normalizeFontFamily(
+      raw.dataFontFamily,
+      DEFAULT_USER_SETTINGS.dataFontFamily,
+    ),
+    dataFontSize: normalizeFontSize(
+      raw.dataFontSize,
+      DEFAULT_USER_SETTINGS.dataFontSize,
+      9,
+      24,
+    ),
     oracleClientLibDir: normalizedOracleClientLibDir,
     aiSuggestionsEnabled:
       typeof raw.aiSuggestionsEnabled === "boolean"
@@ -83,9 +155,31 @@ function applyTheme(theme: ThemeSetting): void {
   document.documentElement.setAttribute(THEME_ATTRIBUTE_NAME, theme);
 }
 
+function applyFontSettings(settings: UserSettings): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--font-ui", settings.uiFontFamily);
+  rootStyle.setProperty("--font-ui-size", `${settings.uiFontSize}px`);
+  rootStyle.setProperty("--font-editor", settings.queryEditorFontFamily);
+  rootStyle.setProperty(
+    "--font-editor-size",
+    `${settings.queryEditorFontSize}px`,
+  );
+  rootStyle.setProperty("--font-data", settings.dataFontFamily);
+  rootStyle.setProperty("--font-data-size", `${settings.dataFontSize}px`);
+}
+
+function applyVisualSettings(settings: UserSettings): void {
+  applyTheme(settings.theme);
+  applyFontSettings(settings);
+}
+
 export function initializeThemeFromSettings(): void {
   const stored = readStoredUserSettings();
-  applyTheme(stored.theme);
+  applyVisualSettings(stored);
 }
 
 export function previewTheme(theme: ThemeSetting): void {
@@ -99,7 +193,7 @@ export function useUserSettings() {
     settings,
     (nextSettings) => {
       writeStoredUserSettings(nextSettings);
-      applyTheme(nextSettings.theme);
+      applyVisualSettings(nextSettings);
     },
     { deep: true, immediate: true },
   );
@@ -126,6 +220,99 @@ export function useUserSettings() {
     settings.value = {
       ...settings.value,
       oracleClientLibDir: normalized,
+    };
+  }
+
+  function updateUiFontFamily(value: string): void {
+    const normalized = normalizeFontFamily(value, DEFAULT_USER_SETTINGS.uiFontFamily);
+    if (settings.value.uiFontFamily === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      uiFontFamily: normalized,
+    };
+  }
+
+  function updateUiFontSize(value: number): void {
+    const normalized = normalizeFontSize(
+      value,
+      DEFAULT_USER_SETTINGS.uiFontSize,
+      12,
+      24,
+    );
+    if (settings.value.uiFontSize === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      uiFontSize: normalized,
+    };
+  }
+
+  function updateQueryEditorFontFamily(value: string): void {
+    const normalized = normalizeFontFamily(
+      value,
+      DEFAULT_USER_SETTINGS.queryEditorFontFamily,
+    );
+    if (settings.value.queryEditorFontFamily === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      queryEditorFontFamily: normalized,
+    };
+  }
+
+  function updateQueryEditorFontSize(value: number): void {
+    const normalized = normalizeFontSize(
+      value,
+      DEFAULT_USER_SETTINGS.queryEditorFontSize,
+      10,
+      28,
+    );
+    if (settings.value.queryEditorFontSize === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      queryEditorFontSize: normalized,
+    };
+  }
+
+  function updateDataFontFamily(value: string): void {
+    const normalized = normalizeFontFamily(
+      value,
+      DEFAULT_USER_SETTINGS.dataFontFamily,
+    );
+    if (settings.value.dataFontFamily === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      dataFontFamily: normalized,
+    };
+  }
+
+  function updateDataFontSize(value: number): void {
+    const normalized = normalizeFontSize(
+      value,
+      DEFAULT_USER_SETTINGS.dataFontSize,
+      9,
+      24,
+    );
+    if (settings.value.dataFontSize === normalized) {
+      return;
+    }
+
+    settings.value = {
+      ...settings.value,
+      dataFontSize: normalized,
     };
   }
 
@@ -182,6 +369,12 @@ export function useUserSettings() {
     settings,
     theme,
     updateTheme,
+    updateUiFontFamily,
+    updateUiFontSize,
+    updateQueryEditorFontFamily,
+    updateQueryEditorFontSize,
+    updateDataFontFamily,
+    updateDataFontSize,
     updateOracleClientLibDir,
     updateAiSuggestionsEnabled,
     updateAiModel,

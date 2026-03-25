@@ -252,6 +252,12 @@ const {
   settings,
   theme,
   updateTheme,
+  updateUiFontFamily,
+  updateUiFontSize,
+  updateQueryEditorFontFamily,
+  updateQueryEditorFontSize,
+  updateDataFontFamily,
+  updateDataFontSize,
   updateOracleClientLibDir,
   updateAiSuggestionsEnabled,
   updateAiModel,
@@ -260,6 +266,14 @@ const {
 } = useUserSettings();
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
 watch(settingsDialogTheme, (next) => previewTheme(next));
+const settingsDialogUiFontFamily = ref(settings.value.uiFontFamily);
+const settingsDialogUiFontSize = ref(settings.value.uiFontSize);
+const settingsDialogQueryEditorFontFamily = ref(
+  settings.value.queryEditorFontFamily,
+);
+const settingsDialogQueryEditorFontSize = ref(settings.value.queryEditorFontSize);
+const settingsDialogDataFontFamily = ref(settings.value.dataFontFamily);
+const settingsDialogDataFontSize = ref(settings.value.dataFontSize);
 const settingsDialogOracleClientLibDir = ref(settings.value.oracleClientLibDir);
 const settingsDialogAiSuggestionsEnabled = ref(
   settings.value.aiSuggestionsEnabled,
@@ -875,6 +889,12 @@ async function openSettingsDialog(
   options: OpenSettingsDialogOptions = {},
 ): Promise<void> {
   settingsDialogTheme.value = theme.value;
+  settingsDialogUiFontFamily.value = settings.value.uiFontFamily;
+  settingsDialogUiFontSize.value = settings.value.uiFontSize;
+  settingsDialogQueryEditorFontFamily.value = settings.value.queryEditorFontFamily;
+  settingsDialogQueryEditorFontSize.value = settings.value.queryEditorFontSize;
+  settingsDialogDataFontFamily.value = settings.value.dataFontFamily;
+  settingsDialogDataFontSize.value = settings.value.dataFontSize;
   settingsDialogOracleClientLibDir.value = settings.value.oracleClientLibDir;
   settingsDialogAiSuggestionsEnabled.value =
     settings.value.aiSuggestionsEnabled;
@@ -897,6 +917,12 @@ function closeSettingsDialog(): void {
 
 async function saveSettingsDialog(): Promise<void> {
   updateTheme(settingsDialogTheme.value);
+  updateUiFontFamily(settingsDialogUiFontFamily.value);
+  updateUiFontSize(settingsDialogUiFontSize.value);
+  updateQueryEditorFontFamily(settingsDialogQueryEditorFontFamily.value);
+  updateQueryEditorFontSize(settingsDialogQueryEditorFontSize.value);
+  updateDataFontFamily(settingsDialogDataFontFamily.value);
+  updateDataFontSize(settingsDialogDataFontSize.value);
   updateOracleClientLibDir(settingsDialogOracleClientLibDir.value);
   updateAiSuggestionsEnabled(settingsDialogAiSuggestionsEnabled.value);
   updateAiModel(settingsDialogAiModel.value);
@@ -1381,6 +1407,74 @@ onBeforeUnmount(() => {
               <span>Dark</span>
             </label>
           </div>
+          <div class="settings-fields-grid">
+            <label class="settings-field">
+              <span>UI Font Family</span>
+              <input
+                v-model.trim="settingsDialogUiFontFamily"
+                placeholder="SF Pro Display, Avenir Next, Segoe UI"
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+            <label class="settings-field">
+              <span>UI Font Size (px)</span>
+              <input
+                v-model.number="settingsDialogUiFontSize"
+                type="number"
+                min="12"
+                max="24"
+                step="1"
+              />
+            </label>
+            <label class="settings-field">
+              <span>Query Editor Font Family</span>
+              <input
+                v-model.trim="settingsDialogQueryEditorFontFamily"
+                placeholder='Consolas, "Courier New", monospace'
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+            <label class="settings-field">
+              <span>Query Editor Font Size (px)</span>
+              <input
+                v-model.number="settingsDialogQueryEditorFontSize"
+                type="number"
+                min="10"
+                max="28"
+                step="1"
+              />
+            </label>
+            <label class="settings-field">
+              <span>Data View Font Family</span>
+              <input
+                v-model.trim="settingsDialogDataFontFamily"
+                placeholder='Consolas, "Courier New", monospace'
+                spellcheck="false"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                data-gramm="false"
+              />
+            </label>
+            <label class="settings-field">
+              <span>Data View Font Size (px)</span>
+              <input
+                v-model.number="settingsDialogDataFontSize"
+                type="number"
+                min="9"
+                max="24"
+                step="1"
+              />
+            </label>
+          </div>
         </fieldset>
 
         <fieldset class="settings-group">
@@ -1657,6 +1751,11 @@ onBeforeUnmount(() => {
 :root[data-theme="light"] {
   --font-ui:
     "SF Pro Display", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-ui-size: 16px;
+  --font-editor: Consolas, "Courier New", monospace;
+  --font-editor-size: 15px;
+  --font-data: Consolas, "Courier New", monospace;
+  --font-data-size: 11px;
   --bg-canvas: #edf1f5;
   --bg-shell: rgba(255, 255, 255, 0.88);
   --bg-sidebar: rgba(244, 248, 252, 0.92);
@@ -1728,6 +1827,7 @@ onBeforeUnmount(() => {
   --shell-border: rgba(92, 112, 150, 0.05);
   --shell-inner-border: rgba(255, 255, 255, 0.12);
   --grid-line: rgba(92, 112, 150, 0.0);
+  font-size: var(--font-ui-size);
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-canvas);

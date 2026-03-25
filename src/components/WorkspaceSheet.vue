@@ -2603,7 +2603,7 @@ button:focus-visible {
 .source-search-content {
   overflow: auto;
   min-height: 0;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--font-data);
   border-radius: 4px;
   background: var(--bg-surface);
 }
@@ -2611,7 +2611,7 @@ button:focus-visible {
 .source-search-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.7rem;
+  font-size: var(--font-data-size);
 }
 
 .source-search-table th,
@@ -2652,7 +2652,7 @@ button:focus-visible {
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
-  font-size: 0.7rem;
+  font-size: var(--font-data-size);
   margin: 0;
 }
 
@@ -2793,7 +2793,7 @@ button:focus-visible {
   width: 100%;
   min-width: 0;
   padding: 0.2rem 0.3rem;
-  font-size: 0.68rem;
+  font-size: var(--font-data-size);
   font-family: inherit;
   color: var(--text-primary);
   border: 0;
@@ -3013,12 +3013,12 @@ button:focus-visible {
 }
 
 .object-detail-grid-pane.is-data-view .results-table td:not(.results-row-actions-cell) {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--font-data);
   user-select: none;
 }
 
 .object-detail-grid-pane.is-data-view .cell-editor {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--font-data);
   padding: 0.08rem 0.16rem;
 }
 
