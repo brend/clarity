@@ -114,10 +114,21 @@ const queryEditorRef = ref<{
   getSelectedText?: () => string;
   openSearch?: () => void;
 } | null>(null);
+
+type GridCellCoord = {
+  rowIndex: number;
+  colIndex: number;
+};
+
 const dataDraftRows = ref<string[][]>([]);
 const dataDraftSourceIndexes = ref<Array<number | null>>([]);
 const selectedRowIndexes = ref<Set<number>>(new Set());
 const lastClickedRowIndex = ref<number | null>(null);
+const cellSelectionAnchor = ref<GridCellCoord | null>(null);
+const cellSelectionFocus = ref<GridCellCoord | null>(null);
+const isCellSelectionDragging = ref(false);
+const editingCell = ref<GridCellCoord | null>(null);
+const editingCellInitialValue = ref("");
 const committingDataChanges = ref(false);
 const suppressDraftSync = ref(false);
 const objectDetailGridWrapEl = ref<HTMLElement | null>(null);
@@ -273,6 +284,7 @@ function syncDraftRowsFromResult(): void {
   if (!showEditableRowActions.value || !props.activeObjectDetailResult) {
     dataDraftRows.value = [];
     dataDraftSourceIndexes.value = [];
+    clearSelection();
     return;
   }
 
@@ -281,6 +293,7 @@ function syncDraftRowsFromResult(): void {
     (_, rowIndex) => rowIndex,
   );
   clearSelection();
+  ensureCellSelectionWithinBounds();
 }
 
 function onCellDraftInput(
@@ -321,10 +334,7 @@ function addDraftRow(): void {
     }
 
     gridWrap.scrollTop = gridWrap.scrollHeight;
-    const firstCellInput = gridWrap.querySelector<HTMLInputElement>(
-      `tr[data-draft-row="${newRowIndex}"] input.cell-editor`,
-    );
-    firstCellInput?.focus();
+    enterCellEditMode(newRowIndex, 0, true);
   });
 }
 
@@ -430,6 +440,36 @@ const someRowsSelected = computed<boolean>(
     selectedRowIndexes.value.size > 0 &&
     selectedRowIndexes.value.size < displayedDataRows.value.length,
 );
+const selectedCellRange = computed<{
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+} | null>(() => {
+  if (
+    !showEditableRowActions.value ||
+    !cellSelectionAnchor.value ||
+    !cellSelectionFocus.value ||
+    displayedDataRows.value.length < 1 ||
+    editableColumnCount.value < 1
+  ) {
+    return null;
+  }
+
+  const anchor = clampCellCoord(cellSelectionAnchor.value);
+  const focus = clampCellCoord(cellSelectionFocus.value);
+  return {
+    startRow: Math.min(anchor.rowIndex, focus.rowIndex),
+    endRow: Math.max(anchor.rowIndex, focus.rowIndex),
+    startCol: Math.min(anchor.colIndex, focus.colIndex),
+    endCol: Math.max(anchor.colIndex, focus.colIndex),
+  };
+});
+const hasCellSelection = computed<boolean>(() => !!selectedCellRange.value);
+const hasCopyableSelection = computed<boolean>(
+  () => hasCellSelection.value || hasSelection.value,
+);
+const canCopySelection = computed<boolean>(() => hasCopyableSelection.value);
 
 function isPersistedDataRow(rowIndex: number): boolean {
   return getDraftSourceRowIndex(rowIndex) !== null;
@@ -448,12 +488,441 @@ function canDeleteDraftRow(rowIndex: number): boolean {
   );
 }
 
+function clampCellCoord(cell: GridCellCoord): GridCellCoord {
+  const maxRowIndex = Math.max(0, displayedDataRows.value.length - 1);
+  const maxColIndex = Math.max(0, editableColumnCount.value - 1);
+  return {
+    rowIndex: Math.min(Math.max(cell.rowIndex, 0), maxRowIndex),
+    colIndex: Math.min(Math.max(cell.colIndex, 0), maxColIndex),
+  };
+}
+
+function isDataGridFocused(): boolean {
+  const gridWrap = objectDetailGridWrapEl.value;
+  const activeEl = document.activeElement;
+  if (!gridWrap || !(activeEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  return activeEl === gridWrap || gridWrap.contains(activeEl);
+}
+
+function focusDataGrid(): void {
+  objectDetailGridWrapEl.value?.focus();
+}
+
+function stopCellSelectionDrag(): void {
+  if (!isCellSelectionDragging.value) {
+    return;
+  }
+
+  isCellSelectionDragging.value = false;
+  window.removeEventListener("mouseup", stopCellSelectionDrag);
+}
+
+function clearCellSelection(): void {
+  stopCellSelectionDrag();
+  cellSelectionAnchor.value = null;
+  cellSelectionFocus.value = null;
+}
+
+function exitCellEditMode(): void {
+  editingCell.value = null;
+  editingCellInitialValue.value = "";
+}
+
 function clearSelection(): void {
   selectedRowIndexes.value = new Set();
   lastClickedRowIndex.value = null;
+  clearCellSelection();
+  exitCellEditMode();
+}
+
+function ensureCellSelectionWithinBounds(): void {
+  if (
+    !showEditableRowActions.value ||
+    displayedDataRows.value.length < 1 ||
+    editableColumnCount.value < 1
+  ) {
+    clearCellSelection();
+    exitCellEditMode();
+    return;
+  }
+
+  if (cellSelectionAnchor.value) {
+    cellSelectionAnchor.value = clampCellCoord(cellSelectionAnchor.value);
+  }
+  if (cellSelectionFocus.value) {
+    cellSelectionFocus.value = clampCellCoord(cellSelectionFocus.value);
+  }
+  if (editingCell.value) {
+    editingCell.value = clampCellCoord(editingCell.value);
+  }
+
+  if (cellSelectionAnchor.value && !cellSelectionFocus.value) {
+    cellSelectionFocus.value = clampCellCoord(cellSelectionAnchor.value);
+  } else if (!cellSelectionAnchor.value && cellSelectionFocus.value) {
+    cellSelectionAnchor.value = clampCellCoord(cellSelectionFocus.value);
+  }
+}
+
+function getActiveCell(): GridCellCoord | null {
+  if (selectedCellRange.value) {
+    return cellSelectionFocus.value ? clampCellCoord(cellSelectionFocus.value) : null;
+  }
+
+  return null;
+}
+
+function setCellSelection(
+  rowIndex: number,
+  colIndex: number,
+  options: { extendFromAnchor?: boolean } = {},
+): void {
+  if (
+    !showEditableRowActions.value ||
+    displayedDataRows.value.length < 1 ||
+    editableColumnCount.value < 1
+  ) {
+    return;
+  }
+
+  const nextCell = clampCellCoord({ rowIndex, colIndex });
+  if (options.extendFromAnchor && cellSelectionAnchor.value) {
+    cellSelectionFocus.value = nextCell;
+    return;
+  }
+
+  cellSelectionAnchor.value = nextCell;
+  cellSelectionFocus.value = nextCell;
+}
+
+function scrollCellIntoView(cell: GridCellCoord): void {
+  const gridWrap = objectDetailGridWrapEl.value;
+  if (!gridWrap) {
+    return;
+  }
+
+  const cellEl = gridWrap.querySelector<HTMLTableCellElement>(
+    `td[data-cell-row="${cell.rowIndex}"][data-cell-col="${cell.colIndex}"]`,
+  );
+  cellEl?.scrollIntoView({
+    block: "nearest",
+    inline: "nearest",
+  });
+}
+
+function isCellInSelection(rowIndex: number, colIndex: number): boolean {
+  const range = selectedCellRange.value;
+  if (!range) {
+    return false;
+  }
+
+  return (
+    rowIndex >= range.startRow &&
+    rowIndex <= range.endRow &&
+    colIndex >= range.startCol &&
+    colIndex <= range.endCol
+  );
+}
+
+function isActiveCell(rowIndex: number, colIndex: number): boolean {
+  const activeCell = getActiveCell();
+  return (
+    !!activeCell &&
+    activeCell.rowIndex === rowIndex &&
+    activeCell.colIndex === colIndex
+  );
+}
+
+function isEditingCell(rowIndex: number, colIndex: number): boolean {
+  return (
+    !!editingCell.value &&
+    editingCell.value.rowIndex === rowIndex &&
+    editingCell.value.colIndex === colIndex
+  );
+}
+
+function onEditableCellMouseDown(
+  rowIndex: number,
+  colIndex: number,
+  event: MouseEvent,
+): void {
+  const target = event.target;
+  if (
+    target instanceof HTMLInputElement &&
+    target.classList.contains("cell-editor")
+  ) {
+    return;
+  }
+
+  if (
+    !showEditableRowActions.value ||
+    event.button !== 0 ||
+    committingDataChanges.value ||
+    props.busy.updatingData
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  focusDataGrid();
+  selectedRowIndexes.value = new Set();
+  lastClickedRowIndex.value = null;
+
+  if (editingCell.value && !isEditingCell(rowIndex, colIndex)) {
+    exitCellEditMode();
+  }
+
+  setCellSelection(rowIndex, colIndex, {
+    extendFromAnchor: event.shiftKey,
+  });
+  isCellSelectionDragging.value = true;
+  window.addEventListener("mouseup", stopCellSelectionDrag);
+}
+
+function onEditableCellMouseEnter(rowIndex: number, colIndex: number): void {
+  if (!isCellSelectionDragging.value) {
+    return;
+  }
+
+  setCellSelection(rowIndex, colIndex, { extendFromAnchor: true });
+}
+
+function focusActiveCellEditor(selectAll: boolean): void {
+  if (!editingCell.value) {
+    return;
+  }
+
+  const targetCell = editingCell.value;
+  void nextTick(() => {
+    const gridWrap = objectDetailGridWrapEl.value;
+    if (!gridWrap) {
+      return;
+    }
+
+    const input = gridWrap.querySelector<HTMLInputElement>(
+      `input.cell-editor[data-cell-row="${targetCell.rowIndex}"][data-cell-col="${targetCell.colIndex}"]`,
+    );
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    if (selectAll) {
+      input.select();
+    }
+  });
+}
+
+function enterCellEditMode(
+  rowIndex: number,
+  colIndex: number,
+  selectAll: boolean,
+): void {
+  if (
+    !showEditableRowActions.value ||
+    committingDataChanges.value ||
+    props.busy.updatingData ||
+    displayedDataRows.value.length < 1 ||
+    editableColumnCount.value < 1
+  ) {
+    return;
+  }
+
+  const nextCell = clampCellCoord({ rowIndex, colIndex });
+  setCellSelection(nextCell.rowIndex, nextCell.colIndex);
+  editingCell.value = nextCell;
+  editingCellInitialValue.value =
+    dataDraftRows.value[nextCell.rowIndex]?.[nextCell.colIndex] ?? "";
+  scrollCellIntoView(nextCell);
+  focusActiveCellEditor(selectAll);
+}
+
+function onEditableCellDoubleClick(
+  rowIndex: number,
+  colIndex: number,
+  event: MouseEvent,
+): void {
+  if (event.button !== 0) {
+    return;
+  }
+
+  event.preventDefault();
+  enterCellEditMode(rowIndex, colIndex, true);
+}
+
+function onCellEditorBlur(): void {
+  exitCellEditMode();
+}
+
+function onCellEditorEscape(rowIndex: number, colIndex: number): void {
+  if (!isEditingCell(rowIndex, colIndex)) {
+    return;
+  }
+
+  if (!dataDraftRows.value[rowIndex]) {
+    dataDraftRows.value[rowIndex] = [];
+  }
+  dataDraftRows.value[rowIndex][colIndex] = editingCellInitialValue.value;
+  exitCellEditMode();
+  focusDataGrid();
+}
+
+function onCellEditorEnter(rowIndex: number, colIndex: number): void {
+  if (!isEditingCell(rowIndex, colIndex)) {
+    return;
+  }
+
+  exitCellEditMode();
+  setCellSelection(rowIndex, colIndex);
+  focusDataGrid();
+}
+
+function moveCellSelection(
+  rowDelta: number,
+  colDelta: number,
+  extendFromAnchor: boolean,
+): void {
+  if (
+    !showEditableRowActions.value ||
+    displayedDataRows.value.length < 1 ||
+    editableColumnCount.value < 1
+  ) {
+    return;
+  }
+
+  const current = getActiveCell();
+  if (!current) {
+    const firstCell = { rowIndex: 0, colIndex: 0 };
+    setCellSelection(firstCell.rowIndex, firstCell.colIndex);
+    scrollCellIntoView(firstCell);
+    return;
+  }
+
+  const nextCell = clampCellCoord({
+    rowIndex: current.rowIndex + rowDelta,
+    colIndex: current.colIndex + colDelta,
+  });
+  setCellSelection(nextCell.rowIndex, nextCell.colIndex, { extendFromAnchor });
+  scrollCellIntoView(nextCell);
+}
+
+function toTsvCell(value: string): string {
+  if (/["\t\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, "\"\"")}"`;
+  }
+
+  return value;
+}
+
+function getSelectedRowsClipboardText(): string {
+  const sortedIndexes = [...selectedRowIndexes.value].sort((a, b) => a - b);
+  const lines = sortedIndexes.map((rowIndex) => {
+    const row = displayedDataRows.value[rowIndex] ?? [];
+    return row.map((value) => toTsvCell(value ?? "")).join("\t");
+  });
+  return lines.join("\n");
+}
+
+function getSelectedCellRangeClipboardText(): string {
+  const range = selectedCellRange.value;
+  if (!range) {
+    return "";
+  }
+
+  const lines: string[] = [];
+  for (let rowIndex = range.startRow; rowIndex <= range.endRow; rowIndex += 1) {
+    const row = displayedDataRows.value[rowIndex] ?? [];
+    const cells: string[] = [];
+    for (let colIndex = range.startCol; colIndex <= range.endCol; colIndex += 1) {
+      cells.push(toTsvCell(row[colIndex] ?? ""));
+    }
+    lines.push(cells.join("\t"));
+  }
+
+  return lines.join("\n");
+}
+
+function getSelectionClipboardText(): string {
+  const cellText = getSelectedCellRangeClipboardText();
+  if (cellText) {
+    return cellText;
+  }
+
+  return getSelectedRowsClipboardText();
+}
+
+function isCellEditorFocused(): boolean {
+  const activeEl = document.activeElement;
+  return (
+    activeEl instanceof HTMLInputElement &&
+    activeEl.classList.contains("cell-editor")
+  );
+}
+
+function shouldHandleSelectionCopy(requireDataGridFocus: boolean): boolean {
+  if (
+    !showEditableRowActions.value ||
+    !hasCopyableSelection.value ||
+    isCellEditorFocused()
+  ) {
+    return false;
+  }
+
+  return !requireDataGridFocus || isDataGridFocused();
+}
+
+async function writeTextToClipboard(text: string): Promise<boolean> {
+  if (!text) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+
+    document.body.removeChild(textarea);
+    return copied;
+  }
+}
+
+async function copyCurrentSelectionToClipboard(
+  requireDataGridFocus: boolean,
+): Promise<void> {
+  if (!shouldHandleSelectionCopy(requireDataGridFocus)) {
+    return;
+  }
+
+  const text = getSelectionClipboardText();
+  if (!text) {
+    return;
+  }
+
+  await writeTextToClipboard(text);
 }
 
 function toggleRowSelection(rowIndex: number, event: MouseEvent): void {
+  clearCellSelection();
+  exitCellEditMode();
   const next = new Set(selectedRowIndexes.value);
 
   if (event.shiftKey && lastClickedRowIndex.value !== null) {
@@ -478,6 +947,8 @@ function toggleRowSelection(rowIndex: number, event: MouseEvent): void {
 }
 
 function toggleSelectAll(): void {
+  clearCellSelection();
+  exitCellEditMode();
   if (allRowsSelected.value) {
     selectedRowIndexes.value = new Set();
   } else {
@@ -621,8 +1092,13 @@ watch(
 );
 
 watch(
-  () => displayedDataRows.value.length,
+  () => [
+    displayedDataRows.value.length,
+    editableColumnCount.value,
+    showEditableRowActions.value,
+  ],
   () => {
+    ensureCellSelectionWithinBounds();
     void nextTick(() => {
       updateObjectDetailViewportMetrics();
       measureObjectDetailRowHeight();
@@ -741,6 +1217,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopObjectDetailColumnResize();
+  stopCellSelectionDrag();
   window.removeEventListener("resize", updateObjectDetailViewportMetrics);
 });
 
@@ -804,6 +1281,19 @@ function isPlainEscape(event: KeyboardEvent): boolean {
   );
 }
 
+function isCellNavigationKey(event: KeyboardEvent): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return false;
+  }
+
+  return (
+    event.key === "ArrowUp" ||
+    event.key === "ArrowDown" ||
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight"
+  );
+}
+
 function executeWithSelection(): void {
   const selected = queryEditorRef.value?.getSelectedText?.() ?? "";
   props.onRunQuery(selected);
@@ -813,8 +1303,32 @@ function openQuerySearch(): void {
   queryEditorRef.value?.openSearch?.();
 }
 
+function handleSheetCopy(event: ClipboardEvent): void {
+  if (!shouldHandleSelectionCopy(true)) {
+    return;
+  }
+
+  const text = getSelectionClipboardText();
+  if (!text) {
+    return;
+  }
+
+  if (event.clipboardData) {
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", text);
+    return;
+  }
+
+  event.preventDefault();
+  void copyCurrentSelectionToClipboard(true);
+}
+
 function handleSheetKeydown(event: KeyboardEvent): void {
-  if (event.defaultPrevented || event.isComposing || event.repeat) {
+  if (event.defaultPrevented || event.isComposing) {
+    return;
+  }
+
+  if (event.repeat && !isCellNavigationKey(event)) {
     return;
   }
 
@@ -838,8 +1352,48 @@ function handleSheetKeydown(event: KeyboardEvent): void {
     return;
   }
 
+  const dataGridContextActive =
+    showEditableRowActions.value && isDataGridFocused();
+  if (dataGridContextActive && !isCellEditorFocused()) {
+    if (isCellNavigationKey(event)) {
+      event.preventDefault();
+      if (event.key === "ArrowUp") {
+        moveCellSelection(-1, 0, event.shiftKey);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        moveCellSelection(1, 0, event.shiftKey);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        moveCellSelection(0, -1, event.shiftKey);
+        return;
+      }
+      moveCellSelection(0, 1, event.shiftKey);
+      return;
+    }
+
+    if (
+      (event.key === "Enter" || event.key === "F2") &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      const activeCell =
+        getActiveCell() ??
+        (displayedDataRows.value.length > 0 && editableColumnCount.value > 0
+          ? { rowIndex: 0, colIndex: 0 }
+          : null);
+      if (activeCell) {
+        enterCellEditMode(activeCell.rowIndex, activeCell.colIndex, true);
+      }
+      return;
+    }
+  }
+
   if (
-    showEditableRowActions.value &&
+    dataGridContextActive &&
     hasSelection.value &&
     event.key === "Delete" &&
     !event.metaKey && !event.ctrlKey && !event.altKey
@@ -852,7 +1406,7 @@ function handleSheetKeydown(event: KeyboardEvent): void {
     }
   }
 
-  if (!showEditableRowActions.value || !isPlainEscape(event)) {
+  if (!dataGridContextActive || !isPlainEscape(event) || isCellEditorFocused()) {
     return;
   }
 
@@ -869,7 +1423,11 @@ watch(
 </script>
 
 <template>
-  <section class="workspace-sheet" @keydown.capture="handleSheetKeydown">
+  <section
+    class="workspace-sheet"
+    @keydown.capture="handleSheetKeydown"
+    @copy.capture="handleSheetCopy"
+  >
     <header class="workspace-toolbar">
       <div>
         <div class="toolbar-eyebrow">Workbench</div>
@@ -1278,6 +1836,7 @@ watch(
             <div
               ref="objectDetailGridWrapEl"
               class="object-detail-grid-wrap"
+              tabindex="0"
               @scroll="onObjectDetailGridScroll"
             >
               <table
@@ -1372,25 +1931,56 @@ watch(
                     <td
                       v-for="(value, colIndex) in row"
                       :key="`obj-col-${rowIndex}-${colIndex}`"
+                      :data-cell-row="showEditableRowActions ? rowIndex : undefined"
+                      :data-cell-col="showEditableRowActions ? colIndex : undefined"
                       :class="{
                         'results-cell-number': props.isLikelyNumeric(value),
+                        'results-cell-selected':
+                          showEditableRowActions &&
+                          isCellInSelection(rowIndex, colIndex),
+                        'results-cell-active':
+                          showEditableRowActions &&
+                          isActiveCell(rowIndex, colIndex),
+                        'results-cell-editing':
+                          showEditableRowActions &&
+                          isEditingCell(rowIndex, colIndex),
                       }"
+                      @mousedown="
+                        onEditableCellMouseDown(rowIndex, colIndex, $event)
+                      "
+                      @mouseenter="onEditableCellMouseEnter(rowIndex, colIndex)"
+                      @dblclick="
+                        onEditableCellDoubleClick(rowIndex, colIndex, $event)
+                      "
                     >
-                      <input
-                        v-if="showEditableRowActions"
-                        class="cell-editor"
-                        :value="value"
-                        :disabled="committingDataChanges || props.busy.updatingData"
-                        spellcheck="false"
-                        autocomplete="off"
-                        autocorrect="off"
-                        autocapitalize="off"
-                        data-gramm="false"
-                        @input="onCellDraftInput(rowIndex, colIndex, $event)"
-                        @keydown.meta.enter.prevent="commitDataChanges"
-                        @keydown.ctrl.enter.prevent="commitDataChanges"
-                        @keydown.esc.prevent="revertDataChanges"
-                      />
+                      <template v-if="showEditableRowActions">
+                        <input
+                          v-if="isEditingCell(rowIndex, colIndex)"
+                          class="cell-editor"
+                          :data-cell-row="rowIndex"
+                          :data-cell-col="colIndex"
+                          :value="value"
+                          :disabled="committingDataChanges || props.busy.updatingData"
+                          spellcheck="false"
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="off"
+                          data-gramm="false"
+                          @input="onCellDraftInput(rowIndex, colIndex, $event)"
+                          @blur="onCellEditorBlur"
+                          @keydown.meta.enter.prevent="commitDataChanges"
+                          @keydown.ctrl.enter.prevent="commitDataChanges"
+                          @keydown.enter.exact.prevent="
+                            onCellEditorEnter(rowIndex, colIndex)
+                          "
+                          @keydown.esc.stop.prevent="
+                            onCellEditorEscape(rowIndex, colIndex)
+                          "
+                        />
+                        <span v-else class="results-cell-text" :title="value">{{
+                          value
+                        }}</span>
+                      </template>
                       <template v-else>
                         <span class="results-cell-text" :title="value">{{
                           value
@@ -1424,6 +2014,14 @@ watch(
                   @click="addDraftRow"
                 >
                   Add Row
+                </button>
+                <button
+                  class="btn row-action-btn"
+                  :disabled="!canCopySelection"
+                  title="Copy selected cells or rows (Cmd/Ctrl+C)"
+                  @click="copyCurrentSelectionToClipboard(false)"
+                >
+                  Copy Selection
                 </button>
                 <button
                   class="btn row-action-btn danger"
@@ -2115,6 +2713,18 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
+.results-cell-selected {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface)) !important;
+}
+
+.results-cell-active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 82%, #ffffff 18%);
+}
+
+.results-cell-editing {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface)) !important;
+}
+
 .results-spacer-row td {
   padding: 0;
   border: 0;
@@ -2191,6 +2801,10 @@ button:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.cell-editor:focus {
+  outline: none;
 }
 
 .row-action-btn.danger {
@@ -2383,6 +2997,11 @@ button:focus-visible {
   overflow: auto;
 }
 
+.object-detail-grid-wrap:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .object-detail-grid-pane.is-data-view .results-table th,
 .object-detail-grid-pane.is-data-view .results-table td {
   padding: 0.22rem 0.4rem;
@@ -2395,6 +3014,7 @@ button:focus-visible {
 
 .object-detail-grid-pane.is-data-view .results-table td:not(.results-row-actions-cell) {
   font-family: Consolas, "Courier New", monospace;
+  user-select: none;
 }
 
 .object-detail-grid-pane.is-data-view .cell-editor {
