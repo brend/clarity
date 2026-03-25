@@ -174,6 +174,14 @@ const showDdlLoadingState = computed<boolean>(() => {
 const showObjectDetailSkeleton = computed<boolean>(
   () => props.activeObjectDetailLoading && !props.activeObjectDetailResult,
 );
+const objectDetailMessage = computed<string>(() => {
+  const message = props.activeObjectDetailResult?.message?.trim() ?? "";
+  if (/^Query executed\. Returned \d+ row\(s\)\.$/.test(message)) {
+    return "";
+  }
+
+  return message;
+});
 const objectDetailColumns = computed<string[]>(
   () => props.activeObjectDetailResult?.columns ?? [],
 );
@@ -1250,8 +1258,8 @@ watch(
           <p v-if="props.activeObjectDetailLoading" class="muted">
             Refreshing object detail...
           </p>
-          <p class="muted">
-            {{ props.activeObjectDetailResult.message }}
+          <p v-if="objectDetailMessage" class="muted">
+            {{ objectDetailMessage }}
           </p>
           <p
             v-if="props.activeObjectDetailResult.rowsAffected !== null"
@@ -1267,12 +1275,6 @@ watch(
             No rows returned.
           </p>
           <template v-else>
-            <p v-if="showEditableRowActions" class="muted object-detail-hint">
-              Cells are editable. Select rows to delete (Shift+click for range, Del to remove). Commit to apply, Esc to revert.
-            </p>
-            <p v-else-if="isDataDetailTab" class="muted object-detail-hint">
-              Data preview is read-only for this object type.
-            </p>
             <div
               ref="objectDetailGridWrapEl"
               class="object-detail-grid-wrap"
@@ -1285,7 +1287,7 @@ watch(
                 }"
               >
                 <colgroup>
-                  <col v-if="showEditableRowActions" style="width: 40px" />
+                  <col v-if="showEditableRowActions" style="width: 32px" />
                   <col
                     v-for="(column, columnIndex) in props
                       .activeObjectDetailResult.columns"
@@ -2081,9 +2083,9 @@ button:focus-visible {
 
 .results-select-header,
 .results-select-cell {
-  width: 40px;
-  min-width: 40px;
-  max-width: 40px;
+  width: 32px;
+  min-width: 32px;
+  max-width: 32px;
   text-align: center;
   padding: 0.2rem 0.3rem;
 }
@@ -2316,6 +2318,11 @@ button:focus-visible {
   gap: 0.6rem;
 }
 
+.object-detail-grid-pane.is-data-view {
+  padding: 0.48rem 0.48rem 0.36rem;
+  gap: 0.4rem;
+}
+
 .object-invalid-banner {
   display: grid;
   gap: 0.32rem;
@@ -2376,12 +2383,23 @@ button:focus-visible {
   overflow: auto;
 }
 
+.object-detail-grid-pane.is-data-view .results-table th,
+.object-detail-grid-pane.is-data-view .results-table td {
+  padding: 0.22rem 0.4rem;
+}
+
+.object-detail-grid-pane.is-data-view .results-select-header,
+.object-detail-grid-pane.is-data-view .results-select-cell {
+  padding: 0.14rem 0.2rem;
+}
+
 .object-detail-grid-pane.is-data-view .results-table td:not(.results-row-actions-cell) {
   font-family: Consolas, "Courier New", monospace;
 }
 
 .object-detail-grid-pane.is-data-view .cell-editor {
   font-family: Consolas, "Courier New", monospace;
+  padding: 0.08rem 0.16rem;
 }
 
 .muted {

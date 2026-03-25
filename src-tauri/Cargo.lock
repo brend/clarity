@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "clarity"
-version = "0.1.0"
+version = "0.1.21"
 dependencies = [
  "keyring",
  "oracle",
