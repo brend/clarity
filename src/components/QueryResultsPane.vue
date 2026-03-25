@@ -41,6 +41,11 @@ type SortState = {
   direction: SortDirection;
 };
 
+type GridCellCoord = {
+  rowIndex: number;
+  colIndex: number;
+};
+
 interface DbFilteredQueryRequest {
   sessionId: number;
   sql: string;
@@ -106,9 +111,13 @@ const activeRows = computed<string[][]>(() => {
 });
 const visibleColumnCount = computed<number>(() => Math.max(1, activeColumns.value.length));
 const resultsContentEl = ref<HTMLElement | null>(null);
+const resultsGridShellEl = ref<HTMLElement | null>(null);
 const resultsScrollTop = ref(0);
 const resultsViewportHeight = ref(0);
 const resultRowHeight = ref(DEFAULT_ROW_HEIGHT);
+const selectionAnchor = ref<GridCellCoord | null>(null);
+const selectionFocus = ref<GridCellCoord | null>(null);
+const isSelectionDragging = ref(false);
 let resizeRafId: number | null = null;
 let pendingResizePointerX: number | null = null;
 let resultsResizeObserver: ResizeObserver | null = null;
@@ -381,6 +390,312 @@ const rowSummaryLabel = computed<string>(() => {
   return `${shownRows} of ${totalRows} rows`;
 });
 
+const selectedCellRange = computed<{
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+} | null>(() => {
+  if (
+    !selectionAnchor.value ||
+    !selectionFocus.value ||
+    filteredAndSortedRows.value.length < 1 ||
+    activeColumns.value.length < 1
+  ) {
+    return null;
+  }
+
+  const anchor = clampCellCoord(selectionAnchor.value);
+  const focus = clampCellCoord(selectionFocus.value);
+  return {
+    startRow: Math.min(anchor.rowIndex, focus.rowIndex),
+    endRow: Math.max(anchor.rowIndex, focus.rowIndex),
+    startCol: Math.min(anchor.colIndex, focus.colIndex),
+    endCol: Math.max(anchor.colIndex, focus.colIndex),
+  };
+});
+
+const hasSelection = computed<boolean>(() => !!selectedCellRange.value);
+
+function clampCellCoord(cell: GridCellCoord): GridCellCoord {
+  const maxRowIndex = Math.max(0, filteredAndSortedRows.value.length - 1);
+  const maxColIndex = Math.max(0, activeColumns.value.length - 1);
+  return {
+    rowIndex: Math.min(Math.max(cell.rowIndex, 0), maxRowIndex),
+    colIndex: Math.min(Math.max(cell.colIndex, 0), maxColIndex),
+  };
+}
+
+function stopSelectionDrag(): void {
+  if (!isSelectionDragging.value) {
+    return;
+  }
+
+  isSelectionDragging.value = false;
+  window.removeEventListener("mouseup", stopSelectionDrag);
+}
+
+function clearSelection(): void {
+  stopSelectionDrag();
+  selectionAnchor.value = null;
+  selectionFocus.value = null;
+}
+
+function ensureSelectionWithinBounds(): void {
+  if (filteredAndSortedRows.value.length < 1 || activeColumns.value.length < 1) {
+    clearSelection();
+    return;
+  }
+
+  if (selectionAnchor.value) {
+    selectionAnchor.value = clampCellCoord(selectionAnchor.value);
+  }
+
+  if (selectionFocus.value) {
+    selectionFocus.value = clampCellCoord(selectionFocus.value);
+  }
+
+  if (selectionAnchor.value && !selectionFocus.value) {
+    selectionFocus.value = clampCellCoord(selectionAnchor.value);
+  } else if (!selectionAnchor.value && selectionFocus.value) {
+    selectionAnchor.value = clampCellCoord(selectionFocus.value);
+  }
+}
+
+function setCellSelection(
+  rowIndex: number,
+  colIndex: number,
+  options: { extendFromAnchor?: boolean } = {},
+): void {
+  if (filteredAndSortedRows.value.length < 1 || activeColumns.value.length < 1) {
+    return;
+  }
+
+  const nextCell = clampCellCoord({ rowIndex, colIndex });
+  if (options.extendFromAnchor && selectionAnchor.value) {
+    selectionFocus.value = nextCell;
+    return;
+  }
+
+  selectionAnchor.value = nextCell;
+  selectionFocus.value = nextCell;
+}
+
+function getActiveCell(): GridCellCoord | null {
+  if (!selectedCellRange.value || !selectionFocus.value) {
+    return null;
+  }
+
+  return clampCellCoord(selectionFocus.value);
+}
+
+function isCellInSelection(rowIndex: number, colIndex: number): boolean {
+  const range = selectedCellRange.value;
+  if (!range) {
+    return false;
+  }
+
+  return (
+    rowIndex >= range.startRow &&
+    rowIndex <= range.endRow &&
+    colIndex >= range.startCol &&
+    colIndex <= range.endCol
+  );
+}
+
+function isActiveCell(rowIndex: number, colIndex: number): boolean {
+  const activeCell = getActiveCell();
+  return (
+    !!activeCell &&
+    activeCell.rowIndex === rowIndex &&
+    activeCell.colIndex === colIndex
+  );
+}
+
+function scrollCellIntoView(cell: GridCellCoord): void {
+  const gridShell = resultsGridShellEl.value;
+  if (!gridShell) {
+    return;
+  }
+
+  const cellEl = gridShell.querySelector<HTMLTableCellElement>(
+    `td[data-cell-row="${cell.rowIndex}"][data-cell-col="${cell.colIndex}"]`,
+  );
+  cellEl?.scrollIntoView({
+    block: "nearest",
+    inline: "nearest",
+  });
+}
+
+function focusGridShell(): void {
+  resultsGridShellEl.value?.focus();
+}
+
+function isGridShellFocused(): boolean {
+  const gridShell = resultsGridShellEl.value;
+  const activeEl = document.activeElement;
+  if (!gridShell || !(activeEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  return activeEl === gridShell || gridShell.contains(activeEl);
+}
+
+function isTextInputFocused(): boolean {
+  const activeEl = document.activeElement;
+  if (!(activeEl instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    activeEl instanceof HTMLInputElement ||
+    activeEl instanceof HTMLTextAreaElement ||
+    activeEl.isContentEditable
+  );
+}
+
+function onDataCellMouseDown(
+  rowIndex: number,
+  colIndex: number,
+  event: MouseEvent,
+): void {
+  if (event.button !== 0) {
+    return;
+  }
+
+  event.preventDefault();
+  focusGridShell();
+  setCellSelection(rowIndex, colIndex, { extendFromAnchor: event.shiftKey });
+  isSelectionDragging.value = true;
+  window.addEventListener("mouseup", stopSelectionDrag);
+}
+
+function onDataCellMouseEnter(rowIndex: number, colIndex: number): void {
+  if (!isSelectionDragging.value) {
+    return;
+  }
+
+  setCellSelection(rowIndex, colIndex, { extendFromAnchor: true });
+}
+
+function isNavigationKey(event: KeyboardEvent): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return false;
+  }
+
+  return (
+    event.key === "ArrowUp" ||
+    event.key === "ArrowDown" ||
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight"
+  );
+}
+
+function moveSelection(
+  rowDelta: number,
+  colDelta: number,
+  extendFromAnchor: boolean,
+): void {
+  if (filteredAndSortedRows.value.length < 1 || activeColumns.value.length < 1) {
+    return;
+  }
+
+  const current = getActiveCell();
+  if (!current) {
+    const firstCell = { rowIndex: 0, colIndex: 0 };
+    setCellSelection(firstCell.rowIndex, firstCell.colIndex);
+    scrollCellIntoView(firstCell);
+    return;
+  }
+
+  const nextCell = clampCellCoord({
+    rowIndex: current.rowIndex + rowDelta,
+    colIndex: current.colIndex + colDelta,
+  });
+  setCellSelection(nextCell.rowIndex, nextCell.colIndex, { extendFromAnchor });
+  scrollCellIntoView(nextCell);
+}
+
+function toTsvCell(value: string): string {
+  if (/["\t\r\n]/.test(value)) {
+    return `"${value.replace(/"/g, "\"\"")}"`;
+  }
+
+  return value;
+}
+
+function getSelectionClipboardText(): string {
+  const range = selectedCellRange.value;
+  if (!range) {
+    return "";
+  }
+
+  const lines: string[] = [];
+  for (let rowIndex = range.startRow; rowIndex <= range.endRow; rowIndex += 1) {
+    const sourceRow = filteredAndSortedRows.value[rowIndex]?.row ?? [];
+    const cells: string[] = [];
+    for (let colIndex = range.startCol; colIndex <= range.endCol; colIndex += 1) {
+      cells.push(toTsvCell(sourceRow[colIndex] ?? ""));
+    }
+    lines.push(cells.join("\t"));
+  }
+
+  return lines.join("\n");
+}
+
+async function writeTextToClipboard(text: string): Promise<boolean> {
+  if (!text) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+
+    document.body.removeChild(textarea);
+    return copied;
+  }
+}
+
+function shouldHandleCopy(requireGridFocus: boolean): boolean {
+  if (!hasSelection.value || isTextInputFocused()) {
+    return false;
+  }
+
+  return !requireGridFocus || isGridShellFocused();
+}
+
+async function copySelectionToClipboard(requireGridFocus: boolean): Promise<void> {
+  if (!shouldHandleCopy(requireGridFocus)) {
+    return;
+  }
+
+  const text = getSelectionClipboardText();
+  if (!text) {
+    return;
+  }
+
+  await writeTextToClipboard(text);
+}
+
 function setCurrentSortState(nextSortState: SortState | null): void {
   const paneId = activePaneId.value;
   if (!paneId) {
@@ -511,6 +826,77 @@ function exportCsv(): void {
   URL.revokeObjectURL(url);
 }
 
+function isPlainEscape(event: KeyboardEvent): boolean {
+  return (
+    event.key === "Escape" &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey
+  );
+}
+
+function handleResultsCopy(event: ClipboardEvent): void {
+  if (!shouldHandleCopy(true)) {
+    return;
+  }
+
+  const text = getSelectionClipboardText();
+  if (!text) {
+    return;
+  }
+
+  if (event.clipboardData) {
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", text);
+    return;
+  }
+
+  event.preventDefault();
+  void copySelectionToClipboard(true);
+}
+
+function handleResultsKeydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.isComposing) {
+    return;
+  }
+
+  if (event.repeat && !isNavigationKey(event)) {
+    return;
+  }
+
+  if (!isGridShellFocused()) {
+    return;
+  }
+
+  if (isTextInputFocused()) {
+    return;
+  }
+
+  if (isNavigationKey(event)) {
+    event.preventDefault();
+    if (event.key === "ArrowUp") {
+      moveSelection(-1, 0, event.shiftKey);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      moveSelection(1, 0, event.shiftKey);
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      moveSelection(0, -1, event.shiftKey);
+      return;
+    }
+    moveSelection(0, 1, event.shiftKey);
+    return;
+  }
+
+  if (isPlainEscape(event)) {
+    event.preventDefault();
+    clearSelection();
+  }
+}
+
 watch(
   () => [activePaneId.value, baseColumns.value.length],
   () => {
@@ -518,6 +904,7 @@ watch(
       ensurePaneGridState(activePaneId.value, baseColumns.value.length);
     }
 
+    clearSelection();
     resetColumnWidths();
     resultRowHeight.value = DEFAULT_ROW_HEIGHT;
     const contentEl = resultsContentEl.value;
@@ -534,8 +921,13 @@ watch(
 );
 
 watch(
-  () => [activeRows.value.length, filteredAndSortedRows.value.length],
+  () => [
+    activeRows.value.length,
+    filteredAndSortedRows.value.length,
+    activeColumns.value.length,
+  ],
   () => {
+    ensureSelectionWithinBounds();
     void nextTick(() => {
       updateResultsViewportMetrics();
       measureResultRowHeight();
@@ -554,6 +946,7 @@ const gridViewStateToken = computed<string>(() => {
 });
 
 watch(gridViewStateToken, () => {
+  ensureSelectionWithinBounds();
   const contentEl = resultsContentEl.value;
   if (contentEl) {
     contentEl.scrollTop = 0;
@@ -767,6 +1160,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopColumnResize();
+  stopSelectionDrag();
   if (filterRefreshDebounceHandle) {
     window.clearTimeout(filterRefreshDebounceHandle);
     filterRefreshDebounceHandle = null;
@@ -781,7 +1175,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="results-pane">
+  <section
+    class="results-pane"
+    @keydown.capture="handleResultsKeydown"
+    @copy.capture="handleResultsCopy"
+  >
     <div class="results-header">
       <div
         v-if="props.resultPanes.length"
@@ -842,6 +1240,14 @@ onBeforeUnmount(() => {
           >
             Export CSV
           </button>
+          <button
+            class="results-toolbar-btn"
+            type="button"
+            :disabled="!hasSelection"
+            @click="copySelectionToClipboard(false)"
+          >
+            Copy Selection
+          </button>
         </div>
 
         <p v-if="activePane.errorMessage" class="results-error">
@@ -865,7 +1271,12 @@ onBeforeUnmount(() => {
           Showing matches from loaded rows only.
         </p>
 
-        <div v-if="activePane.queryResult.columns.length" class="results-grid-shell">
+        <div
+          v-if="activePane.queryResult.columns.length"
+          ref="resultsGridShellEl"
+          class="results-grid-shell"
+          tabindex="0"
+        >
           <table
             class="results-table"
             :class="{ 'is-resizing': !!resizeState }"
@@ -940,7 +1351,15 @@ onBeforeUnmount(() => {
                 <td
                   v-for="(value, colIndex) in row"
                   :key="`col-${rowIndex}-${colIndex}`"
-                  :class="{ 'results-cell-number': props.isLikelyNumeric(value) }"
+                  :data-cell-row="rowIndex"
+                  :data-cell-col="colIndex"
+                  :class="{
+                    'results-cell-number': props.isLikelyNumeric(value),
+                    'results-cell-selected': isCellInSelection(rowIndex, colIndex),
+                    'results-cell-active': isActiveCell(rowIndex, colIndex),
+                  }"
+                  @mousedown="onDataCellMouseDown(rowIndex, colIndex, $event)"
+                  @mouseenter="onDataCellMouseEnter(rowIndex, colIndex)"
                 >
                   <span class="results-cell-text" :title="value">{{ value }}</span>
                 </td>
@@ -1135,6 +1554,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.results-grid-shell:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
 .results-table th,
 .results-table td {
   border: 0;
@@ -1163,6 +1587,18 @@ onBeforeUnmount(() => {
 
 .results-table tbody tr:not(.results-spacer-row):hover {
   background: var(--bg-hover);
+}
+
+.results-table tbody tr:not(.results-spacer-row) td {
+  user-select: none;
+}
+
+.results-cell-selected {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface)) !important;
+}
+
+.results-cell-active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 82%, #ffffff 18%);
 }
 
 .results-sort-active {
