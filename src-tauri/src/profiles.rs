@@ -5,7 +5,7 @@ use crate::types::{
 use keyring::{Entry, Error as KeyringError};
 use serde::Deserialize;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const PROFILE_STORE_FILE: &str = "connection_profiles.json";
@@ -14,11 +14,23 @@ const KEYRING_AI_API_KEY_ACCOUNT: &str = "ai:openai:api_key";
 
 pub(crate) fn read_profiles(app: &AppHandle) -> Result<Vec<StoredConnectionProfile>, String> {
     let path = profiles_file_path(app)?;
+    read_profiles_from_path(path.as_path())
+}
+
+pub(crate) fn write_profiles(
+    app: &AppHandle,
+    profiles: &[StoredConnectionProfile],
+) -> Result<(), String> {
+    let path = profiles_file_path(app)?;
+    write_profiles_to_path(path.as_path(), profiles)
+}
+
+fn read_profiles_from_path(path: &Path) -> Result<Vec<StoredConnectionProfile>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
 
-    let content = fs::read_to_string(&path)
+    let content = fs::read_to_string(path)
         .map_err(|error| format!("Failed to read profiles file: {error}"))?;
     if content.trim().is_empty() {
         return Ok(Vec::new());
@@ -34,14 +46,15 @@ pub(crate) fn read_profiles(app: &AppHandle) -> Result<Vec<StoredConnectionProfi
         .map_err(|error| format!("Failed to parse profiles file: {error}"))
 }
 
-pub(crate) fn write_profiles(
-    app: &AppHandle,
-    profiles: &[StoredConnectionProfile],
-) -> Result<(), String> {
-    let path = profiles_file_path(app)?;
+fn write_profiles_to_path(path: &Path, profiles: &[StoredConnectionProfile]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create app data directory: {error}"))?;
+    }
+
     let payload = serde_json::to_string_pretty(profiles)
         .map_err(|error| format!("Failed to serialize profiles: {error}"))?;
-    fs::write(&path, payload).map_err(|error| format!("Failed to write profiles file: {error}"))
+    fs::write(path, payload).map_err(|error| format!("Failed to write profiles file: {error}"))
 }
 
 pub(crate) fn to_connection_profile(profile: StoredConnectionProfile) -> ConnectionProfile {
@@ -193,4 +206,142 @@ fn keyring_entry(profile_id: &str) -> Result<Entry, String> {
 fn ai_keyring_entry() -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, KEYRING_AI_API_KEY_ACCOUNT)
         .map_err(|error| format!("Failed to initialize AI keyring entry: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        read_profiles_from_path, write_profiles_to_path, DbConnectionProfile, OracleAuthMode,
+        OracleConnectionOptions, StoredConnectionProfile,
+    };
+    use crate::types::NetworkConnectionOptions;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "clarity_profiles_tests_{name}_{}_{}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir_all(&path).expect("failed to create temp test directory");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn sample_profiles() -> Vec<StoredConnectionProfile> {
+        vec![
+            StoredConnectionProfile {
+                id: "profile-1".to_string(),
+                name: "Oracle Dev".to_string(),
+                connection: DbConnectionProfile::Oracle(OracleConnectionOptions {
+                    host: "localhost".to_string(),
+                    port: Some(1521),
+                    service_name: "XE".to_string(),
+                    username: "system".to_string(),
+                    schema: "APP".to_string(),
+                    oracle_auth_mode: OracleAuthMode::Normal,
+                }),
+            },
+            StoredConnectionProfile {
+                id: "profile-2".to_string(),
+                name: "Postgres Dev".to_string(),
+                connection: DbConnectionProfile::Postgres(NetworkConnectionOptions {
+                    host: "localhost".to_string(),
+                    port: Some(5432),
+                    database: "clarity".to_string(),
+                    username: "app_user".to_string(),
+                    schema: Some("public".to_string()),
+                }),
+            },
+        ]
+    }
+
+    #[test]
+    fn write_and_read_profiles_round_trip_current_format() {
+        let temp_dir = TempTestDir::new("round_trip");
+        let path = temp_dir.path.join("connection_profiles.json");
+        let expected = sample_profiles();
+
+        write_profiles_to_path(path.as_path(), &expected).expect("write should succeed");
+        let actual = read_profiles_from_path(path.as_path()).expect("read should succeed");
+
+        assert_eq!(actual.len(), expected.len());
+        assert_eq!(actual[0].id, expected[0].id);
+        assert_eq!(actual[1].name, expected[1].name);
+    }
+
+    #[test]
+    fn read_profiles_returns_empty_for_missing_or_blank_file() {
+        let temp_dir = TempTestDir::new("empty");
+        let path = temp_dir.path.join("connection_profiles.json");
+
+        let missing = read_profiles_from_path(path.as_path()).expect("missing file should succeed");
+        assert!(missing.is_empty());
+
+        fs::write(path.as_path(), " \n\t").expect("failed to write blank file");
+        let blank = read_profiles_from_path(path.as_path()).expect("blank file should succeed");
+        assert!(blank.is_empty());
+    }
+
+    #[test]
+    fn read_profiles_supports_legacy_shape() {
+        let temp_dir = TempTestDir::new("legacy");
+        let path = temp_dir.path.join("connection_profiles.json");
+        let payload = r#"
+[
+  {
+    "id": "legacy-1",
+    "name": "Legacy Pg",
+    "provider": "postgres",
+    "host": "localhost",
+    "port": 5432,
+    "serviceName": "clarity_db",
+    "username": "legacy_user",
+    "schema": "public"
+  }
+]
+"#;
+
+        fs::write(path.as_path(), payload).expect("failed to write legacy payload");
+        let profiles =
+            read_profiles_from_path(path.as_path()).expect("legacy parse should succeed");
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "legacy-1");
+        match &profiles[0].connection {
+            DbConnectionProfile::Postgres(connection) => {
+                assert_eq!(connection.database, "clarity_db");
+                assert_eq!(connection.username, "legacy_user");
+                assert_eq!(connection.schema.as_deref(), Some("public"));
+            }
+            _ => panic!("expected postgres profile"),
+        }
+    }
+
+    #[test]
+    fn read_profiles_returns_error_for_invalid_json() {
+        let temp_dir = TempTestDir::new("invalid_json");
+        let path = temp_dir.path.join("connection_profiles.json");
+        fs::write(path.as_path(), "{not_json").expect("failed to write invalid payload");
+
+        let error = read_profiles_from_path(path.as_path()).expect_err("expected parse error");
+        assert!(error.contains("Failed to parse profiles file"));
+    }
 }

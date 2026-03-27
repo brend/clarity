@@ -417,6 +417,155 @@ fn normalize_suggested_file_name(value: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalize_export_file_content, normalize_export_object_type_dir_name,
+        normalize_suggested_file_name, parse_directory_picker_output, sanitize_export_file_stem,
+        unique_export_file_path, write_query_sheet_file,
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::{ExitStatus, Output};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(unix)]
+    fn exit_status(code: i32) -> ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(code << 8)
+    }
+
+    #[cfg(windows)]
+    fn exit_status(code: i32) -> ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(code as u32)
+    }
+
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "clarity_files_tests_{name}_{}_{}",
+                std::process::id(),
+                unique
+            ));
+            fs::create_dir_all(&path).expect("failed to create temp test directory");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn normalizes_object_type_and_file_stems() {
+        assert_eq!(
+            normalize_export_object_type_dir_name(" Package Body "),
+            "package_body"
+        );
+        assert_eq!(normalize_export_object_type_dir_name("___"), "objects");
+        assert_eq!(sanitize_export_file_stem("Orders/2026*?"), "Orders_2026__");
+        assert_eq!(sanitize_export_file_stem("   "), "object");
+    }
+
+    #[test]
+    fn normalizes_suggested_file_name_for_save_dialog() {
+        assert_eq!(normalize_suggested_file_name(""), "query.sql");
+        assert_eq!(
+            normalize_suggested_file_name(r#" report:orders?.sql "#),
+            "report_orders_.sql"
+        );
+        assert_eq!(normalize_suggested_file_name("..."), "query.sql");
+    }
+
+    #[test]
+    fn picks_unique_export_file_path_when_target_exists() {
+        let temp_dir = TempTestDir::new("unique_path");
+        let base_path = temp_dir.path.join("schema.sql");
+        fs::write(base_path.as_path(), "select 1;").expect("failed to seed base file");
+
+        let next_path = unique_export_file_path(base_path.clone());
+        assert_eq!(
+            next_path.file_name().and_then(|value| value.to_str()),
+            Some("schema_2.sql")
+        );
+
+        fs::write(next_path.as_path(), "select 2;").expect("failed to seed second file");
+        let third_path = unique_export_file_path(base_path);
+        assert_eq!(
+            third_path.file_name().and_then(|value| value.to_str()),
+            Some("schema_3.sql")
+        );
+    }
+
+    #[test]
+    fn writes_query_sheet_file_with_parent_directories_and_normalized_newline() {
+        let temp_dir = TempTestDir::new("write_file");
+        let nested_path = temp_dir.path.join("nested/query/test.sql");
+
+        write_query_sheet_file(nested_path.as_path(), "select 1;\n\n")
+            .expect("write query sheet should succeed");
+        let content =
+            fs::read_to_string(nested_path.as_path()).expect("failed to read written sql file");
+        assert_eq!(content, "select 1;\n");
+
+        write_query_sheet_file(nested_path.as_path(), "   ")
+            .expect("write blank query sheet should succeed");
+        let blank_content =
+            fs::read_to_string(nested_path.as_path()).expect("failed to read blank sql file");
+        assert_eq!(blank_content, "");
+    }
+
+    #[test]
+    fn normalizes_export_file_content_trailing_whitespace() {
+        assert_eq!(
+            normalize_export_file_content("create table t;\n\n"),
+            "create table t;\n"
+        );
+        assert_eq!(normalize_export_file_content("   "), "");
+    }
+
+    #[test]
+    fn parses_directory_picker_output_success_and_cancel_cases() {
+        let success = Output {
+            status: exit_status(0),
+            stdout: b"/tmp/export".to_vec(),
+            stderr: Vec::new(),
+        };
+        let selected = parse_directory_picker_output(success, &[1], "Picker failed")
+            .expect("success should parse");
+        assert_eq!(selected.as_deref(), Some("/tmp/export"));
+
+        let cancel = Output {
+            status: exit_status(1),
+            stdout: Vec::new(),
+            stderr: b"cancel".to_vec(),
+        };
+        let canceled = parse_directory_picker_output(cancel, &[1], "Picker failed")
+            .expect("cancel should not error");
+        assert!(canceled.is_none());
+
+        let failure = Output {
+            status: exit_status(2),
+            stdout: Vec::new(),
+            stderr: b"boom".to_vec(),
+        };
+        let error = parse_directory_picker_output(failure, &[1], "Picker failed")
+            .expect_err("non-cancel failure should error");
+        assert_eq!(error, "Picker failed: boom");
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn escape_applescript_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")

@@ -127,9 +127,7 @@ pub(crate) fn validate_ai_suggest_request(request: &DbAiSuggestQueryRequest) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        validate_ai_suggest_request, validate_connect_request, validate_profile_request,
-    };
+    use super::{validate_ai_suggest_request, validate_connect_request, validate_profile_request};
     use crate::types::{
         DbAiSchemaContextObject, DbAiSuggestQueryRequest, DbConnectConnection, DbConnectRequest,
         DbConnectionProfile, NetworkConnectOptions, NetworkConnectionOptions, OracleConnectOptions,
