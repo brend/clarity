@@ -97,6 +97,7 @@ Clarity now includes two workflows:
 
 - CI: `.github/workflows/ci.yml`
   - Runs on pull requests and pushes to `main`
+  - Runs Vue unit tests with coverage thresholds (`npm run test:coverage`)
   - Builds the Vue frontend (`npm run build`)
   - Runs Rust checks/tests for `src-tauri` (`cargo check`, `cargo test`)
 - Release: `.github/workflows/release.yml`

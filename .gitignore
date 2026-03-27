@@ -53,4 +53,5 @@ debug.log
 TODO.md
 .aider*
 dist/
+coverage/
 settings.local.json

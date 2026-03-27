@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import vue from "@vitejs/plugin-vue";
 
 // @ts-expect-error process is a nodejs global
@@ -7,6 +7,18 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   plugins: [vue()],
+  test: {
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      thresholds: {
+        statements: 100,
+        branches: 90,
+        functions: 100,
+        lines: 100,
+      },
+    },
+  },
   build: {
     rollupOptions: {
       output: {
