@@ -528,15 +528,15 @@ pub(crate) fn update_object_ddl(
     session: &mut OracleSession,
     request: &DbObjectDdlUpdateRequest,
 ) -> Result<DbQueryResult, String> {
+    let object_type = request.object_type.trim().to_ascii_uppercase();
     let mut ddl = request.ddl.trim().to_string();
     if ddl.is_empty() {
         return Err("DDL cannot be empty".to_string());
     }
 
-    ddl = normalize_ddl_for_execute(ddl);
+    ddl = normalize_ddl_for_execute(ddl, object_type.as_str());
     let schema = normalize_schema_name(&request.schema)?;
     ensure_schema_is_in_scope(&schema, session)?;
-    let object_type = request.object_type.trim().to_ascii_uppercase();
     let object_name = request.object_name.trim().to_ascii_uppercase();
 
     let mut compile_error_reported_by_oracle = false;
@@ -1291,7 +1291,7 @@ fn sql_value_to_string(value: &SqlValue<'_>) -> String {
     value.to_string()
 }
 
-fn normalize_ddl_for_execute(ddl: String) -> String {
+fn normalize_ddl_for_execute(ddl: String, object_type: &str) -> String {
     let mut lines = ddl.lines().map(str::to_string).collect::<Vec<_>>();
 
     while lines
@@ -1301,7 +1301,42 @@ fn normalize_ddl_for_execute(ddl: String) -> String {
         lines.pop();
     }
 
-    lines.join("\n")
+    let normalized = lines.join("\n");
+    with_create_or_replace_prefix(normalized, object_type)
+}
+
+fn with_create_or_replace_prefix(ddl: String, object_type: &str) -> String {
+    let trimmed_start = ddl.trim_start();
+    if trimmed_start.is_empty() {
+        return ddl;
+    }
+
+    let normalized_object_type = object_type.trim().to_ascii_uppercase();
+    if !is_source_supported(normalized_object_type.as_str()) {
+        return ddl;
+    }
+
+    let lower = trimmed_start.to_ascii_lowercase();
+    if lower.starts_with("create ") {
+        return ddl;
+    }
+
+    let source_prefix = match normalized_object_type.as_str() {
+        "PROCEDURE" => "procedure",
+        "FUNCTION" => "function",
+        "PACKAGE" => "package",
+        "PACKAGE BODY" => "package body",
+        "TRIGGER" => "trigger",
+        "TYPE" => "type",
+        "TYPE BODY" => "type body",
+        _ => return ddl,
+    };
+
+    if !lower.starts_with(source_prefix) {
+        return ddl;
+    }
+
+    format!("create or replace {trimmed_start}")
 }
 
 fn ensure_oracle_client_initialized(
