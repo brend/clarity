@@ -132,8 +132,8 @@ mod tests {
     };
     use crate::types::{
         DbAiSchemaContextObject, DbAiSuggestQueryRequest, DbConnectConnection, DbConnectRequest,
-        DbConnectionProfile, NetworkConnectOptions, NetworkConnectionOptions,
-        SaveConnectionProfileRequest,
+        DbConnectionProfile, NetworkConnectOptions, NetworkConnectionOptions, OracleConnectOptions,
+        OracleConnectionOptions, SaveConnectionProfileRequest, SqliteConnectionOptions,
     };
 
     fn valid_postgres_connect_request() -> DbConnectRequest {
@@ -165,6 +165,58 @@ mod tests {
         }
     }
 
+    fn valid_oracle_connect_request() -> DbConnectRequest {
+        DbConnectRequest {
+            connection: DbConnectConnection::Oracle(OracleConnectOptions {
+                host: "localhost".to_string(),
+                port: Some(1521),
+                service_name: "XE".to_string(),
+                username: "system".to_string(),
+                password: "secret".to_string(),
+                schema: "APP".to_string(),
+                oracle_auth_mode: Default::default(),
+                oracle_client_lib_dir: None,
+            }),
+        }
+    }
+
+    fn valid_oracle_profile_request() -> SaveConnectionProfileRequest {
+        SaveConnectionProfileRequest {
+            id: None,
+            name: "Oracle".to_string(),
+            connection: DbConnectionProfile::Oracle(OracleConnectionOptions {
+                host: "localhost".to_string(),
+                port: Some(1521),
+                service_name: "XE".to_string(),
+                username: "system".to_string(),
+                schema: "APP".to_string(),
+                oracle_auth_mode: Default::default(),
+            }),
+            save_password: false,
+            password: None,
+        }
+    }
+
+    fn valid_sqlite_connect_request() -> DbConnectRequest {
+        DbConnectRequest {
+            connection: DbConnectConnection::Sqlite(SqliteConnectionOptions {
+                file_path: "/tmp/clarity.db".to_string(),
+            }),
+        }
+    }
+
+    fn valid_sqlite_profile_request() -> SaveConnectionProfileRequest {
+        SaveConnectionProfileRequest {
+            id: None,
+            name: "SQLite".to_string(),
+            connection: DbConnectionProfile::Sqlite(SqliteConnectionOptions {
+                file_path: "/tmp/clarity.db".to_string(),
+            }),
+            save_password: false,
+            password: None,
+        }
+    }
+
     fn valid_ai_suggest_request() -> DbAiSuggestQueryRequest {
         DbAiSuggestQueryRequest {
             current_sql: "select * from users".to_string(),
@@ -188,6 +240,51 @@ mod tests {
     }
 
     #[test]
+    fn validate_connect_request_requires_postgres_database() {
+        let mut request = valid_postgres_connect_request();
+        if let DbConnectConnection::Postgres(connection) = &mut request.connection {
+            connection.database = " ".to_string();
+        }
+
+        assert_eq!(
+            validate_connect_request(&request),
+            Err("Database is required".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_connect_request_requires_oracle_service_name() {
+        let mut request = valid_oracle_connect_request();
+        if let DbConnectConnection::Oracle(connection) = &mut request.connection {
+            connection.service_name = " ".to_string();
+        }
+
+        assert_eq!(
+            validate_connect_request(&request),
+            Err("Service name is required".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_connect_request_requires_sqlite_file_path() {
+        let mut request = valid_sqlite_connect_request();
+        if let DbConnectConnection::Sqlite(connection) = &mut request.connection {
+            connection.file_path = " ".to_string();
+        }
+
+        assert_eq!(
+            validate_connect_request(&request),
+            Err("File path is required".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_profile_request_accepts_valid_postgres_profile() {
+        let request = valid_postgres_profile_request();
+        assert_eq!(validate_profile_request(&request), Ok(()));
+    }
+
+    #[test]
     fn validate_profile_request_requires_name() {
         let mut request = valid_postgres_profile_request();
         request.name = " ".to_string();
@@ -195,6 +292,82 @@ mod tests {
         assert_eq!(
             validate_profile_request(&request),
             Err("Profile name is required".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_profile_request_requires_oracle_schema() {
+        let mut request = valid_oracle_profile_request();
+        if let DbConnectionProfile::Oracle(connection) = &mut request.connection {
+            connection.schema = " ".to_string();
+        }
+
+        assert_eq!(
+            validate_profile_request(&request),
+            Err("Schema is required".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_profile_request_requires_sqlite_file_path() {
+        let mut request = valid_sqlite_profile_request();
+        if let DbConnectionProfile::Sqlite(connection) = &mut request.connection {
+            connection.file_path = " ".to_string();
+        }
+
+        assert_eq!(
+            validate_profile_request(&request),
+            Err("File path is required".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_ai_suggest_request_accepts_valid_input() {
+        let request = valid_ai_suggest_request();
+        assert_eq!(validate_ai_suggest_request(&request), Ok(()));
+    }
+
+    #[test]
+    fn validate_ai_suggest_request_requires_current_sql() {
+        let mut request = valid_ai_suggest_request();
+        request.current_sql = " ".to_string();
+
+        assert_eq!(
+            validate_ai_suggest_request(&request),
+            Err("Current SQL is required.".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_ai_suggest_request_requires_connected_schema() {
+        let mut request = valid_ai_suggest_request();
+        request.connected_schema = " ".to_string();
+
+        assert_eq!(
+            validate_ai_suggest_request(&request),
+            Err("Connected schema is required.".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_ai_suggest_request_requires_model() {
+        let mut request = valid_ai_suggest_request();
+        request.model = " ".to_string();
+
+        assert_eq!(
+            validate_ai_suggest_request(&request),
+            Err("AI model is required.".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_ai_suggest_request_requires_endpoint() {
+        let mut request = valid_ai_suggest_request();
+        request.endpoint = " ".to_string();
+
+        assert_eq!(
+            validate_ai_suggest_request(&request),
+            Err("AI endpoint is required.".to_string())
         );
     }
 
