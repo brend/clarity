@@ -33,6 +33,12 @@ jobs:
       - name: Frontend coverage and thresholds
         run: npm run test:coverage
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Frontend E2E smoke tests
+        run: npm run test:e2e
+
       - name: Typecheck and build web app
         run: npm run build
 

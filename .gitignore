@@ -54,4 +54,6 @@ TODO.md
 .aider*
 dist/
 coverage/
+playwright-report/
+test-results/
 settings.local.json
