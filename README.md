@@ -100,7 +100,7 @@ Clarity now includes two workflows:
   - Runs Vue unit tests with coverage thresholds (`npm run test:coverage`)
   - Runs frontend E2E smoke tests in Chromium (`npm run test:e2e`)
   - Builds the Vue frontend (`npm run build`)
-  - Runs Rust checks/tests for `src-tauri` (`cargo check`, `cargo test`)
+  - Runs Rust checks and enforces a Rust line-coverage gate for `src-tauri` (`cargo check`, `cargo llvm-cov --fail-under-lines 18`)
 - Release: `.github/workflows/release.yml`
   - Runs when a Git tag matching `v*` is pushed (example: `v0.1.0`)
   - Builds Tauri bundles on Linux, macOS, and Windows
