@@ -25,6 +25,7 @@ import type {
   AiQuerySuggestionRequest,
   AiQuerySuggestionResponse,
   AiSchemaContextObject,
+  DbObjectEntry,
   DbObjectColumnEntry,
   SqlCompletionSchema,
 } from "./types/clarity";
@@ -191,6 +192,7 @@ const {
   closeDdlTab,
   openObjectFromExplorer,
   openCreateObjectTemplate,
+  dropTableFromExplorer,
   activateObjectDetailTab,
   refreshActiveObjectDetail,
   updateActiveObjectDataRow,
@@ -224,6 +226,7 @@ const {
 const showExportDialog = ref(false);
 const showSettingsDialog = ref(false);
 const showCreateObjectDialog = ref(false);
+const showDropTableDialog = ref(false);
 const showConnectionDialog = ref(false);
 let connectionSnapshot: Record<string, unknown> | null = null;
 const exportSummaryMessage = ref("");
@@ -248,6 +251,13 @@ const createObjectDialogPreviousDefaultName = ref(
   createObjectDefaultName(CREATE_OBJECT_TYPE_OPTIONS[0].value),
 );
 const createObjectDialogError = ref("");
+const dropTableDialogRequest = ref<{
+  table: DbObjectEntry;
+  options: {
+    cascadeConstraints?: boolean;
+    purge?: boolean;
+  };
+} | null>(null);
 const {
   settings,
   theme,
@@ -849,6 +859,71 @@ function closeCreateObjectDialog(): void {
   createObjectDialogError.value = "";
 }
 
+function formatDropTableModeLabel(options: {
+  cascadeConstraints?: boolean;
+  purge?: boolean;
+}): string {
+  if (options.cascadeConstraints && options.purge) {
+    return " with cascade constraints and purge";
+  }
+
+  if (options.cascadeConstraints) {
+    return " with cascade constraints";
+  }
+
+  if (options.purge) {
+    return " with purge";
+  }
+
+  return "";
+}
+
+function requestDropTableFromExplorer(
+  table: DbObjectEntry,
+  options: {
+    cascadeConstraints?: boolean;
+    purge?: boolean;
+  },
+): Promise<boolean> {
+  dropTableDialogRequest.value = {
+    table,
+    options,
+  };
+  showDropTableDialog.value = true;
+  return Promise.resolve(true);
+}
+
+function closeDropTableDialog(): void {
+  if (busy.runningQuery) {
+    return;
+  }
+
+  showDropTableDialog.value = false;
+  dropTableDialogRequest.value = null;
+}
+
+function cancelDropTableDialog(): void {
+  const request = dropTableDialogRequest.value;
+  closeDropTableDialog();
+  if (!request) {
+    return;
+  }
+
+  statusMessage.value = `Drop cancelled: ${request.table.schema}.${request.table.objectName}`;
+}
+
+async function submitDropTableDialog(): Promise<void> {
+  const request = dropTableDialogRequest.value;
+  if (!request || busy.runningQuery) {
+    return;
+  }
+
+  const dropped = await dropTableFromExplorer(request.table, request.options);
+  if (dropped) {
+    closeDropTableDialog();
+  }
+}
+
 function onCreateObjectTypeChange(): void {
   const nextDefault = createObjectDefaultName(createObjectDialogType.value);
   const currentName = createObjectDialogName.value.trim().toUpperCase();
@@ -1193,6 +1268,7 @@ onBeforeUnmount(() => {
         :on-open-connection-dialog="openConnectionDialog"
         :create-object-types="CREATE_OBJECT_TYPE_OPTIONS"
         :on-request-create-object="openCreateObjectDialog"
+        :on-request-drop-table="requestDropTableFromExplorer"
       />
     </aside>
 
@@ -1355,6 +1431,57 @@ onBeforeUnmount(() => {
         <button class="btn" @click="closeCreateObjectDialog">Cancel</button>
         <button class="btn primary" @click="submitCreateObjectDialog">
           Open Template
+        </button>
+      </footer>
+    </section>
+  </div>
+
+  <div
+    v-if="showDropTableDialog && dropTableDialogRequest"
+    class="dialog-backdrop"
+    @click.self="cancelDropTableDialog"
+  >
+    <section
+      class="dialog create-object-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drop-table-dialog-title"
+    >
+      <header class="dialog-header">
+        <h2 id="drop-table-dialog-title" class="dialog-title">Drop Table</h2>
+      </header>
+
+      <div class="dialog-body">
+        <p>
+          Drop table
+          <code>
+            {{ dropTableDialogRequest.table.schema }}.{{
+              dropTableDialogRequest.table.objectName
+            }}
+          </code>
+          {{
+            formatDropTableModeLabel(dropTableDialogRequest.options)
+          }}?
+        </p>
+        <p class="muted">
+          This action cannot be undone.
+        </p>
+      </div>
+
+      <footer class="dialog-footer">
+        <button
+          class="btn"
+          :disabled="busy.runningQuery"
+          @click="cancelDropTableDialog"
+        >
+          Cancel
+        </button>
+        <button
+          class="btn primary"
+          :disabled="busy.runningQuery"
+          @click="submitDropTableDialog"
+        >
+          {{ busy.runningQuery ? "Dropping..." : "Drop Table" }}
         </button>
       </footer>
     </section>

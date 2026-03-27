@@ -62,6 +62,11 @@ interface ScriptLineLocation {
   line: number | null;
 }
 
+interface DropTableOptions {
+  cascadeConstraints?: boolean;
+  purge?: boolean;
+}
+
 function readDebugConnectionString(
   value: string | undefined,
   fallback: string,
@@ -857,6 +862,26 @@ export function useClarityWorkspace() {
     return toSqlStringLiteral(value);
   }
 
+  function buildQualifiedObjectName(object: DbObjectEntry): string {
+    return `${toQuotedIdentifier(object.schema)}.${toQuotedIdentifier(object.objectName)}`;
+  }
+
+  function buildDropTableSql(
+    table: DbObjectEntry,
+    options: DropTableOptions = {},
+  ): string {
+    const clauses: string[] = [];
+    if (options.cascadeConstraints) {
+      clauses.push("cascade constraints");
+    }
+    if (options.purge) {
+      clauses.push("purge");
+    }
+
+    const suffix = clauses.length > 0 ? ` ${clauses.join(" ")}` : "";
+    return `drop table ${buildQualifiedObjectName(table)}${suffix}`;
+  }
+
   function hasObjectDataRowIdColumn(result: DbQueryResult): boolean {
     const firstColumn = (result.columns[0] ?? "")
       .replace(/"/g, "")
@@ -1130,6 +1155,84 @@ export function useClarityWorkspace() {
     errorMessage.value = "";
     statusMessage.value = `Prepared ${normalizedType} template for ${schemaName}.${normalizedName}`;
     return true;
+  }
+
+  function closeObjectTabs(object: DbObjectEntry): void {
+    const objectKey = buildObjectIdentityKey(object);
+    const activeDdlObjectKey = activeDdlTab.value
+      ? buildObjectIdentityKey(activeDdlTab.value.object)
+      : null;
+    const removedActiveDdlTab =
+      activeDdlObjectKey !== null && activeDdlObjectKey === objectKey;
+
+    ddlTabs.value = ddlTabs.value.filter(
+      (tab) => buildObjectIdentityKey(tab.object) !== objectKey,
+    );
+    syncBusyDdlState();
+
+    if (removedActiveDdlTab) {
+      activateWorkspaceTab(queryTabs.value[0]?.id ?? FIRST_QUERY_TAB_ID);
+    }
+
+    if (
+      selectedObject.value &&
+      buildObjectIdentityKey(selectedObject.value) === objectKey
+    ) {
+      selectedObject.value = null;
+    }
+
+    scriptLineBackHistory.value = scriptLineBackHistory.value.filter(
+      (location) => buildObjectIdentityKey(location.object) !== objectKey,
+    );
+    scriptLineForwardHistory.value = scriptLineForwardHistory.value.filter(
+      (location) => buildObjectIdentityKey(location.object) !== objectKey,
+    );
+    if (
+      currentScriptLineLocation.value &&
+      buildObjectIdentityKey(currentScriptLineLocation.value.object) === objectKey
+    ) {
+      currentScriptLineLocation.value = null;
+    }
+  }
+
+  async function dropTableFromExplorer(
+    table: DbObjectEntry,
+    options: DropTableOptions = {},
+  ): Promise<boolean> {
+    if (!session.value) {
+      errorMessage.value = "Connect to a database before dropping a table.";
+      return false;
+    }
+
+    if (!isTableObject(table.objectType)) {
+      errorMessage.value = `Drop is only supported for TABLE objects (received: ${table.objectType}).`;
+      return false;
+    }
+
+    if (busy.runningQuery || busy.updatingData || busy.loadingObjects) {
+      return false;
+    }
+
+    const objectLabel = `${table.schema}.${table.objectName}`;
+
+    errorMessage.value = "";
+    busy.runningQuery = true;
+
+    try {
+      const result = await runQueryForSession(
+        session.value.sessionId,
+        buildDropTableSql(table, options),
+      );
+      closeObjectTabs(table);
+      await refreshObjects();
+      statusMessage.value = `${objectLabel}: ${result.message}`;
+      return true;
+    } catch (error) {
+      errorMessage.value = toErrorMessage(error);
+      return false;
+    } finally {
+      busy.runningQuery = false;
+    }
   }
 
   function openSearchTab(focusInput = false): void {
@@ -2455,6 +2558,7 @@ export function useClarityWorkspace() {
     closeDdlTab,
     openObjectFromExplorer,
     openCreateObjectTemplate,
+    dropTableFromExplorer,
     activateObjectDetailTab,
     refreshActiveObjectDetail,
     updateActiveObjectDataRow,

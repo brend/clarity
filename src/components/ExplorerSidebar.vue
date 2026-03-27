@@ -42,12 +42,26 @@ const props = defineProps<{
     onOpenConnectionDialog: (mode: "new" | "edit") => void;
     createObjectTypes: CreateObjectTypeOption[];
     onRequestCreateObject: (objectType: string) => void;
+    onRequestDropTable: (
+        table: DbObjectEntry,
+        options: {
+            cascadeConstraints?: boolean;
+            purge?: boolean;
+        },
+    ) => Promise<boolean>;
 }>();
+
+interface DropTableMenuOptions {
+    cascadeConstraints?: boolean;
+    purge?: boolean;
+}
+
 const explorerContextMenu = ref<{
     x: number;
     y: number;
     preferredObjectType: string | null;
     refreshObjectType: string | null;
+    targetObject: DbObjectEntry | null;
 } | null>(null);
 const explorerContextMenuEl = ref<HTMLElement | null>(null);
 
@@ -82,6 +96,31 @@ const refreshContextMenuLabel = computed(() => {
         ? `Refresh ${refreshObjectType}`
         : "Refresh Explorer";
 });
+const dropTableTarget = computed<DbObjectEntry | null>(() => {
+    const targetObject = explorerContextMenu.value?.targetObject;
+    if (!targetObject) {
+        return null;
+    }
+
+    return normalizeObjectType(targetObject.objectType) === "TABLE"
+        ? targetObject
+        : null;
+});
+const showDropTableActions = computed<boolean>(() => !!dropTableTarget.value);
+const dropTableContextLabel = computed(() => {
+    const targetObject = dropTableTarget.value;
+    if (!targetObject) {
+        return "";
+    }
+
+    return `${targetObject.schema}.${targetObject.objectName}`;
+});
+const disableDropTableActions = computed(
+    () =>
+        props.busy.runningQuery ||
+        props.busy.loadingObjects ||
+        props.busy.updatingData,
+);
 
 watch(
     () => props.isConnected,
@@ -149,6 +188,7 @@ function clampExplorerContextMenuPosition(): void {
 async function openExplorerContextMenu(
     event: MouseEvent,
     preferredObjectType: string | null,
+    targetObject: DbObjectEntry | null = null,
 ): Promise<void> {
     event.preventDefault();
     event.stopPropagation();
@@ -166,6 +206,7 @@ async function openExplorerContextMenu(
         y: event.clientY,
         preferredObjectType: normalizedObjectType,
         refreshObjectType: normalizedObjectType,
+        targetObject,
     };
     await nextTick();
     clampExplorerContextMenuPosition();
@@ -183,6 +224,16 @@ function refreshExplorerContext(): void {
 
     closeExplorerContextMenu();
     void props.onRefreshObjects();
+}
+
+function requestDropTable(options: DropTableMenuOptions): void {
+    const targetObject = dropTableTarget.value;
+    if (!targetObject) {
+        return;
+    }
+
+    closeExplorerContextMenu();
+    void props.onRequestDropTable(targetObject, options);
 }
 
 function onGlobalPointerDown(event: MouseEvent): void {
@@ -417,6 +468,7 @@ onBeforeUnmount(() => {
                                             void openExplorerContextMenu(
                                                 event,
                                                 entry.objectType,
+                                                entry,
                                             )
                                     "
                                 >
@@ -471,6 +523,43 @@ onBeforeUnmount(() => {
                 v-if="createContextMenuOptions.length"
                 class="explorer-context-menu-separator"
             ></div>
+            <template v-if="showDropTableActions">
+                <button
+                    class="explorer-context-menu-item"
+                    type="button"
+                    role="menuitem"
+                    :disabled="disableDropTableActions"
+                    @click.stop="requestDropTable({})"
+                >
+                    Drop {{ dropTableContextLabel }}...
+                </button>
+                <button
+                    class="explorer-context-menu-item"
+                    type="button"
+                    role="menuitem"
+                    :disabled="disableDropTableActions"
+                    @click.stop="
+                        requestDropTable({ cascadeConstraints: true })
+                    "
+                >
+                    Drop {{ dropTableContextLabel }} (Cascade Constraints)...
+                </button>
+                <button
+                    class="explorer-context-menu-item"
+                    type="button"
+                    role="menuitem"
+                    :disabled="disableDropTableActions"
+                    @click.stop="
+                        requestDropTable({
+                            cascadeConstraints: true,
+                            purge: true,
+                        })
+                    "
+                >
+                    Drop {{ dropTableContextLabel }} (Cascade + Purge)...
+                </button>
+                <div class="explorer-context-menu-separator"></div>
+            </template>
             <button
                 class="explorer-context-menu-item"
                 type="button"
