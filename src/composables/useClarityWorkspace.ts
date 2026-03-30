@@ -1962,8 +1962,9 @@ export function useClarityWorkspace() {
       await syncTransactionState(summary.sessionId);
       await refreshObjects();
     } catch (error) {
-      errorMessage.value = toErrorMessage(error);
-      statusMessage.value = "Connection failed.";
+      const message = toErrorMessage(error);
+      errorMessage.value = message;
+      statusMessage.value = `Connection failed: ${message}`;
     } finally {
       busy.connecting = false;
     }
