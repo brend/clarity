@@ -42,6 +42,29 @@ export type OracleDbConnectRequest = Extract<
   { provider: "oracle" }
 >;
 
+export interface DbConnectErrorOracleClientMissing {
+  kind: "oracleClientMissing";
+  message: string;
+}
+
+export interface DbConnectErrorGeneral {
+  kind: "general";
+  message: string;
+}
+
+export type DbConnectError =
+  | DbConnectErrorOracleClientMissing
+  | DbConnectErrorGeneral;
+
+export function isDbConnectError(value: unknown): value is DbConnectError {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    "message" in value
+  );
+}
+
 export interface DbSessionSummary {
   sessionId: number;
   displayName: string;

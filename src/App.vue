@@ -181,6 +181,7 @@ const {
   selectedExportSessionId,
   statusMessage,
   errorMessage,
+  oracleClientMissing,
   isQueryTabActive,
   isObjectTypeExpanded,
   toggleObjectType,
@@ -1110,6 +1111,16 @@ async function handleConnect(): Promise<void> {
   updateLastUsedConnectionProfileId(selectedProfileId.value);
 }
 
+async function handleRetryWithClientDir(clientDir: string): Promise<void> {
+  updateOracleClientLibDir(clientDir);
+  await connectOracle(clientDir);
+  if (!session.value) {
+    return;
+  }
+
+  updateLastUsedConnectionProfileId(selectedProfileId.value);
+}
+
 watch(
   () => [
     activeWorkspaceTabId.value,
@@ -1493,11 +1504,14 @@ onBeforeUnmount(() => {
     v-model:save-profile-password="saveProfilePassword"
     :connection="connection"
     :connection-error="errorMessage"
+    :oracle-client-missing="oracleClientMissing"
+    :oracle-client-lib-dir="settings.oracleClientLibDir"
     :selected-profile="selectedProfile"
     :busy="busy"
     :on-save="saveConnectionDialogAndClose"
     :on-delete="deleteConnectionDialogAndClose"
     :on-cancel="cancelConnectionDialog"
+    :on-retry-with-client-dir="handleRetryWithClientDir"
   />
 
   <div

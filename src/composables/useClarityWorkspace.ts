@@ -25,6 +25,7 @@ import type {
   WorkspaceQueryResultPane,
   WorkspaceQueryTab,
 } from "../types/clarity";
+import { isDbConnectError } from "../types/clarity";
 
 const QUERY_TAB_PREFIX = "query:";
 const FIRST_QUERY_TAB_ID = `${QUERY_TAB_PREFIX}1`;
@@ -563,6 +564,7 @@ export function useClarityWorkspace() {
   const transactionActive = ref(false);
   const statusMessage = ref("Ready. Connect to an Oracle session to begin.");
   const errorMessage = ref("");
+  const oracleClientMissing = ref(false);
   const activeWorkspaceTabId = ref(initialQuerySheetState.activeWorkspaceTabId);
   const expandedObjectTypes = ref<Record<string, boolean>>({});
   const scriptLineBackHistory = ref<ScriptLineLocation[]>([]);
@@ -1930,6 +1932,7 @@ export function useClarityWorkspace() {
     oracleClientLibDirOverride?: string,
   ): Promise<void> {
     errorMessage.value = "";
+    oracleClientMissing.value = false;
     busy.connecting = true;
 
     try {
@@ -1962,9 +1965,16 @@ export function useClarityWorkspace() {
       await syncTransactionState(summary.sessionId);
       await refreshObjects();
     } catch (error) {
-      const message = toErrorMessage(error);
-      errorMessage.value = message;
-      statusMessage.value = `Connection failed: ${message}`;
+      if (isDbConnectError(error) && error.kind === "oracleClientMissing") {
+        oracleClientMissing.value = true;
+        errorMessage.value = error.message;
+      } else {
+        const message = isDbConnectError(error)
+          ? error.message
+          : toErrorMessage(error);
+        errorMessage.value = message;
+      }
+      statusMessage.value = `Connection failed: ${errorMessage.value}`;
     } finally {
       busy.connecting = false;
     }
@@ -2548,6 +2558,7 @@ export function useClarityWorkspace() {
     selectedExportSessionId,
     statusMessage,
     errorMessage,
+    oracleClientMissing,
     isQueryTabActive,
     isObjectTypeExpanded,
     toggleObjectType,

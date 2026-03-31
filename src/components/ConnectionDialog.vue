@@ -15,14 +15,18 @@ const saveProfilePassword = defineModel<boolean>("saveProfilePassword", {
 const props = defineProps<{
   connection: OracleDbConnectRequest;
   connectionError: string;
+  oracleClientMissing: boolean;
+  oracleClientLibDir: string;
   selectedProfile: OracleConnectionProfile | null;
   busy: BusyState;
   onSave: () => void;
   onDelete: () => void;
   onCancel: () => void;
+  onRetryWithClientDir: (clientDir: string) => void;
 }>();
 
 const showAdvancedOptions = ref(false);
+const clientLibDirInput = ref(props.oracleClientLibDir);
 </script>
 
 <template>
@@ -172,7 +176,41 @@ const showAdvancedOptions = ref(false);
           </label>
         </div>
 
-        <p v-if="props.connectionError" class="conn-error">
+        <div v-if="props.oracleClientMissing" class="conn-client-missing">
+          <p class="conn-client-missing-title">
+            Oracle Instant Client Required
+          </p>
+          <p class="conn-client-missing-text">
+            Oracle Client libraries could not be found. Download and install the
+            <a
+              href="https://www.oracle.com/database/technologies/instant-client/downloads.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              >Oracle Instant Client</a
+            >, then enter the library directory below.
+          </p>
+          <label class="conn-field conn-client-missing-field">
+            <span>Instant Client Library Directory</span>
+            <input
+              v-model.trim="clientLibDirInput"
+              placeholder="C:\oracle\instantclient_23_7"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              data-gramm="false"
+            />
+          </label>
+          <button
+            class="btn primary conn-client-missing-retry"
+            :disabled="!clientLibDirInput || props.busy.connecting"
+            @click="props.onRetryWithClientDir(clientLibDirInput)"
+          >
+            {{ props.busy.connecting ? "Connecting..." : "Retry Connection" }}
+          </button>
+        </div>
+
+        <p v-else-if="props.connectionError" class="conn-error">
           {{ props.connectionError }}
         </p>
       </div>
@@ -287,5 +325,46 @@ const showAdvancedOptions = ref(false);
 
 .conn-footer-spacer {
   flex: 1;
+}
+
+.conn-client-missing {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--warning-border, var(--border));
+  border-radius: 0.35rem;
+  background: var(--warning-bg, var(--surface-alt, var(--bg-secondary)));
+}
+
+.conn-client-missing-title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--warning-text, var(--text-primary));
+}
+
+.conn-client-missing-text {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.conn-client-missing-text a {
+  color: var(--accent);
+}
+
+.conn-client-missing-field {
+  display: grid;
+  gap: 0.24rem;
+}
+
+.conn-client-missing-field > span {
+  font-size: 0.72rem;
+  color: var(--text-subtle);
+}
+
+.conn-client-missing-retry {
+  justify-self: end;
 }
 </style>

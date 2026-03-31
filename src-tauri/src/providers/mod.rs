@@ -1,9 +1,9 @@
 pub(crate) mod oracle;
 
 use crate::types::{
-    DatabaseProvider, DbConnectConnection, DbConnectRequest, DbFilteredQueryRequest,
-    DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry, DbObjectRef, DbQueryRequest,
-    DbQueryResult, DbSchemaSearchRequest, DbSchemaSearchResult,
+    DatabaseProvider, DbConnectConnection, DbConnectError, DbConnectRequest,
+    DbFilteredQueryRequest, DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry,
+    DbObjectRef, DbQueryRequest, DbQueryResult, DbSchemaSearchRequest, DbSchemaSearchResult,
 };
 
 pub(crate) struct AppSession {
@@ -20,7 +20,7 @@ pub(crate) struct ProviderRegistry;
 impl ProviderRegistry {
     pub(crate) fn connect(
         request: &DbConnectRequest,
-    ) -> Result<(AppSession, String, String), String> {
+    ) -> Result<(AppSession, String, String), DbConnectError> {
         match &request.connection {
             DbConnectConnection::Oracle(connection) => {
                 let (session, display_name, schema) = oracle::connect(connection)?;
@@ -35,7 +35,9 @@ impl ProviderRegistry {
             }
             DbConnectConnection::Postgres(_)
             | DbConnectConnection::Mysql(_)
-            | DbConnectConnection::Sqlite(_) => Err(not_implemented_error(request.provider())),
+            | DbConnectConnection::Sqlite(_) => {
+                Err(DbConnectError::general(not_implemented_error(request.provider())))
+            }
         }
     }
 

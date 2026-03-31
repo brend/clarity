@@ -362,6 +362,21 @@ pub(crate) struct DbSchemaExportProgress {
     pub(crate) current_object: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum DbConnectError {
+    OracleClientMissing { message: String },
+    General { message: String },
+}
+
+impl DbConnectError {
+    pub(crate) fn general(message: impl Into<String>) -> Self {
+        DbConnectError::General {
+            message: message.into(),
+        }
+    }
+}
+
 fn default_ai_confidence() -> f32 {
     0.5
 }

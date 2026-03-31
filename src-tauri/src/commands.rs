@@ -5,12 +5,13 @@ use crate::providers::{AppSession, ProviderRegistry};
 use crate::state::AppState;
 use crate::types::{
     ConnectionProfile, ConnectionProfileRef, DbAiApiKeyPresence, DbAiSuggestQueryRequest,
-    DbAiSuggestQueryResult, DbConnectRequest, DbConnectionProfile, DbExportSchemaRequest,
-    DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry, DbObjectRef, DbQueryRequest,
-    DbQueryResult, DbSaveQuerySheetRequest, DbSaveQuerySheetsRequest, DbSaveQuerySheetsResult,
-    DbSchemaExportResult, DbSchemaSearchRequest, DbSchemaSearchResult, DbSessionSummary,
-    DbTransactionState, NetworkConnectionOptions, OracleConnectionOptions,
-    SaveConnectionProfileRequest, SessionRequest, StoredConnectionProfile,
+    DbAiSuggestQueryResult, DbConnectError, DbConnectRequest, DbConnectionProfile,
+    DbExportSchemaRequest, DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry,
+    DbObjectRef, DbQueryRequest, DbQueryResult, DbSaveQuerySheetRequest,
+    DbSaveQuerySheetsRequest, DbSaveQuerySheetsResult, DbSchemaExportResult,
+    DbSchemaSearchRequest, DbSchemaSearchResult, DbSessionSummary, DbTransactionState,
+    NetworkConnectionOptions, OracleConnectionOptions, SaveConnectionProfileRequest,
+    SessionRequest, StoredConnectionProfile,
 };
 use crate::validation::{
     validate_ai_suggest_request, validate_connect_request, validate_profile_request,
@@ -21,8 +22,8 @@ use std::sync::atomic::Ordering;
 pub(crate) fn db_connect(
     request: DbConnectRequest,
     state: tauri::State<'_, AppState>,
-) -> Result<DbSessionSummary, String> {
-    validate_connect_request(&request)?;
+) -> Result<DbSessionSummary, DbConnectError> {
+    validate_connect_request(&request).map_err(DbConnectError::general)?;
     let (session, display_name, schema) = ProviderRegistry::connect(&request)?;
 
     let session_id = state.next_session_id.fetch_add(1, Ordering::Relaxed);
@@ -36,7 +37,7 @@ pub(crate) fn db_connect(
     let mut sessions = state
         .sessions
         .lock()
-        .map_err(|_| "Failed to acquire session lock".to_string())?;
+        .map_err(|_| DbConnectError::general("Failed to acquire session lock"))?;
     sessions.insert(session_id, session);
 
     Ok(summary)

@@ -1,7 +1,7 @@
 use crate::types::{
-    DbFilteredQueryRequest, DbObjectColumnEntry, DbObjectDdlUpdateRequest, DbObjectEntry,
-    DbObjectRef, DbQueryRequest, DbQueryResult, DbSchemaSearchRequest, DbSchemaSearchResult,
-    OracleAuthMode, OracleConnectOptions,
+    DbConnectError, DbFilteredQueryRequest, DbObjectColumnEntry, DbObjectDdlUpdateRequest,
+    DbObjectEntry, DbObjectRef, DbQueryRequest, DbQueryResult, DbSchemaSearchRequest,
+    DbSchemaSearchResult, OracleAuthMode, OracleConnectOptions,
 };
 use oracle::{Connection, Connector, Error as OracleError, InitParams, Privilege, SqlValue};
 use std::collections::HashMap;
@@ -25,7 +25,7 @@ pub(crate) struct OracleSession {
 
 pub(crate) fn connect(
     request: &OracleConnectOptions,
-) -> Result<(OracleSession, String, String), String> {
+) -> Result<(OracleSession, String, String), DbConnectError> {
     ensure_oracle_client_initialized(request.oracle_client_lib_dir.as_deref())?;
 
     let host = request.host.trim();
@@ -33,7 +33,7 @@ pub(crate) fn connect(
     let service_name = request.service_name.trim();
     let username = request.username.trim();
     let password = request.password.as_str();
-    let schema = normalize_schema_name(&request.schema)?;
+    let schema = normalize_schema_name(&request.schema).map_err(DbConnectError::general)?;
 
     let connect_string = format!("//{}:{}/{}", host, port, service_name);
     let connection = connect_with_mode(
@@ -46,7 +46,7 @@ pub(crate) fn connect(
     let alter_schema_sql = format!("ALTER SESSION SET CURRENT_SCHEMA = {}", schema);
     connection
         .execute(alter_schema_sql.as_str(), &[])
-        .map_err(map_oracle_error)?;
+        .map_err(|e| DbConnectError::general(map_oracle_error(e)))?;
 
     let display_name = format!(
         "{}@{} [{}]",
@@ -1167,17 +1167,21 @@ fn map_oracle_error(error: OracleError) -> String {
     error.to_string()
 }
 
-fn map_connect_error(error: OracleError, host: &str, port: u16, service_name: &str) -> String {
+fn map_connect_error(error: OracleError, host: &str, port: u16, service_name: &str) -> DbConnectError {
     let base = error.to_string();
 
     if base.contains("DPI-1047") {
-        return format!(
-            "{} Oracle Client libraries are required. Install Oracle Instant Client and ensure the client library path is configured for this app process.",
-            base
-        );
+        return DbConnectError::OracleClientMissing {
+            message: format!(
+                "{} Oracle Client libraries are required. Install Oracle Instant Client and ensure the client library path is configured for this app process.",
+                base
+            ),
+        };
     }
 
-    format!("{} (target: //{}:{}/{})", base, host, port, service_name)
+    DbConnectError::General {
+        message: format!("{} (target: //{}:{}/{})", base, host, port, service_name),
+    }
 }
 
 fn is_compile_diagnostics_error(error: &OracleError) -> bool {
@@ -1341,7 +1345,7 @@ fn with_create_or_replace_prefix(ddl: String, object_type: &str) -> String {
 
 fn ensure_oracle_client_initialized(
     oracle_client_lib_dir_override: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), DbConnectError> {
     let normalized_override = oracle_client_lib_dir_override
         .map(str::trim)
         .filter(|path| !path.is_empty())
@@ -1370,13 +1374,13 @@ fn ensure_oracle_client_initialized(
         env::set_var("ORACLE_CLIENT_LIB_DIR", dir);
         params
             .oracle_client_lib_dir(dir)
-            .map_err(map_oracle_error)?;
+            .map_err(|e| DbConnectError::general(map_oracle_error(e)))?;
     }
 
     if let Some(tns_admin) = env::var_os("TNS_ADMIN") {
         params
             .oracle_client_config_dir(tns_admin)
-            .map_err(map_oracle_error)?;
+            .map_err(|e| DbConnectError::general(map_oracle_error(e)))?;
     }
 
     params.init().map_err(|error| {
@@ -1388,13 +1392,15 @@ fn ensure_oracle_client_initialized(
                 " Set ORACLE_CLIENT_LIB_DIR to your Instant Client directory.".to_string()
             };
 
-            return format!(
-                "{} Oracle Client libraries are required.{} Configure Oracle Instant Client in app settings or set ORACLE_CLIENT_LIB_DIR before launch.",
-                base, env_hint
-            );
+            return DbConnectError::OracleClientMissing {
+                message: format!(
+                    "{} Oracle Client libraries are required.{} Configure Oracle Instant Client in app settings or set ORACLE_CLIENT_LIB_DIR before launch.",
+                    base, env_hint
+                ),
+            };
         }
 
-        base
+        DbConnectError::general(base)
     })?;
 
     Ok(())
