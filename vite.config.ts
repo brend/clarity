@@ -12,6 +12,11 @@ export default defineConfig(async () => ({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
+      include: [
+        "src/composables/usePaneLayout.ts",
+        "src/composables/useUserSettings.ts",
+        "src/constants/createObjectTemplates.ts",
+      ],
       thresholds: {
         statements: 100,
         branches: 90,

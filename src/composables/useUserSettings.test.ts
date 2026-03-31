@@ -328,6 +328,22 @@ describe("useUserSettings", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
 
+  it("updates key bindings via updateKeyBindings", async () => {
+    const { settings, updateKeyBindings } = useUserSettings();
+    await nextTick();
+
+    updateKeyBindings({
+      executeQuery: "Ctrl+Enter",
+      saveDdl: "Ctrl+S",
+      findInEditor: "Ctrl+F",
+      commitDataChanges: "Ctrl+Shift+S",
+    });
+    await nextTick();
+
+    expect(settings.value.keyBindings.executeQuery).toBe("Ctrl+Enter");
+    expect(settings.value.keyBindings.saveDdl).toBe("Ctrl+S");
+  });
+
   it("works safely when window is unavailable", async () => {
     const originalWindow = globalThis.window;
     try {
