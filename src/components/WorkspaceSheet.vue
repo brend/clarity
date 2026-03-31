@@ -20,7 +20,8 @@ import type {
   WorkspaceDdlTab,
   WorkspaceQueryTab,
 } from "../types/clarity";
-import type { ThemeSetting } from "../types/settings";
+import type { KeyBindings, ThemeSetting } from "../types/settings";
+import { matchesBinding } from "../composables/useKeyBindings";
 
 const queryText = defineModel<string>("queryText", { required: true });
 const ddlText = defineModel<string>("ddlText", { required: true });
@@ -73,6 +74,7 @@ const props = defineProps<{
   aiSuggestionLoading: boolean;
   canUseAiSuggestions: boolean;
   theme: ThemeSetting;
+  keyBindings: KeyBindings;
   onActivateWorkspaceTab: (tabId: string) => void;
   onCloseQueryTab: (tabId: string) => void;
   onAddQueryTab: () => void;
@@ -1247,30 +1249,6 @@ function formatSearchScopeLabel(
   return "Source";
 }
 
-function isModifierEnter(event: KeyboardEvent): boolean {
-  if (event.key !== "Enter") {
-    return false;
-  }
-
-  if (event.altKey || event.shiftKey) {
-    return false;
-  }
-
-  return event.metaKey || event.ctrlKey;
-}
-
-function isModifierF(event: KeyboardEvent): boolean {
-  if (event.key.toLowerCase() !== "f") {
-    return false;
-  }
-
-  if (event.altKey || event.shiftKey) {
-    return false;
-  }
-
-  return event.metaKey || event.ctrlKey;
-}
-
 function isPlainEscape(event: KeyboardEvent): boolean {
   return (
     event.key === "Escape" &&
@@ -1332,23 +1310,27 @@ function handleSheetKeydown(event: KeyboardEvent): void {
     return;
   }
 
-  if (props.isQueryTabActive && isModifierF(event)) {
+  if (props.isQueryTabActive && matchesBinding(event, props.keyBindings.findInEditor)) {
     event.preventDefault();
     openQuerySearch();
     return;
   }
 
-  if (isModifierEnter(event)) {
-    if (props.isQueryTabActive) {
-      event.preventDefault();
-      executeWithSelection();
-      return;
-    }
+  if (props.isQueryTabActive && matchesBinding(event, props.keyBindings.executeQuery)) {
+    event.preventDefault();
+    executeWithSelection();
+    return;
+  }
 
-    if (showEditableRowActions.value) {
-      event.preventDefault();
-      void commitDataChanges();
-    }
+  if (props.activeDdlTab && props.activeObjectDetailTabId === "ddl" && matchesBinding(event, props.keyBindings.saveDdl)) {
+    event.preventDefault();
+    props.onSaveDdl();
+    return;
+  }
+
+  if (showEditableRowActions.value && matchesBinding(event, props.keyBindings.commitDataChanges)) {
+    event.preventDefault();
+    void commitDataChanges();
     return;
   }
 

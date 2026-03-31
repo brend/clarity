@@ -29,7 +29,13 @@ import type {
   DbObjectColumnEntry,
   SqlCompletionSchema,
 } from "./types/clarity";
-import type { ThemeSetting } from "./types/settings";
+import type { KeyBindings, ThemeSetting } from "./types/settings";
+import {
+  DEFAULT_KEY_BINDINGS,
+  KEY_BINDING_LABELS,
+  formatBindingForDisplay,
+  recordKeyBinding,
+} from "./composables/useKeyBindings";
 
 const EVENT_OPEN_EXPORT_DATABASE_DIALOG =
   "clarity://open-export-database-dialog";
@@ -274,8 +280,9 @@ const {
   updateAiModel,
   updateAiEndpoint,
   updateLastUsedConnectionProfileId,
+  updateKeyBindings,
 } = useUserSettings();
-const settingsDialogTab = ref<"appearance" | "ai" | "database" | "updates">("appearance");
+const settingsDialogTab = ref<"appearance" | "ai" | "database" | "keybindings" | "updates">("appearance");
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
 watch(settingsDialogTheme, (next) => previewTheme(next));
 const settingsDialogUiFontFamily = ref(settings.value.uiFontFamily);
@@ -294,6 +301,8 @@ const settingsDialogAiModel = ref(settings.value.aiModel);
 const settingsDialogAiEndpoint = ref(settings.value.aiEndpoint);
 const settingsDialogAiApiKey = ref("");
 const settingsDialogAiApiKeyDirty = ref(false);
+const settingsDialogKeyBindings = ref<KeyBindings>({ ...DEFAULT_KEY_BINDINGS });
+const settingsDialogRecordingBinding = ref<keyof KeyBindings | null>(null);
 const settingsDialogError = ref("");
 const settingsDialogAppVersion = ref("");
 const updateCheckResult = ref<UpdateCheckResult | null>(null);
@@ -980,6 +989,8 @@ async function openSettingsDialog(
   settingsDialogAiEndpoint.value = settings.value.aiEndpoint;
   settingsDialogAiApiKey.value = "";
   settingsDialogAiApiKeyDirty.value = false;
+  settingsDialogKeyBindings.value = { ...settings.value.keyBindings };
+  settingsDialogRecordingBinding.value = null;
   settingsDialogError.value = "";
   await Promise.all([refreshAiKeyPresence(), refreshCurrentAppVersion()]);
   showSettingsDialog.value = true;
@@ -1006,6 +1017,7 @@ async function saveSettingsDialog(): Promise<void> {
   updateAiSuggestionsEnabled(settingsDialogAiSuggestionsEnabled.value);
   updateAiModel(settingsDialogAiModel.value);
   updateAiEndpoint(settingsDialogAiEndpoint.value);
+  updateKeyBindings(settingsDialogKeyBindings.value);
   try {
     if (settingsDialogAiApiKeyDirty.value) {
       const normalizedKey = settingsDialogAiApiKey.value.trim();
@@ -1021,6 +1033,46 @@ async function saveSettingsDialog(): Promise<void> {
     settingsDialogError.value =
       typeof error === "string" ? error : "Failed to save AI settings.";
   }
+}
+
+function startRecordingBinding(action: keyof KeyBindings): void {
+  settingsDialogRecordingBinding.value = action;
+}
+
+function handleKeyBindingRecord(event: KeyboardEvent, action: keyof KeyBindings): void {
+  if (settingsDialogRecordingBinding.value !== action) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (event.key === "Escape") {
+    settingsDialogRecordingBinding.value = null;
+    return;
+  }
+
+  const recorded = recordKeyBinding(event);
+  if (recorded) {
+    settingsDialogKeyBindings.value = {
+      ...settingsDialogKeyBindings.value,
+      [action]: recorded,
+    };
+    settingsDialogRecordingBinding.value = null;
+  }
+}
+
+function resetKeyBinding(action: keyof KeyBindings): void {
+  settingsDialogKeyBindings.value = {
+    ...settingsDialogKeyBindings.value,
+    [action]: DEFAULT_KEY_BINDINGS[action],
+  };
+  settingsDialogRecordingBinding.value = null;
+}
+
+function resetAllKeyBindings(): void {
+  settingsDialogKeyBindings.value = { ...DEFAULT_KEY_BINDINGS };
+  settingsDialogRecordingBinding.value = null;
 }
 
 function closeExportDialog(): void {
@@ -1341,6 +1393,7 @@ onBeforeUnmount(() => {
         :sql-completion-schema="sqlCompletionSchema"
         :sql-completion-default-schema="sqlCompletionDefaultSchema"
         :theme="theme"
+        :key-bindings="settings.keyBindings"
         :on-activate-workspace-tab="activateWorkspaceTab"
         :on-close-query-tab="closeQueryTab"
         :on-add-query-tab="addQueryTab"
@@ -1554,6 +1607,13 @@ onBeforeUnmount(() => {
           </button>
           <button
             class="settings-tab"
+            :class="{ active: settingsDialogTab === 'keybindings' }"
+            @click="settingsDialogTab = 'keybindings'"
+          >
+            Key Bindings
+          </button>
+          <button
+            class="settings-tab"
             :class="{ active: settingsDialogTab === 'updates' }"
             @click="settingsDialogTab = 'updates'"
           >
@@ -1742,6 +1802,44 @@ onBeforeUnmount(() => {
             Optional. Overrides <code>ORACLE_CLIENT_LIB_DIR</code> for new
             Oracle connections.
           </p>
+        </fieldset>
+
+        <fieldset v-show="settingsDialogTab === 'keybindings'" class="settings-group">
+          <legend>Key Bindings</legend>
+          <p class="muted settings-hint">
+            Click a shortcut field and press the desired key combination to reassign it. Press Escape to cancel.
+          </p>
+          <div class="keybinding-list">
+            <div
+              v-for="(actionKey) in (Object.keys(settingsDialogKeyBindings) as (keyof KeyBindings)[])"
+              :key="actionKey"
+              class="keybinding-row"
+            >
+              <span class="keybinding-label">{{ KEY_BINDING_LABELS[actionKey] }}</span>
+              <button
+                class="keybinding-input"
+                :class="{ recording: settingsDialogRecordingBinding === actionKey }"
+                @click="startRecordingBinding(actionKey)"
+                @keydown="handleKeyBindingRecord($event, actionKey)"
+              >
+                {{
+                  settingsDialogRecordingBinding === actionKey
+                    ? "Press a key combination..."
+                    : formatBindingForDisplay(settingsDialogKeyBindings[actionKey])
+                }}
+              </button>
+              <button
+                class="btn keybinding-reset"
+                title="Reset to default"
+                @click="resetKeyBinding(actionKey)"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+          <div class="keybinding-footer">
+            <button class="btn" @click="resetAllKeyBindings">Reset All to Defaults</button>
+          </div>
         </fieldset>
 
         <fieldset v-show="settingsDialogTab === 'updates'" class="settings-group">
@@ -2490,6 +2588,64 @@ body {
   margin: 0 1rem;
   font-size: 0.74rem;
   color: var(--danger);
+}
+
+.keybinding-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.keybinding-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.keybinding-label {
+  font-size: 0.78rem;
+}
+
+.keybinding-input {
+  padding: 0.32rem 0.6rem;
+  font-size: 0.76rem;
+  font-family: var(--font-ui);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+  min-width: 8rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.keybinding-input:hover {
+  border-color: var(--accent);
+}
+
+.keybinding-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-focus-ring, rgba(59, 130, 246, 0.25));
+}
+
+.keybinding-input.recording {
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--bg));
+  font-style: italic;
+  color: var(--text-subtle);
+}
+
+.keybinding-reset {
+  font-size: 0.68rem;
+  padding: 0.22rem 0.45rem;
+}
+
+.keybinding-footer {
+  margin-top: 0.5rem;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .export-summary {

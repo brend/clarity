@@ -1,5 +1,6 @@
 import { computed, ref, watch } from "vue";
-import type { ThemeSetting, UserSettings } from "../types/settings";
+import type { KeyBindings, ThemeSetting, UserSettings } from "../types/settings";
+import { DEFAULT_KEY_BINDINGS, normalizeKeyBindings } from "./useKeyBindings";
 
 const USER_SETTINGS_STORAGE_KEY = "clarity.user-settings.v1";
 const THEME_ATTRIBUTE_NAME = "data-theme";
@@ -23,6 +24,7 @@ const DEFAULT_USER_SETTINGS: UserSettings = {
   aiModel: "gpt-4o-mini",
   aiEndpoint: "https://api.openai.com/v1/chat/completions",
   lastUsedConnectionProfileId: "",
+  keyBindings: { ...DEFAULT_KEY_BINDINGS },
 };
 
 function isThemeSetting(value: unknown): value is ThemeSetting {
@@ -115,6 +117,9 @@ function normalizeUserSettings(value: unknown): UserSettings {
       normalizedLastUsedConnectionProfileId.length > 0
         ? normalizedLastUsedConnectionProfileId
         : DEFAULT_USER_SETTINGS.lastUsedConnectionProfileId,
+    keyBindings: normalizeKeyBindings(
+      raw.keyBindings as Partial<KeyBindings> | undefined,
+    ),
   };
 }
 
@@ -365,6 +370,14 @@ export function useUserSettings() {
     };
   }
 
+  function updateKeyBindings(value: KeyBindings): void {
+    const normalized = normalizeKeyBindings(value);
+    settings.value = {
+      ...settings.value,
+      keyBindings: normalized,
+    };
+  }
+
   return {
     settings,
     theme,
@@ -380,5 +393,6 @@ export function useUserSettings() {
     updateAiModel,
     updateAiEndpoint,
     updateLastUsedConnectionProfileId,
+    updateKeyBindings,
   };
 }
