@@ -275,6 +275,7 @@ const {
   updateAiEndpoint,
   updateLastUsedConnectionProfileId,
 } = useUserSettings();
+const settingsDialogTab = ref<"appearance" | "ai" | "database" | "updates">("appearance");
 const settingsDialogTheme = ref<ThemeSetting>(theme.value);
 watch(settingsDialogTheme, (next) => previewTheme(next));
 const settingsDialogUiFontFamily = ref(settings.value.uiFontFamily);
@@ -964,6 +965,7 @@ function submitCreateObjectDialog(): void {
 async function openSettingsDialog(
   options: OpenSettingsDialogOptions = {},
 ): Promise<void> {
+  settingsDialogTab.value = "appearance";
   settingsDialogTheme.value = theme.value;
   settingsDialogUiFontFamily.value = settings.value.uiFontFamily;
   settingsDialogUiFontSize.value = settings.value.uiFontSize;
@@ -982,6 +984,7 @@ async function openSettingsDialog(
   await Promise.all([refreshAiKeyPresence(), refreshCurrentAppVersion()]);
   showSettingsDialog.value = true;
   if (options.checkForUpdates) {
+    settingsDialogTab.value = "updates";
     await runUpdateCheck();
   }
 }
@@ -1527,10 +1530,40 @@ onBeforeUnmount(() => {
     >
       <header class="dialog-header">
         <h2 id="settings-dialog-title" class="dialog-title">Settings</h2>
+        <nav class="settings-tabs">
+          <button
+            class="settings-tab"
+            :class="{ active: settingsDialogTab === 'appearance' }"
+            @click="settingsDialogTab = 'appearance'"
+          >
+            Appearance
+          </button>
+          <button
+            class="settings-tab"
+            :class="{ active: settingsDialogTab === 'ai' }"
+            @click="settingsDialogTab = 'ai'"
+          >
+            AI
+          </button>
+          <button
+            class="settings-tab"
+            :class="{ active: settingsDialogTab === 'database' }"
+            @click="settingsDialogTab = 'database'"
+          >
+            Database
+          </button>
+          <button
+            class="settings-tab"
+            :class="{ active: settingsDialogTab === 'updates' }"
+            @click="settingsDialogTab = 'updates'"
+          >
+            Updates
+          </button>
+        </nav>
       </header>
 
       <div class="dialog-body">
-        <fieldset class="settings-group">
+        <fieldset v-show="settingsDialogTab === 'appearance'" class="settings-group">
           <legend>Appearance</legend>
           <div class="settings-theme-switch">
             <label
@@ -1618,7 +1651,7 @@ onBeforeUnmount(() => {
           </div>
         </fieldset>
 
-        <fieldset class="settings-group">
+        <fieldset v-show="settingsDialogTab === 'ai'" class="settings-group">
           <legend>AI Suggestions</legend>
           <label class="settings-option">
             <input
@@ -1691,7 +1724,7 @@ onBeforeUnmount(() => {
           </p>
         </fieldset>
 
-        <fieldset class="settings-group">
+        <fieldset v-show="settingsDialogTab === 'database'" class="settings-group">
           <legend>Oracle</legend>
           <label class="settings-field">
             <span>Instant Client Library Directory</span>
@@ -1711,7 +1744,7 @@ onBeforeUnmount(() => {
           </p>
         </fieldset>
 
-        <fieldset class="settings-group">
+        <fieldset v-show="settingsDialogTab === 'updates'" class="settings-group">
           <legend>Updates</legend>
           <div class="settings-update-row">
             <div class="settings-update-version">
@@ -2169,6 +2202,36 @@ body {
 .dialog-header {
   padding: 0.7rem 1rem;
   border-bottom: 1px solid var(--border);
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  margin-top: 0.5rem;
+  margin-bottom: -0.7rem;
+  padding-bottom: 0;
+}
+
+.settings-tab {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0.38rem 0.7rem;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text-subtle);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
 }
 
 .dialog-title {
