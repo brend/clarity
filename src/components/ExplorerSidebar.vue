@@ -122,11 +122,32 @@ const disableDropTableActions = computed(
         props.busy.updatingData,
 );
 
+const explorerFilter = ref("");
+
+const filteredObjectTree = computed(() => {
+    const f = explorerFilter.value.trim().toLowerCase();
+    if (!f) return props.objectTree;
+    return props.objectTree
+        .map((node) => ({
+            ...node,
+            entries: node.entries.filter((e) =>
+                e.objectName.toLowerCase().includes(f),
+            ),
+        }))
+        .filter((node) => node.entries.length > 0);
+});
+
+function isEffectivelyExpanded(objectType: string): boolean {
+    if (explorerFilter.value.trim()) return true;
+    return props.isObjectTypeExpanded(objectType);
+}
+
 watch(
     () => props.isConnected,
     (isConnected) => {
         if (!isConnected) {
             closeExplorerContextMenu();
+            explorerFilter.value = "";
         }
     },
 );
@@ -369,11 +390,42 @@ onBeforeUnmount(() => {
                 </button>
             </header>
 
+            <div
+                v-if="props.isConnected || props.objectTree.length"
+                class="explorer-filter-row"
+            >
+                <input
+                    v-model="explorerFilter"
+                    class="explorer-filter-input"
+                    type="search"
+                    placeholder="Filter objects…"
+                    aria-label="Filter objects"
+                />
+            </div>
+
             <div class="explorer-meta-row">
                 <span class="meta-pill">
-                    {{ props.objectTree.length }} type{{
-                        props.objectTree.length === 1 ? "" : "s"
-                    }}
+                    <template v-if="explorerFilter.trim()">
+                        {{
+                            filteredObjectTree.reduce(
+                                (sum, node) => sum + node.entries.length,
+                                0,
+                            )
+                        }}
+                        match{{
+                            filteredObjectTree.reduce(
+                                (sum, node) => sum + node.entries.length,
+                                0,
+                            ) === 1
+                                ? ""
+                                : "es"
+                        }}
+                    </template>
+                    <template v-else>
+                        {{ props.objectTree.length }} type{{
+                            props.objectTree.length === 1 ? "" : "s"
+                        }}
+                    </template>
                 </span>
                 <span class="meta-pill">
                     {{
@@ -386,8 +438,18 @@ onBeforeUnmount(() => {
                 </span>
             </div>
 
-            <p v-if="!props.objectTree.length" class="muted empty-copy">
+            <p
+                v-if="!props.objectTree.length"
+                class="muted empty-copy"
+            >
                 Connect and refresh to load objects for this schema.
+            </p>
+
+            <p
+                v-else-if="explorerFilter.trim() && !filteredObjectTree.length"
+                class="muted empty-copy"
+            >
+                No objects match "{{ explorerFilter.trim() }}".
             </p>
 
             <div v-else class="tree-scroll">
@@ -397,18 +459,18 @@ onBeforeUnmount(() => {
                     aria-label="Database object explorer"
                 >
                     <li
-                        v-for="typeNode in props.objectTree"
+                        v-for="typeNode in filteredObjectTree"
                         :key="typeNode.objectType"
                         class="tree-branch"
                         role="treeitem"
                         :aria-expanded="
-                            props.isObjectTypeExpanded(typeNode.objectType)
+                            isEffectivelyExpanded(typeNode.objectType)
                         "
                     >
                         <button
                             class="tree-row tree-type"
                             :class="{
-                                expanded: props.isObjectTypeExpanded(
+                                expanded: isEffectivelyExpanded(
                                     typeNode.objectType,
                                 ),
                             }"
@@ -438,7 +500,7 @@ onBeforeUnmount(() => {
 
                         <ul
                             v-show="
-                                props.isObjectTypeExpanded(typeNode.objectType)
+                                isEffectivelyExpanded(typeNode.objectType)
                             "
                             class="tree-children"
                             role="group"
@@ -633,7 +695,7 @@ onBeforeUnmount(() => {
 
 .tree-area {
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
     gap: 0.6rem;
     min-height: 0;
     padding: 0.85rem;
@@ -740,6 +802,32 @@ button:focus-visible {
 
 .explorer-refresh-btn {
     white-space: nowrap;
+}
+
+.explorer-filter-row {
+    padding: 0.35rem 0 0.1rem;
+}
+
+.explorer-filter-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    outline: none;
+}
+
+.explorer-filter-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.explorer-filter-input::placeholder {
+    color: var(--text-muted);
 }
 
 .explorer-meta-row {
